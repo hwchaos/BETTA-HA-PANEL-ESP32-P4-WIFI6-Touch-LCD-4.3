@@ -453,3 +453,7 @@ These fixes cure the ~2-day panel freeze and the blocking caused by „chatty" Z
 - Init order — `app_main.c`.
 - **4 stability fixes** (section 7) — `app_config.h`, `app_events.c`, `ui_runtime.c/.h`,
   `system_log.c`, `ha_client.c`.
+⚠️ Disclaimer / Zastrzeżenie
+EN — Provided "AS IS", without warranty of any kind. The author is not responsible for damage to hardware, data loss or incorrect energy/server readings. Configuration values (Wi-Fi password, Home Assistant token) are stored on the device (NVS/SD), not in this repository — keep your backups private.
+
+PL — Oprogramowanie udostępnione „AS IS", bez jakiejkolwiek gwarancji. Autor nie odpowiada za uszkodzenia sprzętu, utratę danych ani błędne odczyty energii/serwerów. Dane konfiguracyjne (hasło Wi-Fi, token Home Assistant) przechowywane są na urządzeniu (NVS/SD), nie w tym repozytorium — kopie zapasowe trzymaj prywatnie.
