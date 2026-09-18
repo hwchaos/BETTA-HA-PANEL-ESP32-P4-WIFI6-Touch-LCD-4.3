@@ -449,28 +449,56 @@ ciągły bez ani jednego błysku. Jeżeli kiedykolwiek zobaczysz podobny efekt, 
 
 ## Zrzuty ekranu — panel
 
-<div align="center">
-  <a href="images/waveshare-7b-panel-na-zywo.png"><img src="images/waveshare-7b-panel-na-zywo.png" alt="Panel Waveshare 7B na ścianie" width="45%" /></a>
-  <a href="images/waveshare-7b-kolory-kuchnia.png"><img src="images/waveshare-7b-kolory-kuchnia.png" alt="Kafelki światła — kolory" width="45%" /></a>
-</div>
+Wszystkie zrzuty pobrane bezpośrednio z działającego panelu (`GET /api/screenshot.bmp`, natywne
+1024 × 600 px) i pokazują aktualny wygląd interfejsu — kolory tła, tapety i kafelki zależą od
+konfiguracji, więc u Ciebie będą inne.
 
-<div align="center">
-  <a href="images/waveshare-7b-salon-kolory.png"><img src="images/waveshare-7b-salon-kolory.png" alt="Salon — kafelki" width="30%" /></a>
-  <a href="images/waveshare-7b-led-kolory.png"><img src="images/waveshare-7b-led-kolory.png" alt="Oświetlenie RGB" width="30%" /></a>
-  <a href="images/waveshare-7b-gniazdka-kolory.png"><img src="images/waveshare-7b-gniazdka-kolory.png" alt="Gniazdka" width="30%" /></a>
-</div>
+| Strona „Salon” | Oświetlenie RGB | Gniazdka |
+|---|---|---|
+| ![Strona Salon — kafelki](images/screenshots/panel-01-salon.png) | ![Oświetlenie RGB — kolory](images/screenshots/panel-02-led.png) | ![Sterowanie gniazdkami](images/screenshots/panel-03-sockets.png) |
+| **Muzyka — Music Assistant** | **Pogoda** | **Asystent Xiaozhi AI** |
+| ![Muzyka — Music Assistant](images/screenshots/panel-04-music.png) | ![Pogoda — prognoza](images/screenshots/panel-05-weather.png) | ![Asystent Xiaozhi AI](images/screenshots/panel-06-xiaozhi.png) |
+| **Kamery — podgląd RTSP** | **Radio internetowe** | **Wygaszacz — zegar flip** |
+| ![Kamery — podgląd RTSP](images/screenshots/panel-07-cameras.png) | ![Radio internetowe](images/screenshots/panel-08-radio.png) | ![Wygaszacz z zegarem flip](images/screenshots/panel-09-screensaver.png) |
 
-<div align="center">
-  <a href="images/waveshare-7b-muzyka-kolory.png"><img src="images/waveshare-7b-muzyka-kolory.png" alt="Odtwarzacz muzyki" width="30%" /></a>
-  <a href="images/waveshare-7b-wygaszacz-flip.png"><img src="images/waveshare-7b-wygaszacz-flip.png" alt="Wygaszacz z zegarem flip" width="30%" /></a>
-  <a href="images/waveshare-7b-dolny-pasek.png"><img src="images/waveshare-7b-dolny-pasek.png" alt="Dolny pasek nawigacji" width="30%" /></a>
-</div>
+Dolny pasek nawigacji (1024 × 145 px) — skróty do stron i przełącznik wygaszacza, z podświetleniem
+aktywnej strony:
+
+![Dolny pasek nawigacji](images/screenshots/panel-10-bottom-nav.png)
 
 ## Zrzuty ekranu — edytor WWW
 
-<div align="center">
-  <a href="images/waveshare-7b-webui-kamera.png"><img src="images/waveshare-7b-webui-kamera.png" alt="Edytor WWW — konfiguracja kamery" width="80%" /></a>
-</div>
+Edytor otwiera się w przeglądarce pod adresem panelu i działa w tym samym układzie na komputerze
+(poniższe zrzuty: 1900 px szerokości okna, dwie kolumny — nawigacja i płótno podglądu).
+
+### Zakładka „Layout” — pełny widok
+
+![Edytor WWW — zakładka Layout](images/screenshots/editor-01-layout.png)
+
+### Strony, kafelki i podgląd
+
+| | |
+|---|---|
+| **Pasek stron i kafelków** — dodawanie stron, kolejność, liczba kafelków<br>![Pasek stron i kafelków](images/screenshots/editor-02-pages-widgets.png) | **Menu „+ Dodaj”** — typy kafelków (światło, gniazdko, roleta, scena, kamera, radio, pogoda, zegar, minutnik…)<br>![Typy kafelków](images/screenshots/editor-04-widget-types.png) |
+| **Inspektor kafelka** — encja, ikona, kolory, zachowanie po kliknięciu<br>![Inspektor kafelka](images/screenshots/editor-03-widget-inspector.png) | **Płótno podglądu** — wygląd panelu 1:1 (1024 × 600), kafelki przeciągane myszką<br>![Płótno podglądu](images/screenshots/editor-05-canvas.png) |
+| **Kreator szybkiej konfiguracji** — pierwsze uruchomienie, Wi-Fi i Home Assistant krok po kroku<br>![Kreator konfiguracji](images/screenshots/editor-06-setup-wizard.png) | **Wybór światła** — dialog przypisania encji światła do kafelka<br>![Wybór światła](images/screenshots/editor-07-light-picker.png) |
+
+### Sekcje ustawień
+
+| | |
+|---|---|
+| **Ustawienia → Wi-Fi i sieć** — skan sieci, zapis wielu profili, adres IP, tryb oszczędzania<br>![Wi-Fi i sieć](images/screenshots/editor-08-wifi.png) | **Ustawienia → Home Assistant** — adres, token dostępu, szyfrowanie, test połączenia<br>![Home Assistant](images/screenshots/editor-09-home-assistant.png) |
+| **Ustawienia → Xiaozhi AI** — serwer, klucz OTA, tryb asystenta głosowego<br>![Xiaozhi AI](images/screenshots/editor-10-xiaozhi-ai.png) | **Ustawienia → Kamery** — kamery z HA i strumienie RTSP, kanały, odświeżanie<br>![Kamery](images/screenshots/editor-11-cameras.png) |
+| **Ustawienia → Kamera wbudowana** — czujnik, ekspozycja, detekcja ruchu<br>![Kamera wbudowana](images/screenshots/editor-12-builtin-camera.png) | **Ustawienia → Czas** — strefa, serwer NTP, format 12/24 h, synchronizacja<br>![Czas](images/screenshots/editor-13-time.png) |
+| **Ustawienia → Ekran i wygaszacz** — jasność, przejścia stron, wygaszacz, styl zegara, tapeta *(sekcja jest długa — przewijana)*<br>![Ekran i wygaszacz](images/screenshots/editor-14-display-screensaver.png) | **Ustawienia → Karta microSD** — montowanie, formatowanie, pliki, tapeta z karty, eksport logów<br>![Karta microSD](images/screenshots/editor-15-sd-card.png) |
+| **Ustawienia → Strony** — wygląd strony, tapeta, motyw strony, przejścia<br>![Strony](images/screenshots/editor-16-pages-transitions.png) | **Ustawienia → MQTT** — broker, dane logowania, autodiscovery dla Home Assistant<br>![MQTT](images/screenshots/editor-17-mqtt.png) |
+| **Ustawienia → Interfejs** — kolory górnego i dolnego paska, widoczność ikon<br>![Interfejs](images/screenshots/editor-18-ui.png) | **Ustawienia → Motyw** — motywy dzień/noc, własne palety, akcenty<br>![Motyw](images/screenshots/editor-19-theme.png) |
+| **Ustawienia → AP konfiguracyjny** — tryb punktu dostępu i jego hasło<br>![AP konfiguracyjny](images/screenshots/editor-20-config-ap.png) | **Ustawienia → Aktualizacja firmware** — OTA z URL lub z pliku, z możliwością wycofania<br>![Aktualizacja firmware](images/screenshots/editor-21-firmware-update.png) |
+| **Ustawienia → System** — auto-restart, boot guard, restart urządzenia<br>![System](images/screenshots/editor-22-system.png) | **Ustawienia → Kopia zapasowa** — pełny backup i odtwarzanie ustawień z pliku JSON<br>![Kopia zapasowa](images/screenshots/editor-23-backup.png) |
+| **Ustawienia → Diagnostyka** — pule pamięci, liczniki łączy, stan zadań, watchdog klatek<br>![Diagnostyka](images/screenshots/editor-24-diagnostics.png) | **Ustawienia → Logi** — dziennik systemowy, pobieranie i czyszczenie<br>![Logi](images/screenshots/editor-25-logs.png) |
+
+> Dane w powyższych zrzutach zostały zamaskowane — nazwa sieci Wi-Fi, adresy IP, adresy serwerów
+> i hasła na obrazkach są przykładowe.
 
 ---
 

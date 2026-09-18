@@ -452,28 +452,56 @@ will tell you straight away whether the problem is back.
 
 ## Screenshots — on the panel
 
-<div align="center">
-  <a href="images/waveshare-7b-panel-na-zywo.png"><img src="images/waveshare-7b-panel-na-zywo.png" alt="Waveshare 7B panel on the wall" width="45%" /></a>
-  <a href="images/waveshare-7b-kolory-kuchnia.png"><img src="images/waveshare-7b-kolory-kuchnia.png" alt="Light tiles — colours" width="45%" /></a>
-</div>
+All captures were taken straight from the running panel (`GET /api/screenshot.bmp`, native
+1024 × 600 px) and show the current UI — background colours, wallpapers and tiles depend on your
+configuration, so yours will look different.
 
-<div align="center">
-  <a href="images/waveshare-7b-salon-kolory.png"><img src="images/waveshare-7b-salon-kolory.png" alt="Living room — tiles" width="30%" /></a>
-  <a href="images/waveshare-7b-led-kolory.png"><img src="images/waveshare-7b-led-kolory.png" alt="RGB lighting" width="30%" /></a>
-  <a href="images/waveshare-7b-gniazdka-kolory.png"><img src="images/waveshare-7b-gniazdka-kolory.png" alt="Sockets" width="30%" /></a>
-</div>
+| “Living room” page | RGB lighting | Sockets |
+|---|---|---|
+| ![Living room page — tiles](images/screenshots/panel-01-salon.png) | ![RGB lighting — colours](images/screenshots/panel-02-led.png) | ![Socket control](images/screenshots/panel-03-sockets.png) |
+| **Music — Music Assistant** | **Weather** | **Xiaozhi AI assistant** |
+| ![Music — Music Assistant](images/screenshots/panel-04-music.png) | ![Weather — forecast](images/screenshots/panel-05-weather.png) | ![Xiaozhi AI assistant](images/screenshots/panel-06-xiaozhi.png) |
+| **Cameras — RTSP preview** | **Internet radio** | **Screensaver — flip clock** |
+| ![Cameras — RTSP preview](images/screenshots/panel-07-cameras.png) | ![Internet radio](images/screenshots/panel-08-radio.png) | ![Screensaver with a flip clock](images/screenshots/panel-09-screensaver.png) |
 
-<div align="center">
-  <a href="images/waveshare-7b-muzyka-kolory.png"><img src="images/waveshare-7b-muzyka-kolory.png" alt="Music player" width="30%" /></a>
-  <a href="images/waveshare-7b-wygaszacz-flip.png"><img src="images/waveshare-7b-wygaszacz-flip.png" alt="Screensaver with a flip clock" width="30%" /></a>
-  <a href="images/waveshare-7b-dolny-pasek.png"><img src="images/waveshare-7b-dolny-pasek.png" alt="Bottom navigation bar" width="30%" /></a>
-</div>
+Bottom navigation bar (1024 × 145 px) — page shortcuts and the screensaver toggle, with the active
+page highlighted:
+
+![Bottom navigation bar](images/screenshots/panel-10-bottom-nav.png)
 
 ## Screenshots — web editor
 
-<div align="center">
-  <a href="images/waveshare-7b-webui-kamera.png"><img src="images/waveshare-7b-webui-kamera.png" alt="Web editor — camera configuration" width="80%" /></a>
-</div>
+The editor opens in any browser at the panel's address and uses the same layout as on a desktop
+(captures below: 1900 px window width, two columns — navigation plus the preview canvas).
+
+### “Layout” tab — full view
+
+![Web editor — Layout tab](images/screenshots/editor-01-layout.png)
+
+### Pages, tiles and preview
+
+| | |
+|---|---|
+| **Page and tile rail** — add pages, reorder them, tile counts<br>![Page and tile rail](images/screenshots/editor-02-pages-widgets.png) | **“+ Add” menu** — tile types (light, socket, cover, scene, camera, radio, weather, clock, timer…)<br>![Tile types](images/screenshots/editor-04-widget-types.png) |
+| **Tile inspector** — entity, icon, colours, tap behaviour<br>![Tile inspector](images/screenshots/editor-03-widget-inspector.png) | **Preview canvas** — 1:1 look of the panel (1024 × 600), tiles dragged with the mouse<br>![Preview canvas](images/screenshots/editor-05-canvas.png) |
+| **Setup wizard** — first run, Wi-Fi and Home Assistant step by step<br>![Setup wizard](images/screenshots/editor-06-setup-wizard.png) | **Light picker** — dialog that assigns a light entity to a tile<br>![Light picker](images/screenshots/editor-07-light-picker.png) |
+
+### Settings sections
+
+| | |
+|---|---|
+| **Settings → Wi-Fi & network** — network scan, multiple saved profiles, IP address, power save<br>![Wi-Fi & network](images/screenshots/editor-08-wifi.png) | **Settings → Home Assistant** — address, access token, encryption, connection test<br>![Home Assistant](images/screenshots/editor-09-home-assistant.png) |
+| **Settings → Xiaozhi AI** — server, OTA key, voice assistant mode<br>![Xiaozhi AI](images/screenshots/editor-10-xiaozhi-ai.png) | **Settings → Cameras** — HA cameras and RTSP streams, channels, refresh rate<br>![Cameras](images/screenshots/editor-11-cameras.png) |
+| **Settings → Built-in camera** — sensor, exposure, motion detection<br>![Built-in camera](images/screenshots/editor-12-builtin-camera.png) | **Settings → Time** — time zone, NTP server, 12/24 h format, sync<br>![Time](images/screenshots/editor-13-time.png) |
+| **Settings → Display & screensaver** — brightness, page transitions, screensaver, clock style, wallpaper *(long section — scrollable)*<br>![Display & screensaver](images/screenshots/editor-14-display-screensaver.png) | **Settings → microSD card** — mount, format, files, wallpaper from the card, log export<br>![microSD card](images/screenshots/editor-15-sd-card.png) |
+| **Settings → Pages** — page look, wallpaper, per-page theme, transitions<br>![Pages](images/screenshots/editor-16-pages-transitions.png) | **Settings → MQTT** — broker, credentials, Home Assistant autodiscovery<br>![MQTT](images/screenshots/editor-17-mqtt.png) |
+| **Settings → UI** — top and bottom bar colours, icon visibility<br>![UI](images/screenshots/editor-18-ui.png) | **Settings → Theme** — day/night themes, custom palettes, accents<br>![Theme](images/screenshots/editor-19-theme.png) |
+| **Settings → Config AP** — access point mode and its password<br>![Config AP](images/screenshots/editor-20-config-ap.png) | **Settings → Firmware update** — OTA from URL or file, with rollback<br>![Firmware update](images/screenshots/editor-21-firmware-update.png) |
+| **Settings → System** — auto-restart, boot guard, device reboot<br>![System](images/screenshots/editor-22-system.png) | **Settings → Backup** — full backup and restore of settings from a JSON file<br>![Backup](images/screenshots/editor-23-backup.png) |
+| **Settings → Diagnostics** — memory pools, link counters, task state, frame watchdog<br>![Diagnostics](images/screenshots/editor-24-diagnostics.png) | **Settings → Logs** — system log, download and clear<br>![Logs](images/screenshots/editor-25-logs.png) |
+
+> The data in these screenshots is masked — the Wi-Fi name, IP addresses, server addresses and
+> passwords shown in the images are placeholders.
 
 ---
 
