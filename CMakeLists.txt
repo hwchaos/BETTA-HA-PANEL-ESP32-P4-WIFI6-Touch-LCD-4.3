@@ -38,3 +38,11 @@ message(STATUS "betta-ha-panel variant manifest: ${_PANEL_MANIFEST}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(${_PROJECT_NAME})
+
+# The component manager (running inside project()) has populated
+# managed_components/ by now, so this is the point where our fixes for the
+# patched vendor components can be (re)applied. managed_components/ is
+# git-ignored, so the patch files in patches/ are the published record of those
+# fixes - see cmake/apply_vendor_patches.cmake.
+set(_VENDOR_PATCH_ROOT "${CMAKE_CURRENT_LIST_DIR}")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/apply_vendor_patches.cmake")

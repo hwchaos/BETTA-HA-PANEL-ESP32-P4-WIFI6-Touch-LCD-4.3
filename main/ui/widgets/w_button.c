@@ -867,6 +867,7 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     }
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, title_text);
     lv_obj_set_width(title, def->w - 32);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_20, LV_PART_MAIN);
@@ -878,6 +879,7 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
 #endif
 
     lv_obj_t *state_label = lv_label_create(card);
+    lv_obj_add_flag(state_label, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(state_label, ui_i18n_get("common.off", "OFF"));
     lv_obj_set_style_text_font(state_label, APP_FONT_TEXT_20, LV_PART_MAIN);
 #if APP_UI_TILE_LAYOUT_TUNED

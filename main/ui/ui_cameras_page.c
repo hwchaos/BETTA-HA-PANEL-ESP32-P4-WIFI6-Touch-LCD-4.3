@@ -11,6 +11,7 @@
 #include "esp_log.h"
 
 #include "app_config.h"
+#include "diag/system_log.h"
 #include "camera/camera_store.h"
 #include "ha/ha_cover_fetcher.h"
 #include "ui/fonts/app_text_fonts.h"
@@ -52,6 +53,11 @@ typedef struct {
 } ui_camera_instance_t;
 
 static ui_camera_instance_t s_instances[APP_MAX_CAMERAS];
+/* Snapshot fetching is only allowed for the page the user is actually looking
+ * at: the refresh timers used to keep downloading and decoding JPEGs on every
+ * page and behind the screen saver as well. */
+static char s_visible_page_id[APP_MAX_PAGE_ID_LEN];
+static bool s_suspended;
 
 /* HA camera integrations that expose several streams do so as separate
  * entities, e.g. camera.balkon_mainstream (2K) and camera.balkon_substream
@@ -181,11 +187,23 @@ static void cam_cover_cb(void *user, const ha_cover_result_t *result)
     cam_set_status(inst, status);
 }
 
+/* A tile may only fetch while its page is the visible one and the screen saver
+ * is not covering the UI. */
+static bool cam_instance_is_live(const ui_camera_instance_t *inst)
+{
+    return !s_suspended && s_visible_page_id[0] != '\0' &&
+           strncmp(inst->page_id, s_visible_page_id, sizeof(s_visible_page_id)) == 0;
+}
+
 static void cam_timer_cb(lv_timer_t *timer)
 {
+    system_log_note_lvgl_cb("cam_timer_cb");
     ui_camera_instance_t *inst = (ui_camera_instance_t *)lv_timer_get_user_data(timer);
     if (inst == NULL || !inst->active) {
         return;
+    }
+    if (!cam_instance_is_live(inst)) {
+        return; /* hidden page or screen saver: no download, no decode */
     }
     if (inst->fetching) {
         return; /* in flight; next tick retries */
@@ -292,6 +310,27 @@ static void cam_build_empty(lv_obj_t *parent)
     lv_obj_center(label);
 }
 
+/* Pause or resume every tile's refresh timer according to whether the user can
+ * see it; pausing also drops the snapshot that is still in flight. */
+static void cam_sync_activity(void)
+{
+    for (size_t i = 0; i < APP_MAX_CAMERAS; i++) {
+        ui_camera_instance_t *inst = &s_instances[i];
+        if (!inst->active || inst->timer == NULL) {
+            continue;
+        }
+        if (cam_instance_is_live(inst)) {
+            lv_timer_resume(inst->timer);
+            continue;
+        }
+        if (inst->fetching) {
+            ha_cover_fetcher_cancel(inst);
+            inst->fetching = false;
+        }
+        lv_timer_pause(inst->timer);
+    }
+}
+
 esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
 {
     if (parent == NULL || page_id == NULL) {
@@ -326,6 +365,7 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
     }
 
     if (count == 0) {
+        ESP_LOGW(TAG, "no enabled cameras (%u stored) -> empty page", (unsigned)total);
         free(entries);
         cam_build_empty(parent);
         return ESP_OK;
@@ -372,6 +412,8 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
     }
 
     free(entries);
+    /* Tiles of a page that is not on screen must not start fetching. */
+    cam_sync_activity();
     return ESP_OK;
 }
 
@@ -415,8 +457,32 @@ void ui_cameras_page_on_shown(const char *page_id)
             inst->fail_count = 0;
             inst->fetching = false;
             if (inst->timer != NULL) {
+                lv_timer_resume(inst->timer);
                 cam_timer_cb(inst->timer);
             }
         }
+    }
+}
+
+void ui_cameras_page_set_visible_page(const char *page_id)
+{
+    if (page_id != NULL) {
+        snprintf(s_visible_page_id, sizeof(s_visible_page_id), "%s", page_id);
+    } else {
+        s_visible_page_id[0] = '\0';
+    }
+    cam_sync_activity();
+}
+
+void ui_cameras_page_set_suspended(bool suspended)
+{
+    if (s_suspended == suspended) {
+        return;
+    }
+    s_suspended = suspended;
+    cam_sync_activity();
+    if (!suspended) {
+        /* Coming back from the screen saver: pull one fresh frame now. */
+        ui_cameras_page_on_shown(s_visible_page_id);
     }
 }

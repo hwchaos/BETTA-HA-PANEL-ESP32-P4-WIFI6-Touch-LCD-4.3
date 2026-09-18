@@ -102,6 +102,7 @@ static jpeg_decoder_handle_t s_decoder = NULL;
 static void *s_cancelled_user = NULL; /* serialised via s_lock with the worker */
 static cover_req_t s_inflight = {0};  /* guarded by s_lock                    */
 static bool s_inflight_valid = false;
+static volatile bool s_paused = false; /* set by the OTA upload, see header    */
 
 static void cover_dispatch_on_lvgl(void *data);
 
@@ -1191,7 +1192,10 @@ static esp_err_t cover_download_digest(const char *url, const char *username,
         goto done;
     }
 
-    ESP_LOGI(TAG, "Cover HTTP digest status=%d len=%" PRId64 " got=%u",
+    /* One of these runs for every cover refresh (several times per minute), so
+     * success is a debug line: it would otherwise push real diagnostics out of
+     * the bounded log file.  Failures stay visible. */
+    ESP_LOGD(TAG, "Cover HTTP digest status=%d len=%" PRId64 " got=%u",
              status, content_length, (unsigned)sink->len);
 
     if (status != 200) {
@@ -1846,6 +1850,12 @@ static void cover_task(void *arg)
         cover_req_t req;
         if (xQueueReceive(s_queue, &req, portMAX_DELAY) != pdTRUE) continue;
 
+        /* The OTA upload pauses us so nothing downloads or decodes while the
+         * new image is written to flash and verified. */
+        while (s_paused) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+
         /* Mark as in-flight so cancel() can invalidate us. */
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_inflight = req;
@@ -1982,9 +1992,13 @@ static void cover_task(void *arg)
                 sink.len = cover_jpeg_sanitize(sink.buf, sink.len);
                 ok = cover_decode(sink.buf, sink.len, req.target_w, req.target_h, &result);
             }
-            ESP_LOGI(TAG, "cover decode %s valid=%d src=%ux%u",
-                     ok ? "ok" : "fail", (int)result.valid,
-                     (unsigned)result.source_w, (unsigned)result.source_h);
+            if (ok) {
+                ESP_LOGD(TAG, "cover decode ok valid=%d src=%ux%u", (int)result.valid,
+                         (unsigned)result.source_w, (unsigned)result.source_h);
+            } else {
+                ESP_LOGW(TAG, "cover decode failed valid=%d src=%ux%u", (int)result.valid,
+                         (unsigned)result.source_w, (unsigned)result.source_h);
+            }
         } else {
             ESP_LOGW(TAG, "cover pipeline failed (download_err=%s)",
                      esp_err_to_name(download_err));
@@ -2178,4 +2192,11 @@ void ha_cover_result_release(ha_cover_result_t *result)
         result->image.data = NULL;
     }
     result->valid = false;
+}
+
+void ha_cover_fetcher_set_paused(bool paused)
+{
+    if (s_paused == paused) return;
+    s_paused = paused;
+    ESP_LOGI(TAG, "cover fetcher %s", paused ? "paused (OTA)" : "resumed");
 }

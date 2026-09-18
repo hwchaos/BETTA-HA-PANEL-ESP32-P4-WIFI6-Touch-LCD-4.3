@@ -21,6 +21,7 @@
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/fonts/mdi_font_registry.h"
 #include "ui/ui_i18n.h"
+#include "ui/ui_value_anim.h"
 #include "ui/theme/theme_default.h"
 
 #ifndef APP_UI_WEATHER_ICON_DEBUG
@@ -2481,7 +2482,7 @@ static void weather_render_3day(lv_obj_t *card, w_weather_tile_ctx_t *ctx, const
     } else {
         snprintf(temp_text, sizeof(temp_text), "--");
     }
-    lv_label_set_text(ctx->temp_label, temp_text);
+    ui_value_anim_set_text(ctx->temp_label, temp_text);
 
     char meta_text[64] = {0};
     if (values->humidity >= 0) {
@@ -2657,7 +2658,7 @@ static void weather_render(lv_obj_t *card, w_weather_tile_ctx_t *ctx, const weat
     } else {
         snprintf(temp_text, sizeof(temp_text), "--");
     }
-    lv_label_set_text(ctx->temp_label, temp_text);
+    ui_value_anim_set_text(ctx->temp_label, temp_text);
 
     if (values->humidity >= 0) {
         char meta_text[64] = {0};
@@ -2759,6 +2760,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_width(title, def->w - 32);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -2770,6 +2772,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 #endif
 
     lv_obj_t *condition = lv_label_create(card);
+    lv_obj_add_flag(condition, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(condition, "--");
     lv_obj_set_width(condition, def->w - 32);
     lv_obj_set_style_text_align(condition, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -2782,6 +2785,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 #endif
 
     lv_obj_t *temp = lv_label_create(card);
+    lv_obj_add_flag(temp, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(temp, "--");
     lv_obj_set_width(temp, def->w - 32);
     lv_obj_set_style_text_align(temp, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -2794,6 +2798,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 #endif
 
     lv_obj_t *meta = lv_label_create(card);
+    lv_obj_add_flag(meta, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(meta, "");
     lv_obj_set_width(meta, def->w - 32);
     lv_obj_set_style_text_align(meta, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -2837,6 +2842,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
             lv_obj_set_style_radius(row->container, 0, LV_PART_MAIN);
 
             row->day_label = lv_label_create(row->container);
+            lv_obj_add_flag(row->day_label, LV_OBJ_FLAG_USER_2);
             lv_label_set_text(row->day_label, "--");
             lv_obj_set_style_text_align(row->day_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
             lv_label_set_long_mode(row->day_label, LV_LABEL_LONG_CLIP);
@@ -2847,6 +2853,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
             lv_label_set_long_mode(row->icon_label, LV_LABEL_LONG_CLIP);
 
             row->low_label = lv_label_create(row->container);
+            lv_obj_add_flag(row->low_label, LV_OBJ_FLAG_USER_3);
             lv_label_set_text(row->low_label, "--");
             lv_obj_set_style_text_align(row->low_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
@@ -2867,6 +2874,7 @@ esp_err_t w_weather_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
             lv_obj_add_flag(row->bar_marker, LV_OBJ_FLAG_HIDDEN);
 
             row->high_label = lv_label_create(row->container);
+            lv_obj_add_flag(row->high_label, LV_OBJ_FLAG_USER_3);
             lv_label_set_text(row->high_label, "--");
             lv_obj_set_style_text_align(row->high_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
         }

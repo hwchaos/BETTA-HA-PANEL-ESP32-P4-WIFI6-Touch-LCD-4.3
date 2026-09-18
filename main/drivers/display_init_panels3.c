@@ -47,6 +47,7 @@
 #include "lvgl.h"
 
 #include "app_config.h"
+#include "app_task.h"
 #include "util/log_tags.h"
 
 /* â”€â”€ Pin definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -74,13 +75,22 @@
 #define BL_LEDC_FREQUENCY_HZ 150U
 
 /* â”€â”€ RGB panel timing (Guition manufacturer demo confirmed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-/* PCLK lowered to 12 MHz: the manufacturer demo uses 16 MHz but runs
- * Arduino_GFX without a bounce buffer (single-FB, partial updates).
- * Our setup has the FB in PSRAM with a 10-line bounce buffer + 64-B
- * GDMA bursts (PSRAM HW limit), so 16 MHz starves the buffer and shows
- * as stripe artifacts. 10 MHz did not improve the panel's bright-to-dark
- * bleed and reduces refresh rate too much, so 12 MHz is the safer compromise. */
-#define PANELS3_PCLK_HZ      (12 * 1000 * 1000)
+/* PCLK history: the manufacturer demo uses 16 MHz but runs Arduino_GFX
+ * without a bounce buffer (single-FB, partial updates). Our setup has the FB
+ * in PSRAM with a bounce buffer + 64-B GDMA bursts (PSRAM HW limit), so
+ * 16 MHz starves the buffer and shows as stripe artifacts; 12 MHz still
+ * showed faint left-edge stripes, so 10 MHz was used.
+ * 10 -> 9 MHz: that 10 MHz margin was measured on an early, light UI. The UI
+ * has grown a lot since (18+ tiles, graph, clock, MQTT + HA websocket
+ * traffic, code/rodata XIP from the same PSRAM), so the bounce-buffer refill
+ * still missed its deadline under load spikes and showed as short dashes/dots
+ * at the left edge / top of the frame. 9 MHz frees ~10% of the scanout
+ * bandwidth (refresh only drops 35 -> 31 Hz, invisible).
+ * Together with PANELS3_BOUNCE_LINES and CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
+ * (see sdkconfig.defaults.panels3) this keeps the scanout path away from the
+ * PSRAM bandwidth edge, so a late VSync/refill interrupt no longer shows up
+ * as a one-frame glitch at the left edge. */
+#define PANELS3_PCLK_HZ      (9 * 1000 * 1000)
 #define PANELS3_H_PULSE      8
 #define PANELS3_H_FRONT      10
 #define PANELS3_H_BACK       50                    /* manufacturer: hsync_back_porch=50 */
@@ -109,10 +119,14 @@
 #endif
 
 /* Bounce buffer lines (internal SRAM, managed by RGB driver).
- * 10 lines × 480 px × 2 B = 9.6 KiB. Larger values (20) starve the
- * remaining internal SRAM and made FreeRTOS task creation fail later
- * (ui_runtime task could not allocate its stack). */
-#define PANELS3_BOUNCE_LINES   10
+ * 10 lines × 480 px × 2 B = 9.6 KiB (two ping-pong buffers = 19.2 KiB)
+ * gave only ~480 us of slack per refill; 16 lines = 15.4 KiB each
+ * (30.7 KiB total, +11.5 KiB internal DRAM) raises that to ~768 us, which
+ * absorbs Wi-Fi/MQTT/HTTP bursts and cache stalls without underrun.
+ * Must divide into 480 lines: 480 / 16 = 30 refills per frame.
+ * 20 lines was too much on the earlier (tighter) firmware and broke
+ * task-stack allocation later; 16 is the compromise value. */
+#define PANELS3_BOUNCE_LINES   16
 /* LVGL draw buffer height in lines (2Ã— PSRAM double-buffer) */
 #define PANELS3_LVGL_BUF_LINES 20
 
@@ -120,11 +134,12 @@
 static bool                   s_display_ready = false;
 static lv_display_t          *s_lv_display    = NULL;
 static esp_lcd_panel_handle_t s_panel         = NULL;
-static esp_timer_handle_t     s_dim_timer      = NULL;
 static int                    s_display_brightness = -1;
 static int                    s_active_brightness = APP_DISPLAY_ACTIVE_BRIGHTNESS_PERCENT;
 static int                    s_dim_brightness = APP_DISPLAY_DIM_BRIGHTNESS_PERCENT;
 static uint32_t               s_dim_timeout_ms = APP_DISPLAY_DIM_TIMEOUT_MS;
+static int64_t                s_last_activity_ms = 0;
+static display_activity_cb_t  s_activity_cb = NULL;
 
 /* â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 static lvgl_port_cfg_t display_port_cfg(void)
@@ -134,7 +149,7 @@ static lvgl_port_cfg_t display_port_cfg(void)
     cfg.task_stack       = APP_LVGL_TASK_STACK;
     cfg.task_affinity    = 1;
     cfg.task_max_sleep_ms = 100;
-    cfg.task_stack_caps  = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    cfg.task_stack_caps  = APP_TASK_STACK_CAPS;
     return cfg;
 }
 
@@ -169,17 +184,46 @@ static esp_err_t backlight_ledc_init(void)
     return ledc_channel_config(&ch_cfg);
 }
 
+/* Backlight duty lookup: percentage -> 10-bit LEDC duty with a 2.2 gamma curve.
+ *
+ * A linear duty mapping (duty = percent * 1023 / 100) makes the slider feel
+ * broken at the low end: 10 % duty still looks like ~45 % brightness to the
+ * eye, so the first third of the range did nothing useful and the panel could
+ * not be dimmed for night use. The curve below is the standard perceptual
+ * transfer and keeps every non-zero percentage at duty >= 1, so the whole
+ * slider range is usable (1 % .. 5 % = barely glowing, 20 % = readable but
+ * dark screensaver clock, 100 % = full). 202 B in rodata, zero RAM cost. */
+static const uint16_t BL_DUTY_BY_PERCENT[101] = {
+       0,    1,    1,    1,    1,    1,    2,    3,    4,    5,
+       6,    8,   10,   11,   14,   16,   18,   21,   24,   26,
+      30,   33,   37,   40,   44,   48,   53,   57,   62,   67,
+      72,   78,   83,   89,   95,  102,  108,  115,  122,  129,
+     136,  144,  152,  160,  168,  177,  185,  194,  204,  213,
+     223,  233,  243,  253,  264,  275,  286,  297,  309,  320,
+     333,  345,  357,  370,  383,  397,  410,  424,  438,  452,
+     467,  482,  497,  512,  527,  543,  559,  576,  592,  609,
+     626,  643,  661,  679,  697,  715,  734,  753,  772,  792,
+     811,  831,  852,  872,  893,  914,  935,  957,  979, 1001,
+    1023,
+};
+
 esp_err_t display_set_brightness_percent(int percent)
 {
     const int next = display_clamp_brightness(percent);
     if (s_display_brightness == next) return ESP_OK;
 
-    const uint32_t duty = (uint32_t)(next * ((1u << 10) - 1)) / 100u;
+    const uint32_t duty = BL_DUTY_BY_PERCENT[next];
     esp_err_t err = ledc_set_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL, duty);
     if (err == ESP_OK) err = ledc_update_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL);
     if (err == ESP_OK) {
+        const int previous = s_display_brightness;
         s_display_brightness = next;
-        ESP_LOGD(TAG_DISPLAY, "backlight %d%% (duty=%" PRIu32 ")", next, duty);
+        /* Log only coarse transitions: a slider drag would otherwise flood the
+         * log ring buffer with one line per step. */
+        const int delta = (next > previous) ? (next - previous) : (previous - next);
+        if (previous == 0 || next == 0 || delta >= 5) {
+            ESP_LOGI(TAG_DISPLAY, "backlight %d%% (duty=%" PRIu32 "/1023)", next, duty);
+        }
     } else {
         ESP_LOGW(TAG_DISPLAY, "backlight set failed: %s", esp_err_to_name(err));
     }
@@ -216,40 +260,41 @@ void display_set_power_config(const display_power_config_t *cfg)
 }
 
 /* â”€â”€ Dim timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-static void display_dim_timer_cb(void *arg)
+void display_set_active_brightness_percent(int percent)
 {
-    (void)arg;
-    if (!s_display_ready) return;
-    (void)display_set_brightness_percent(s_dim_brightness);
+    s_active_brightness = display_clamp_brightness(percent);
 }
 
-static esp_err_t display_dim_timer_init(void)
+/* This driver has no inactivity policy of its own (the shared screensaver owns
+ * idle dimming), so there is nothing to enable or disable. */
+void display_set_power_policy_enabled(bool enabled)
 {
-    if (s_dim_timer != NULL) return ESP_OK;
-    const esp_timer_create_args_t args = {
-        .callback              = display_dim_timer_cb,
-        .arg                   = NULL,
-        .dispatch_method       = ESP_TIMER_TASK,
-        .name                  = "display_dim",
-        .skip_unhandled_events = true,
-    };
-    return esp_timer_create(&args, &s_dim_timer);
-}
-
-static void display_restart_dim_timer(void)
-{
-    if (s_dim_timer == NULL) return;
-    if (esp_timer_is_active(s_dim_timer)) (void)esp_timer_stop(s_dim_timer);
-    if (s_dim_timeout_ms == 0U) return;
-    const uint64_t us = (uint64_t)s_dim_timeout_ms * 1000ULL;
-    (void)esp_timer_start_once(s_dim_timer, us);
+    (void)enabled;
 }
 
 void display_note_activity(void)
 {
     if (!s_display_ready) return;
-    (void)display_set_brightness_percent(s_active_brightness);
-    display_restart_dim_timer();
+    s_last_activity_ms = esp_timer_get_time() / 1000;
+    /* Restore the user's configured brightness (not a hardcoded 100%). The
+     * screensaver/screen-off logic owns idle dimming, so there is no separate
+     * auto-dim timer here — that keeps the HA brightness slider authoritative.
+     * The callback runs first and may claim the backlight: the screensaver has to
+     * drop its light wallpaper before the panel gets brighter. */
+    bool owned = false;
+    if (s_activity_cb != NULL) owned = s_activity_cb();
+    if (!owned) (void)display_set_brightness_percent(s_active_brightness);
+}
+
+void display_set_activity_callback(display_activity_cb_t cb)
+{
+    s_activity_cb = cb;
+}
+
+int64_t display_ms_since_activity(void)
+{
+    if (!s_display_ready) return 0;
+    return (esp_timer_get_time() / 1000) - s_last_activity_ms;
 }
 
 /* â”€â”€ ST7701S panel init (3-wire SPI + RGB) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ *
@@ -518,9 +563,6 @@ esp_err_t display_init(void)
 
     /* 4. Register with LVGL */
     ESP_RETURN_ON_ERROR(lvgl_display_add(), TAG_DISPLAY, "lvgl_display_add failed");
-
-    /* 5. Dim timer (non-fatal) */
-    (void)display_dim_timer_init();
 
     s_display_ready = true;
     ESP_LOGI(TAG_DISPLAY, "Display init OK â€” ST7701S RGB 480x480, LEDC backlight GPIO%d",

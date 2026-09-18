@@ -39,6 +39,57 @@ endchoice
 
 endmenu
 
+menu "Local Camera (MIPI-CSI)"
+
+config APP_FEATURE_LOCAL_CAMERA
+    bool "Built-in MIPI-CSI camera support"
+    default y
+    depends on APP_PANEL_VARIANT_7INCH_1024
+    help
+        Enables the built-in OV5647 MIPI-CSI camera of the Waveshare
+        ESP32-P4-WIFI6-Touch-LCD-7B panel: on-panel preview, snapshot
+        endpoint (/api/camera/snapshot), MJPEG stream (/api/camera/stream),
+        camera status endpoint and motion-based screen wake.
+
+        The sensor format is selected through the esp_cam_sensor (OV5647)
+        Kconfig, not here.  sdkconfig.defaults.panel7 enables
+        1920x1080 RAW10 and the matching default format.
+
+config APP_LOCAL_CAMERA_HFLIP
+    bool "Horizontally mirror camera image"
+    default y
+    depends on APP_FEATURE_LOCAL_CAMERA
+    help
+        Apply a horizontal flip to the captured image.  Default enabled to
+        match the Waveshare demo orientation.
+
+config APP_LOCAL_CAMERA_VFLIP
+    bool "Vertically mirror camera image"
+    default n
+    depends on APP_FEATURE_LOCAL_CAMERA
+    help
+        Apply a vertical flip to the captured image.
+
+config APP_LOCAL_CAMERA_MOTION_WAKE
+    bool "Wake screen on camera motion"
+    default y
+    depends on APP_FEATURE_LOCAL_CAMERA
+    help
+        Use a lightweight frame-difference detector on the camera stream to
+        wake the screen when someone approaches the panel while the display
+        is dimmed or off.
+
+config APP_LOCAL_CAMERA_JPEG_QUALITY
+    int "Snapshot JPEG quality (1-100)"
+    range 10 95
+    default 55
+    depends on APP_FEATURE_LOCAL_CAMERA
+    help
+        JPEG quality used for /api/camera/snapshot.  Higher values produce
+        larger images.
+
+endmenu
+
 menu "Wi-Fi Station"
 
 config APP_WIFI_SSID

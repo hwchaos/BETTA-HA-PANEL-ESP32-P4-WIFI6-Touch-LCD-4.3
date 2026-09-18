@@ -27,9 +27,15 @@ else()
     )
 endif()
 
+# Built-in MIPI-CSI camera (panel7 / Waveshare 7B only).
+set(APP_LOCAL_CAMERA_SRCS "")
+if(CONFIG_APP_FEATURE_LOCAL_CAMERA)
+    list(APPEND APP_LOCAL_CAMERA_SRCS
+        "camera/local_camera.c"
+        "api/api_camera_local.c")
+endif()
 idf_component_register(
-    SRCS
-        "app_main.c"
+    SRCS        "app_main.c"
         "app_events.c"
         "api/http_server.c"
         "api/http_guard.c"
@@ -39,6 +45,7 @@ idf_component_register(
         "api/api_entities.c"
         "api/api_state.c"
         "api/api_settings.c"
+        "api/api_sd.c"
         "api/api_i18n.c"
         "api/api_wifi.c"
         "api/api_version.c"
@@ -49,6 +56,18 @@ idf_component_register(
         "api/api_cameras.c"
         "api/api_system_log.c"
         "diag/system_log.c"
+        "diag/display_flash_watch.c"
+        "diag/dsi_underrun_watch.c"
+        "diag/lvgl_log_bridge.c"
+        "drivers/display_frame_buffer.c"
+        "api/api_diagnostics.c"
+        "api/api_backup.c"
+        "api/api_pages.c"
+        "diag/boot_guard.c"
+        "diag/crash_core.c"
+        "diag/storage_guard.c"
+        "sd/sd_card.c"
+        "sd/sd_logs.c"
         ${PANEL_DRIVER_SRCS}
         "ha/ha_client.c"
         "ha/ha_ws.c"
@@ -56,21 +75,35 @@ idf_component_register(
         "ha/ha_energy_model.c"
         "ha/ha_light_capabilities.c"
         "ha/ha_cover_fetcher.c"
+        "ha/ha_alarm_events.c"
         "layout/layout_store.c"
         "layout/layout_validate.c"
         "settings/runtime_settings.c"
         "settings/i18n_store.c"
         "net/wifi_mgr.c"
+        "net/net_health.c"
         "net/time_sync.c"
+        "mqtt/panel_mqtt.c"
         "ui/ui_runtime.c"
         "ui/ui_boot_splash.c"
         "ui/ui_ota_progress.c"
         "ui/ui_pages.c"
         "ui/ui_settings.c"
+        "ui/ui_page_style.c"
+        "ui/ui_page_transition.c"
+        "ui/ui_press_feedback.c"
+        "ui/ui_screen_saver.c"
+        "ui/ui_slider_touch.c"
+        "ui/ui_theme_router.c"
+        "ui/ui_value_anim.c"
         "ui/ui_energy_page.c"
         "ui/ui_cameras_page.c"
+        "ui/ui_music_page.c"
+        "ui/ui_radio_page.c"
+        "ui/ui_radio_stations.c"
         "ui/ui_i18n.c"
         "ui/ui_widget_factory.c"
+        "ui/ui_tile_style.c"
         "ui/ui_bindings.c"
         "ui/lv_psram_mem.c"
         "ui/widgets/w_sensor.c"
@@ -91,13 +124,21 @@ idf_component_register(
         "ui/widgets/w_fan.c"
         "ui/widgets/w_select.c"
         "ui/widgets/w_number.c"
+        "ui/widgets/w_alarm_tile.c"
+        "ui/widgets/w_clock_alarm.c"
+        "ui/widgets/w_cover_tile.c"
+        "ui/widgets/w_scene_tile.c"
+        "ui/widgets/w_person_tile.c"
+        "ui/widgets/w_timer_tile.c"
         "ui/fonts/mdi_font_registry.c"
         "ui/theme/theme_default.c"
         "ui/theme/theme_palette.c"
         "ui/theme/theme_store.c"
         "camera/camera_store.c"
+        ${APP_LOCAL_CAMERA_SRCS}
         "util/json_util.c"
         "util/ringbuf.c"
+        "radio/panel_radio.c"
         "xiaozhi/xiaozhi_activate.c"
         "xiaozhi/xiaozhi_audio.c"
         "xiaozhi/xiaozhi_client.c"
@@ -110,7 +151,10 @@ idf_component_register(
         "drivers"
         "ha"
         "layout"
+        "mqtt"
         "net"
+        "radio"
+        "sd"
         "ui"
         "ui/theme"
         "util"
@@ -124,13 +168,19 @@ idf_component_register(
         esp_driver_gpio
         esp_driver_i2c
         esp_driver_ledc
+        esp_driver_sdspi
+        esp_driver_sdmmc
+        sdmmc
+        fatfs
         esp_websocket_client
         esp_http_client
         esp_http_server
+        mqtt
         esp_rom
         esp_timer
         app_update
         esp_app_format
+        espcoredump
         spi_flash
         esp_lcd
         lvgl
@@ -140,7 +190,18 @@ idf_component_register(
         esp_driver_jpeg
         esp_codec_dev
         esp-tls
+        esp_driver_tsens
+        esp_mm
+        soc
+        hal
 )
+
+# `esp_video` provides the V4L2-style camera stack used by camera/local_camera.c
+# and api/api_camera_local.c. It is attached with optional_requires so panel
+# variants that build without the camera feature keep the same component graph.
+if(CONFIG_APP_FEATURE_LOCAL_CAMERA)
+    idf_component_optional_requires(PUBLIC esp_video)
+endif()
 
 # ESP-Hosted (P4 + C6 coprocessor) is only used by panel4 / panel10.
 # panels3 (ESP32-S3) has native Wi-Fi and must not pull in the hosted stack.
@@ -218,6 +279,14 @@ endif() # NOT CONFIG_APP_PANEL_VARIANT_S3_480
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE APP_HAVE_HOSTED_C6_FW_IMAGE=${APP_HAVE_HOSTED_C6_FW_IMAGE})
 
+# The frame-gap witness (diag/dsi_underrun_watch.c) has to see the scan-out DMA
+# completion interrupt, because that interrupt is the only per-frame beacon that
+# keeps telling the truth while the flash driver has the caches off.  The DPI
+# panel's own callback slot for it is taken by the LVGL adapter, so the witness
+# interposes on the one call that owns the DMA channel - IDF's own - with the
+# linker's --wrap.
+idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=dw_gdma_channel_register_event_callbacks" APPEND)
+
 set(SPLASH_HOUSE_IMAGE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/assets/splash_house_image.c")
 if(EXISTS "${SPLASH_HOUSE_IMAGE_SOURCE}")
     target_sources(${COMPONENT_LIB} PRIVATE "${SPLASH_HOUSE_IMAGE_SOURCE}")
@@ -258,6 +327,7 @@ set(MDI_STANDARD_FONT_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/mdi_standard_ic
 set(MDI_WEATHER_FONT20_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/mdiweatherIcons20.c")
 set(MDI_ENERGY_FONT42_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/mdi_energy_42.c")
 set(MDI_ARROWS_FONT20_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/mdi_arrows_20.c")
+set(MDI_TOPBAR_FONT24_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/mdi_topbar_24.c")
 set(POPPINS_REGULAR_12_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regular_12.c")
 set(POPPINS_REGULAR_14_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regular_14.c")
 set(POPPINS_REGULAR_16_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regular_16.c")
@@ -270,6 +340,7 @@ set(POPPINS_REGULAR_34_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regula
 set(POPPINS_REGULAR_36_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regular_36.c")
 set(POPPINS_REGULAR_38_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regular_38.c")
 set(POPPINS_REGULAR_40_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/poppins_regular_40.c")
+set(CLOCK_DIGITS_84_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ui/fonts/clock_digits_84.c")
 
 set(MDI_TOP50_FONT72_AVAILABLE 0)
 if(EXISTS "${MDI_TOP50_FONT72_SOURCE}")
@@ -305,6 +376,12 @@ set(APP_HAVE_MDI_ARROWS_FONT_20 0)
 if(EXISTS "${MDI_ARROWS_FONT20_SOURCE}")
     target_sources(${COMPONENT_LIB} PRIVATE "${MDI_ARROWS_FONT20_SOURCE}")
     set(APP_HAVE_MDI_ARROWS_FONT_20 1)
+endif()
+
+set(APP_HAVE_MDI_TOPBAR_FONT 0)
+if(EXISTS "${MDI_TOPBAR_FONT24_SOURCE}")
+    target_sources(${COMPONENT_LIB} PRIVATE "${MDI_TOPBAR_FONT24_SOURCE}")
+    set(APP_HAVE_MDI_TOPBAR_FONT 1)
 endif()
 
 set(APP_HAVE_MDI_ENERGY_FONT_100 0)
@@ -385,6 +462,12 @@ if(EXISTS "${POPPINS_REGULAR_40_SOURCE}")
     set(APP_HAVE_POPPINS_REGULAR_40 1)
 endif()
 
+set(APP_HAVE_CLOCK_DIGITS_84 0)
+if(EXISTS "${CLOCK_DIGITS_84_SOURCE}")
+    target_sources(${COMPONENT_LIB} PRIVATE "${CLOCK_DIGITS_84_SOURCE}")
+    set(APP_HAVE_CLOCK_DIGITS_84 1)
+endif()
+
 if(MDI_TOP50_FONT42_AVAILABLE OR MDI_TOP50_FONT56_AVAILABLE OR MDI_TOP50_FONT72_AVAILABLE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE APP_HAVE_MDI_ICON_FONT=1 APP_HAVE_MDI_TOP50_FONT=1 APP_HAVE_MDI_TOP50_FONT_72=${MDI_TOP50_FONT72_AVAILABLE} APP_HAVE_MDI_TOP50_FONT_56=${MDI_TOP50_FONT56_AVAILABLE} APP_HAVE_MDI_TOP50_FONT_42=${MDI_TOP50_FONT42_AVAILABLE} APP_HAVE_MDI_TOP50_FONT_LEGACY=0 APP_HAVE_MDI_STANDARD_FONT=0 APP_HAVE_MDI_WEATHER_FONT_20=${MDI_WEATHER_FONT20_AVAILABLE})
 elseif(EXISTS "${MDI_TOP50_FONT_SOURCE}")
@@ -396,6 +479,8 @@ elseif(EXISTS "${MDI_STANDARD_FONT_SOURCE}")
 else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE APP_HAVE_MDI_ICON_FONT=0 APP_HAVE_MDI_TOP50_FONT=0 APP_HAVE_MDI_TOP50_FONT_72=0 APP_HAVE_MDI_TOP50_FONT_56=0 APP_HAVE_MDI_TOP50_FONT_42=0 APP_HAVE_MDI_TOP50_FONT_LEGACY=0 APP_HAVE_MDI_STANDARD_FONT=0 APP_HAVE_MDI_WEATHER_FONT_20=${MDI_WEATHER_FONT20_AVAILABLE})
 endif()
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE APP_HAVE_MDI_TOPBAR_FONT=${APP_HAVE_MDI_TOPBAR_FONT})
 
 target_compile_definitions(
     ${COMPONENT_LIB}
@@ -412,6 +497,7 @@ target_compile_definitions(
         APP_HAVE_POPPINS_REGULAR_36=${APP_HAVE_POPPINS_REGULAR_36}
         APP_HAVE_POPPINS_REGULAR_38=${APP_HAVE_POPPINS_REGULAR_38}
         APP_HAVE_POPPINS_REGULAR_40=${APP_HAVE_POPPINS_REGULAR_40}
+        APP_HAVE_CLOCK_DIGITS_84=${APP_HAVE_CLOCK_DIGITS_84}
         APP_HAVE_MDI_ENERGY_FONT_42=${APP_HAVE_MDI_ENERGY_FONT_42}
         APP_HAVE_MDI_ENERGY_FONT_100=${APP_HAVE_MDI_ENERGY_FONT_100}
         APP_HAVE_MDI_ARROWS_FONT_20=${APP_HAVE_MDI_ARROWS_FONT_20})

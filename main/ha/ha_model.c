@@ -9,8 +9,10 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "diag/system_log.h"
 #include "util/log_tags.h"
 
 static SemaphoreHandle_t s_model_mutex = NULL;
@@ -19,6 +21,24 @@ static size_t s_entity_count = 0;
 static ha_state_t *s_states = NULL;
 static size_t s_state_count = 0;
 static uint32_t s_state_revision = 0;
+
+/* The UI task reads the revision on every loop iteration, so that one read must
+ * never be able to park the interface behind a stuck writer. */
+#define HA_MODEL_LOCK_TIMEOUT_MS 100
+
+/* Thin wrappers so the advisory lock tracker in system_log.c can name the task
+ * that owns the model when a freeze report is written. */
+static void ha_model_lock(void)
+{
+    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    system_log_lock_acquire("model");
+}
+
+static void ha_model_unlock(void)
+{
+    system_log_lock_release("model");
+    xSemaphoreGive(s_model_mutex);
+}
 
 #define HA_MODEL_LIGHT_EFFECT_SLOTS 24
 
@@ -172,14 +192,14 @@ void ha_model_reset(void)
     if (s_model_mutex == NULL || s_entities == NULL || s_states == NULL) {
         return;
     }
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     memset(s_entities, 0, sizeof(ha_entity_info_t) * APP_HA_MAX_ENTITIES);
     memset(s_states, 0, sizeof(ha_state_t) * APP_HA_MAX_STATES);
     ha_model_free_light_effects();
     s_entity_count = 0;
     s_state_count = 0;
     s_state_revision++;
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
 }
 
 static int find_entity_index(const char *entity_id)
@@ -208,20 +228,20 @@ esp_err_t ha_model_upsert_entity(const ha_entity_info_t *entity)
         return ESP_ERR_INVALID_ARG;
     }
 
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     int idx = find_entity_index(entity->id);
     if (idx >= 0) {
         s_entities[idx] = *entity;
-        xSemaphoreGive(s_model_mutex);
+        ha_model_unlock();
         return ESP_OK;
     }
 
     if (s_entity_count >= APP_HA_MAX_ENTITIES) {
-        xSemaphoreGive(s_model_mutex);
+        ha_model_unlock();
         return ESP_ERR_NO_MEM;
     }
     s_entities[s_entity_count++] = *entity;
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
     return ESP_OK;
 }
 
@@ -231,19 +251,19 @@ esp_err_t ha_model_upsert_state(const ha_state_t *state)
         return ESP_ERR_INVALID_ARG;
     }
 
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     int idx = find_state_index(state->entity_id);
     bool state_changed = false;
     if (idx >= 0) {
         if (ha_state_equals(&s_states[idx], state)) {
-            xSemaphoreGive(s_model_mutex);
+            ha_model_unlock();
             return ESP_OK;
         }
         s_states[idx] = *state;
         state_changed = true;
     } else {
         if (s_state_count >= APP_HA_MAX_STATES) {
-            xSemaphoreGive(s_model_mutex);
+            ha_model_unlock();
             return ESP_ERR_NO_MEM;
         }
         s_states[s_state_count++] = *state;
@@ -262,7 +282,7 @@ esp_err_t ha_model_upsert_state(const ha_state_t *state)
         s_state_revision++;
     }
 
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
     return ESP_OK;
 }
 
@@ -272,13 +292,13 @@ bool ha_model_get_state(const char *entity_id, ha_state_t *out_state)
         return false;
     }
     bool found = false;
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     int idx = find_state_index(entity_id);
     if (idx >= 0) {
         *out_state = s_states[idx];
         found = true;
     }
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
     return found;
 }
 
@@ -290,7 +310,7 @@ size_t ha_model_list_entities(
     }
     size_t written = 0;
 
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     for (size_t i = 0; i < s_entity_count && written < max_out; i++) {
         const ha_entity_info_t *entity = &s_entities[i];
         if (domain_filter != NULL && domain_filter[0] != '\0' &&
@@ -302,7 +322,7 @@ size_t ha_model_list_entities(
         }
         out_entities[written++] = *entity;
     }
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
     return written;
 }
 
@@ -313,11 +333,11 @@ size_t ha_model_list_states(ha_state_t *out_states, size_t max_out)
     }
 
     size_t written = 0;
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     for (size_t i = 0; i < s_state_count && written < max_out; i++) {
         out_states[written++] = s_states[i];
     }
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
 
     return written;
 }
@@ -328,11 +348,31 @@ uint32_t ha_model_state_revision(void)
         return 0;
     }
 
-    uint32_t revision = 0;
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
-    revision = s_state_revision;
-    xSemaphoreGive(s_model_mutex);
-    return revision;
+    /* This runs on every UI loop iteration.  A bounded wait means a stuck
+     * writer degrades into a stale revision (the UI simply repaints a moment
+     * later) instead of freezing the whole interface, and the warning names
+     * the holder. */
+    if (xSemaphoreTake(s_model_mutex, pdMS_TO_TICKS(HA_MODEL_LOCK_TIMEOUT_MS)) == pdTRUE) {
+        uint32_t revision = s_state_revision;
+        xSemaphoreGive(s_model_mutex);
+        return revision;
+    }
+
+    static uint32_t s_timeout_count = 0;
+    static int64_t s_last_warn_ms = 0;
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    s_timeout_count++;
+    if ((now_ms - s_last_warn_ms) >= 1000) {
+        s_last_warn_ms = now_ms;
+        char owner[32];
+        (void)system_log_lock_owner("model", owner, sizeof(owner));
+        ESP_LOGW(TAG_HA_MODEL, "state revision read timed out after %d ms (model held by %s, %u timeouts)",
+                 HA_MODEL_LOCK_TIMEOUT_MS, owner, (unsigned)s_timeout_count);
+    }
+
+    /* A single aligned word load is atomic, and the value only grows, so a
+     * stale-by-one revision is harmless. */
+    return s_state_revision;
 }
 
 esp_err_t ha_model_set_light_effects(const char *entity_id, const char *effect_list, const char *current_effect)
@@ -341,7 +381,7 @@ esp_err_t ha_model_set_light_effects(const char *entity_id, const char *effect_l
         return ESP_ERR_INVALID_ARG;
     }
 
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
 
     int target = -1;
     for (size_t i = 0; i < HA_MODEL_LIGHT_EFFECT_SLOTS; i++) {
@@ -382,7 +422,7 @@ esp_err_t ha_model_set_light_effects(const char *entity_id, const char *effect_l
         }
     }
 
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
     return ESP_OK;
 }
 
@@ -394,7 +434,7 @@ bool ha_model_get_light_effects(const char *entity_id, char *out_list, size_t ou
     }
 
     bool found = false;
-    xSemaphoreTake(s_model_mutex, portMAX_DELAY);
+    ha_model_lock();
     for (size_t i = 0; i < HA_MODEL_LIGHT_EFFECT_SLOTS; i++) {
         if (s_light_effects[i].entity_id[0] != '\0' &&
             strncmp(s_light_effects[i].entity_id, entity_id, APP_MAX_ENTITY_ID_LEN) == 0) {
@@ -408,6 +448,6 @@ bool ha_model_get_light_effects(const char *entity_id, char *out_list, size_t ou
             break;
         }
     }
-    xSemaphoreGive(s_model_mutex);
+    ha_model_unlock();
     return found;
 }

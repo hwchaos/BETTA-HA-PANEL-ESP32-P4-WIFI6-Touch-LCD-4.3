@@ -1552,6 +1552,7 @@ esp_err_t w_heating_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 #endif
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_width(title, def->w - 32);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_16, LV_PART_MAIN);
@@ -1575,6 +1576,7 @@ esp_err_t w_heating_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
     lv_obj_clear_flag(arc, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *target_label = lv_label_create(card);
+    lv_obj_add_flag(target_label, LV_OBJ_FLAG_USER_3);
     heating_set_target_label(target_label, 20.0f);
     lv_obj_set_style_text_font(target_label, HEATING_TARGET_FONT, LV_PART_MAIN);
 #if APP_UI_TILE_LAYOUT_TUNED
@@ -1584,6 +1586,7 @@ esp_err_t w_heating_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 #endif
 
     lv_obj_t *actual_label = lv_label_create(card);
+    lv_obj_add_flag(actual_label, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(actual_label, "--.- C");
     lv_obj_set_style_text_font(actual_label, HEATING_ACTUAL_FONT, LV_PART_MAIN);
 #if APP_UI_TILE_LAYOUT_TUNED
@@ -1593,6 +1596,7 @@ esp_err_t w_heating_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 #endif
 
     lv_obj_t *status_label = lv_label_create(card);
+    lv_obj_add_flag(status_label, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(status_label, ui_i18n_get("common.off", "OFF"));
     lv_obj_set_style_text_font(status_label, APP_FONT_TEXT_14, LV_PART_MAIN);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -1647,11 +1651,13 @@ esp_err_t w_heating_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui
 
         /* Min/Max labels at arc ends. */
         ctx->min_label = lv_label_create(card);
+        lv_obj_add_flag(ctx->min_label, LV_OBJ_FLAG_USER_2);
         lv_label_set_text(ctx->min_label, "5");
         lv_obj_set_style_text_font(ctx->min_label, APP_FONT_TEXT_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(ctx->min_label, lv_color_hex(APP_UI_COLOR_TEXT_MUTED), LV_PART_MAIN);
 
         ctx->max_label = lv_label_create(card);
+        lv_obj_add_flag(ctx->max_label, LV_OBJ_FLAG_USER_2);
         lv_label_set_text(ctx->max_label, "30");
         lv_obj_set_style_text_font(ctx->max_label, APP_FONT_TEXT_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(ctx->max_label, lv_color_hex(APP_UI_COLOR_TEXT_MUTED), LV_PART_MAIN);

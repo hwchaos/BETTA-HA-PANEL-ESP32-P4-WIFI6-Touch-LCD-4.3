@@ -38,6 +38,14 @@ esp_err_t api_version_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "canvas_w", APP_CONTENT_BOX_WIDTH);
     cJSON_AddNumberToObject(root, "canvas_h", APP_CONTENT_BOX_HEIGHT);
 
+    /* Feature flag so the web UI can hide the built-in camera tab when the
+     * feature is compiled out of this build. */
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+    cJSON_AddBoolToObject(root, "feature_local_camera", true);
+#else
+    cJSON_AddBoolToObject(root, "feature_local_camera", false);
+#endif
+
     char *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (payload == NULL) {

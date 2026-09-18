@@ -24,6 +24,10 @@ typedef struct {
 } ha_client_config_t;
 
 esp_err_t ha_client_start(const ha_client_config_t *cfg);
+/* Creates the HA state mutex. Idempotent and callable from any task: call it
+ * before the HTTP API can be reached so a request served ahead of
+ * ha_client_start() never touches an uninitialised semaphore. */
+esp_err_t ha_client_preinit(void);
 void ha_client_stop(void);
 bool ha_client_is_connected(void);
 bool ha_client_is_initial_sync_done(void);
@@ -99,3 +103,16 @@ typedef struct {
 /* Fill `out` with the current diagnostics snapshot.  Safe to call from any
  * task; the implementation takes an internal mutex briefly. */
 void ha_client_get_diagnostics(ha_client_diagnostics_t *out);
+
+/* Link-health counters used by /api/diagnostics to spot reconnect storms. */
+typedef struct {
+    uint32_t connect_count;          /* successful WebSocket connections */
+    uint32_t disconnect_count;       /* WebSocket disconnects */
+    uint32_t recover_count;          /* forced Wi-Fi/transport recoveries */
+    uint32_t error_streak;           /* consecutive WS connect errors, current */
+    uint8_t short_session_strikes;   /* consecutive short WS sessions, current */
+    int64_t last_connected_unix_ms;  /* uptime-based stamp of the last connect */
+    int64_t last_session_ms;         /* duration of the last WS session */
+} ha_client_link_stats_t;
+
+void ha_client_get_link_stats(ha_client_link_stats_t *out);

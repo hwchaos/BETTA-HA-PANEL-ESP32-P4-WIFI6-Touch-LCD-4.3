@@ -15,6 +15,7 @@
 #include "lvgl.h"
 
 #include "app_config.h"
+#include "diag/system_log.h"
 #include "drivers/display_init.h"
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
@@ -254,6 +255,7 @@ static void splash_step_progress(void)
 
 static void splash_timer_cb(lv_timer_t *timer)
 {
+    system_log_note_lvgl_cb("splash_timer_cb");
     (void)timer;
     splash_step_progress();
 }
@@ -504,6 +506,9 @@ void ui_boot_splash_hide(void)
     lv_obj_invalidate(lv_scr_act());
     lv_refr_now(NULL);
     display_unlock();
+    /* The first page is on the glass: apply the brightness the UI asked for while
+     * the splash was up, so the panel lights up once (see display_init_panel7.c). */
+    display_boot_brightness_release();
     display_note_activity();
     ESP_LOGI(TAG_UI, "Boot splash hidden");
 }

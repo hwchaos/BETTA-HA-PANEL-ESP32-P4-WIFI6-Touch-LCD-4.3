@@ -14,6 +14,7 @@
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/theme/theme_default.h"
 #include "ui/ui_i18n.h"
+#include "ui/ui_slider_touch.h"
 #include "ui/ui_bindings.h"
 #include "ui/ui_memory.h"
 
@@ -727,6 +728,7 @@ esp_err_t w_slider_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_width(title, def->w - 32);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_20, LV_PART_MAIN);
@@ -734,11 +736,13 @@ esp_err_t w_slider_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, APP_UI_TILE_LAYOUT_TUNED ? -12 : -10);
 
     lv_obj_t *state = lv_label_create(card);
+    lv_obj_add_flag(state, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(state, ui_i18n_get("common.off", "OFF"));
     lv_obj_set_style_text_font(state, APP_FONT_TEXT_20, LV_PART_MAIN);
     lv_obj_align(state, LV_ALIGN_TOP_LEFT, 0, APP_UI_TILE_LAYOUT_TUNED ? 2 : 0);
 
     lv_obj_t *value = lv_label_create(card);
+    lv_obj_add_flag(value, LV_OBJ_FLAG_USER_3);
     slider_set_value_label(value, 0);
     lv_obj_set_style_text_font(value, APP_FONT_TEXT_20, LV_PART_MAIN);
     lv_obj_align(value, LV_ALIGN_TOP_RIGHT, 0, APP_UI_TILE_LAYOUT_TUNED ? 2 : 0);
@@ -787,6 +791,7 @@ esp_err_t w_slider_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_obj_add_event_cb(slider, w_slider_event_cb, LV_EVENT_RELEASED, ctx);
     lv_obj_add_event_cb(slider, w_slider_event_cb, LV_EVENT_PRESS_LOST, ctx);
     lv_obj_add_event_cb(slider, w_slider_event_cb, LV_EVENT_DELETE, ctx);
+    ui_slider_touch_enable(slider);
 
     slider_apply_visual(ctx);
     out_instance->obj = card;

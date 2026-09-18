@@ -2,6 +2,82 @@
 
 # Release Notes
 
+> **Fork notice.** Everything below this notice comes from upstream BETTA HA Panel
+> (Copyright (c) 2026 Cpt_Kirk). The sections marked **`v0.8.2-7b`** describe the changes made in
+> **this fork** for the Waveshare 7" ESP32-P4 panel variant (`panel7`), as required by §3 of the
+> FNCL-1.1 licence. See also the "Detailed list of improvements" section of
+> [README.md](README.md) / [README.pl.md](README.pl.md).
+
+## v0.8.2-7b — Waveshare 7" (ESP32-P4) variant
+
+First public release of the fork: the Waveshare **ESP32-P4-WIFI6-Touch-LCD-7B** becomes a
+first-class variant (`panel7` → project `betta-ha-panel-7b`, version `v0.8.2-7b`), together with
+two weeks of stabilisation work on display, audio, cameras and the dashboard editor.
+
+### Hardware and platform
+
+- New panel variant: 7" 1024×600 **MIPI-DSI** display (EK79007), **GT911** touch
+  (`display_init_panel7.c`, `touch_init_panel7.c`), 32 MB QIO flash with 4-byte addressing,
+  PSRAM HEX 200 MHz, **ES8311** codec, **OV5647** MIPI-CSI camera and a microSD slot.
+- ESP32-P4 revision < 3.0 support (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3`, `REV_MIN_100`).
+- Wi-Fi 6 through the on-board **ESP32-C6** (ESP-Hosted + `esp_wifi_remote`) with two local
+  ESP-Hosted patches applied automatically by `cmake/apply_vendor_patches.cmake`.
+- Build tuned with `-O2`, main task stack raised to 16 kB and the ISR stack to 6 144 B.
+
+### Fixed — screen flashes (light-blue glitches) in every menu
+
+- Root cause: **writes to the internal flash** (`spi_flash_write` / `spi_flash_erase`) disable the
+  cache and mask interrupts, starving GDMA; the MIPI-DSI bridge then transmits its filler colour
+  for one frame. Small ISR stack overflows (mcause 27) added restarts that looked like flashes.
+- Fixes: system log and graph history moved to the microSD card (no runtime flash writes), DSI
+  filler colour set to black, new **`flash_ops`** counter and MIPI-DSI frame watchdog in
+  `GET /api/diagnostics` (hooked via `-Wl,--wrap=dw_gdma_channel_register_event_callbacks`).
+- Verified on hardware: ≈ 60.2 fps, `dsi_underruns = 0`, `flashes = 0`, 9.7-minute soak clean.
+
+### Fixed — audio speed and playback freezes
+
+- Radio / Music Assistant playback no longer plays ~300 % too fast and no longer freezes: the
+  in-panel audio pipeline demand was reduced (smaller buffers, bandwidth cap), stream playback is
+  delegated to Home Assistant, and the pipeline is stopped when leaving the playback page.
+
+### Fixed — cameras and resource usage
+
+- Camera previews (HA cameras and the built-in OV5647 stream) now run **only while the cameras page
+  is open** and are paused/stopped when leaving it; tile errors report the real reason (download
+  error, connection error, timeout) instead of an empty tile.
+
+### Added / changed — UI and editor
+
+- Tile appearance engine (`tile_*`): background, gradient, border, radius, opacity, shadow, font
+  scale, five independent text colours, press effects, copy-look/reset actions.
+- Page look (`page_*`) with 8 presets, wallpaper support, dimming and per-page theme override.
+- Themes: 7 built-in palettes plus custom themes and automatic day/night switching.
+- Rebuilt top bar: perfectly centred clock, Radio and Weather shortcuts on the left, Wi-Fi/HA
+  status and the settings icon on the right; fixed the tile icon colour that could stick after an
+  entity refresh (off = grey, on = yellow).
+- New fixed-id **Weather page** (`pogoda`) configured from the editor's "Weather page" section
+  (weather, forecast and sensor tiles), opened from the top-bar chip.
+- Internet **radio** page (up to 24 stations, 2–4 columns, played by Home Assistant) and a
+  **Music Assistant** page.
+- Alarmo panel tile, new tile types (binary sensor, cover/cover tile, fan, lock, number, person,
+  presence, scene, select, timer, alarm clock, empty tile) — 28 entries in the add-tile menu.
+
+### Added — stability and operations
+
+- UI watchdog (clean restart when the LVGL loop stalls) and configurable **auto-restart**
+  (`system.auto_restart_enabled`, `auto_restart_hours`).
+- Home Assistant event coalescing to survive chatty Zigbee sensors; `net/net_health` link
+  statistics with automatic reconnect.
+- Polish is the default language; PL/EN/DE/ES/FR translations for the panel and the web editor.
+
+### Packaging
+
+- Factory image: `firmware/betta-ha-panel-7b.factory.bin` (offset `0x0`).
+- Application image: `firmware/betta-ha-panel-7b.bin` (offset `0x20000`), plus
+  `bootloader.bin` (`0x2000`), `partition-table.bin` (`0x8000`) and `ota_data_initial.bin`
+  (`0xf000`), with SHA256 sums in [firmware/README.md](firmware/README.md).
+- Flashing **requires** `--flash_size 32MB` (esp32p4, dio, 80 MHz).
+
 ## v0.8.2
 
 BETTA HA Panel v0.8.2 adds a third supported hardware variant — the Guition ESP32-S3-4848S040 — and ships factory and OTA images for all three panel variants.

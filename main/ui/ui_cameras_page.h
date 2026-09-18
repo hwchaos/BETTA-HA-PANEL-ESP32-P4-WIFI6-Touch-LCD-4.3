@@ -26,6 +26,14 @@ void ui_cameras_page_deinit(void);
 /* Called when the page becomes visible; forces an immediate snapshot refresh. */
 void ui_cameras_page_on_shown(const char *page_id);
 
+/* Tell the tiles which page is on screen: only that page keeps fetching, every
+ * other tile's refresh timer is paused and its in-flight fetch is cancelled. */
+void ui_cameras_page_set_visible_page(const char *page_id);
+
+/* Suspend all snapshot fetching (screen saver / screen off) and resume it after,
+ * which pulls one fresh frame for the visible page. */
+void ui_cameras_page_set_suspended(bool suspended);
+
 #ifdef __cplusplus
 }
 #endif

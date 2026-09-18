@@ -11,28 +11,45 @@
 #include "esp_littlefs.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 #include "soc/soc_caps.h"
 
 #include "api/http_server.h"
+#include "api/api_routes.h"
 #include "app_config.h"
 #include "app_events.h"
 #include "diag/system_log.h"
+#include "diag/boot_guard.h"
+#include "diag/crash_core.h"
+#include "diag/display_flash_watch.h"
+#include "diag/dsi_underrun_watch.h"
+#include "diag/lvgl_log_bridge.h"
 #include "drivers/display_init.h"
 #include "camera/camera_store.h"
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+#include "camera/local_camera.h"
+#endif
 #include "drivers/touch_init.h"
 #include "ha/ha_client.h"
 #include "ha/ha_cover_fetcher.h"
 #include "ha/ha_energy_model.h"
 #include "ha/ha_model.h"
 #include "layout/layout_store.h"
+#include "mqtt/panel_mqtt.h"
+#include "net/net_health.h"
 #include "net/time_sync.h"
 #include "net/wifi_mgr.h"
+#include "sd/sd_card.h"
 #include "settings/runtime_settings.h"
 #include "ui/ui_boot_splash.h"
 #include "ui/ui_i18n.h"
 #include "ui/lv_psram_mem.h"
 #include "ui/ui_runtime.h"
+#include "ui/ui_screen_saver.h"
+#include "ui/ui_theme_router.h"
 #include "ui/theme/theme_store.h"
 #include "util/log_tags.h"
 #include "xiaozhi/xiaozhi_activate.h"
@@ -44,6 +61,66 @@
 #endif
 
 static runtime_settings_t s_runtime_settings = {0};
+
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+/* Wakes the display when the built-in camera sees movement, no matter which
+ * UI (panel settings or web editor) started the pipeline. */
+static void camera_motion_wake_cb(void *user_data)
+{
+    (void)user_data;
+    display_note_activity_from("camera-motion");
+}
+
+/* The built-in camera is opt-in: it is controlled from Settings
+ * (panel: Ustawienia -> Kamera; web editor: settings) and started here
+ * again at every boot when the persisted configuration has it enabled,
+ * so the toggle survives a reboot.
+ *
+ * Verified on hardware (Waveshare 7B + OV5647): starting the 1280x960
+ * pipeline costs ~8 KB of internal heap, leaves ~155 KB free and does
+ * not starve the ESP-Hosted WiFi transport while HA, covers and the web
+ * UI are running. */
+static void camera_boot_task(void *arg)
+{
+    (void)arg;
+    boot_guard_stage("camera");
+
+    /* Motion tuning (zones/debounce/cooldown) lives in the camera component. */
+    (void)runtime_settings_apply_motion_config(&s_runtime_settings);
+    (void)local_camera_register_motion_cb(camera_motion_wake_cb, NULL);
+    /* Setters are safe before the pipeline is started: the values persist in
+     * the component and take effect as soon as frames flow. */
+    local_camera_set_motion_wake(s_runtime_settings.camera_motion_wake);
+    local_camera_set_motion_threshold((uint8_t)s_runtime_settings.camera_motion_threshold);
+    local_camera_set_jpeg_quality((uint8_t)s_runtime_settings.camera_jpeg_quality);
+    local_camera_set_flip(s_runtime_settings.camera_hflip, s_runtime_settings.camera_vflip);
+    local_camera_set_resolution(s_runtime_settings.camera_resolution);
+
+    if (s_runtime_settings.camera_enabled) {
+        const esp_err_t err =
+            local_camera_apply_settings(true, s_runtime_settings.camera_motion_wake,
+                                        (uint8_t)s_runtime_settings.camera_motion_threshold,
+                                        (uint8_t)s_runtime_settings.camera_jpeg_quality,
+                                        s_runtime_settings.camera_hflip,
+                                        s_runtime_settings.camera_vflip,
+                                        s_runtime_settings.camera_resolution);
+        if (err == ESP_OK) {
+            api_camera_local_set_stream_enabled(s_runtime_settings.camera_stream_enabled);
+            ESP_LOGI(TAG_CAMERA, "Local camera auto-started (%dx%d, stream=%d)", local_camera_width(),
+                     local_camera_height(), (int)s_runtime_settings.camera_stream_enabled);
+        } else {
+            /* Never leave the MJPEG endpoint enabled without a pipeline. */
+            api_camera_local_set_stream_enabled(false);
+            ESP_LOGE(TAG_CAMERA, "Local camera auto-start failed: %s", esp_err_to_name(err));
+        }
+    } else {
+        api_camera_local_set_stream_enabled(false);
+        ESP_LOGI(TAG_CAMERA, "Local camera disabled in Settings; not started");
+    }
+
+    vTaskDelete(NULL);
+}
+#endif
 
 typedef enum {
     BOOT_SCREEN_DASHBOARD = 0,
@@ -136,10 +213,150 @@ static esp_err_t init_net_stack(void)
     return ESP_OK;
 }
 
+/* ------------------------------------------------------------------
+ * Boot-time Wi-Fi recovery
+ *
+ * A single failed association at boot (typical right after an OTA reboot
+ * while the ESP-Hosted C6 coprocessor is still settling) used to leave the
+ * panel sitting on the "Wi-Fi setup" splash forever, because the boot code
+ * treated "no link yet" as "no credentials" and started the setup AP, which
+ * cancels the driver's own reconnect ladder.
+ *
+ * The credentials live in NVS and are still valid, so the panel now keeps
+ * the dashboard up and retries in the background.  Every attempt calls
+ * wifi_mgr_force_reconnect(); as soon as the link answers we restart so the
+ * normal bring-up (HA client, MQTT, SNTP) runs with a live network.  The
+ * last resort is a clean esp_restart(), bounded by an RTC counter so a real
+ * outage (AP off, wrong password, out of range) can never turn into a
+ * reboot loop: after APP_WIFI_RECOVERY_MAX_RESTARTS restarts without a link
+ * the panel keeps retrying slowly and stays usable over USB/AP-less paths.
+ * ------------------------------------------------------------------ */
+
+#define WIFI_RECOVERY_RTC_MAGIC 0x57495231U /* "WIR1" */
+
+static RTC_NOINIT_ATTR uint32_t s_wifi_recovery_rtc_magic;
+static RTC_NOINIT_ATTR uint32_t s_wifi_recovery_restarts;
+
+static void wifi_recovery_note_link_up(void)
+{
+    s_wifi_recovery_rtc_magic = WIFI_RECOVERY_RTC_MAGIC;
+    s_wifi_recovery_restarts = 0;
+}
+
+static void wifi_recovery_task(void *arg)
+{
+    (void)arg;
+
+    /* A cold boot invalidates the previous session's restart budget; an
+     * uninitialised RTC field (random magic) is treated the same way. */
+    const esp_reset_reason_t reason = esp_reset_reason();
+    const bool cold_boot = (reason == ESP_RST_POWERON || reason == ESP_RST_BROWNOUT ||
+                            reason == ESP_RST_EXT);
+    if (cold_boot || s_wifi_recovery_rtc_magic != WIFI_RECOVERY_RTC_MAGIC) {
+        s_wifi_recovery_rtc_magic = WIFI_RECOVERY_RTC_MAGIC;
+        s_wifi_recovery_restarts = 0;
+    }
+
+    uint32_t attempts = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS((s_wifi_recovery_restarts >= APP_WIFI_RECOVERY_MAX_RESTARTS)
+                                     ? APP_WIFI_RECOVERY_SLOW_INTERVAL_MS
+                                     : APP_WIFI_RECOVERY_INTERVAL_MS));
+
+        if (wifi_mgr_is_connected()) {
+            attempts = 0;
+            if (s_wifi_recovery_restarts >= APP_WIFI_RECOVERY_MAX_RESTARTS) {
+                /* Budget spent: stay online in this degraded session (dashboard,
+                 * web editor and layout are usable) instead of looping.  The
+                 * next boot that brings the link up clears the budget. */
+                continue;
+            }
+
+            /* Let a flapping association settle before deciding. */
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            if (!wifi_mgr_is_connected()) {
+                continue;
+            }
+
+            ++s_wifi_recovery_restarts;
+            ESP_LOGW(TAG_APP,
+                     "Wi-Fi recovered after %u attempts; restarting for a clean bring-up (%u/%u)",
+                     (unsigned)attempts, (unsigned)s_wifi_recovery_restarts,
+                     (unsigned)APP_WIFI_RECOVERY_MAX_RESTARTS);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
+
+        ++attempts;
+        if (attempts <= 5U || (attempts % 5U) == 0U) {
+            ESP_LOGW(TAG_APP,
+                     "Wi-Fi still down at boot (attempt %u, restarts %u/%u) - forcing reconnect",
+                     (unsigned)attempts, (unsigned)s_wifi_recovery_restarts,
+                     (unsigned)APP_WIFI_RECOVERY_MAX_RESTARTS);
+        }
+        (void)wifi_mgr_force_reconnect();
+
+        if (attempts < APP_WIFI_RECOVERY_RESTART_AFTER) {
+            continue;
+        }
+
+        if (s_wifi_recovery_restarts >= APP_WIFI_RECOVERY_MAX_RESTARTS) {
+            /* Out of budget: keep retrying quietly, never reboot in a loop. */
+            attempts = 0;
+            continue;
+        }
+
+        ++s_wifi_recovery_restarts;
+        ESP_LOGW(TAG_APP, "Wi-Fi unreachable after %u reconnect attempts; restarting (%u/%u)",
+                 (unsigned)attempts, (unsigned)s_wifi_recovery_restarts,
+                 (unsigned)APP_WIFI_RECOVERY_MAX_RESTARTS);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+}
+
+static void wifi_recovery_start(void)
+{
+    static bool started = false;
+    if (started) {
+        return;
+    }
+    started = true;
+    xTaskCreate(wifi_recovery_task, "wifi_recovery", 3584, NULL, 4, NULL);
+}
+
+static void auto_restart_task(void *arg)
+{
+    (void)arg;
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(60U * 1000U));
+
+        if (!s_runtime_settings.system_auto_restart_enabled) {
+            continue;
+        }
+
+        uint32_t hours = s_runtime_settings.system_auto_restart_hours;
+        if (hours < 1U) {
+            hours = 1U;
+        } else if (hours > 168U) {
+            hours = 168U;
+        }
+
+        const uint64_t interval_us = (uint64_t)hours * 3600ULL * 1000000ULL;
+        if ((uint64_t)esp_timer_get_time() >= interval_us) {
+            ESP_LOGW(TAG_APP, "Auto-restart interval reached (%u h), restarting", (unsigned)hours);
+            esp_restart();
+        }
+    }
+}
+
 void app_main(void)
 {
     const esp_app_desc_t *app_desc = esp_app_get_description();
     const char *app_version = (app_desc != NULL && app_desc->version[0] != '\0') ? app_desc->version : "unknown";
+
+    boot_guard_init();
 
     ESP_LOGI(TAG_APP, "Booting %s", APP_NAME);
     ESP_LOGI("app_init", "App version: %s", app_version);
@@ -166,6 +383,12 @@ void app_main(void)
     ESP_ERROR_CHECK(init_nvs());
     ESP_ERROR_CHECK(init_littlefs());
     (void)system_log_init(); /* best effort: log capture must not block boot */
+    (void)system_log_init();
+    boot_guard_report_boot();
+    /* Right after the boot bookkeeping: decode the core dump the previous boot
+     * left behind (if any) so the panic is in the log before the display comes
+     * up - the panel's failures happen during or shortly after display init. */
+    crash_core_init();
     ESP_ERROR_CHECK(init_net_stack());
     ESP_ERROR_CHECK(app_events_init());
     ESP_ERROR_CHECK(ha_model_init());
@@ -177,12 +400,44 @@ void app_main(void)
         ESP_LOGW(TAG_APP, "Failed to load runtime settings (%s), continuing with defaults", esp_err_to_name(settings_err));
         runtime_settings_set_defaults(&s_runtime_settings);
     }
+    /* Verbosity is applied as early as possible so the boot sequence itself is
+     * captured at the level the user configured. */
+    system_log_set_verbosity(s_runtime_settings.log_verbosity);
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+    /* Motion tuning lives in the camera component rather than in the settings
+     * struct, so it is pushed once here to be in effect whenever the pipeline
+     * is started. */
+    (void)runtime_settings_apply_motion_config(&s_runtime_settings);
+#endif
     (void)ui_i18n_init(s_runtime_settings.ui_language);
     (void)time_sync_set_timezone(s_runtime_settings.time_tz);
+    /* Route LVGL's own warnings/errors into the persistent log before LVGL is
+     * brought up, so even display_init() problems are captured. */
+    lvgl_log_bridge_init();
     ESP_ERROR_CHECK(display_init());
+    boot_guard_stage("display");
     (void)ui_boot_splash_show();
 
+    /* Start watching the panel for screen flashes as soon as the framebuffers
+     * exist: this is the only instrument that can catch a flash the logs
+     * otherwise miss. */
+    (void)display_flash_watch_start();
+
+    /* Arm the DSI bridge underrun watch: this is what catches the light-blue
+     * flash, which is generated inside the LCD controller (not drawn by us) and
+     * whose only report is an ESP_DRAM_LOGE that never reaches our log. */
+    (void)dsi_underrun_watch_start();
+
+    /* IO47/IO48 are shared with the panel init sequence, so the card can only
+     * be brought up once display_init() released them. */
+    if (s_runtime_settings.sd_enabled) {
+        ui_boot_splash_set_status(ui_i18n_get("boot.mounting_sd", "Mounting microSD card"));
+        (void)sd_card_init();
+        boot_guard_stage("sd");
+    }
+
     ui_boot_splash_set_status(ui_i18n_get("boot.initializing_wifi", "Initializing Wi-Fi"));
+    boot_guard_stage("wifi");
 
     bool has_wifi_credentials = false;
     bool wifi_ready = false;
@@ -195,25 +450,43 @@ void app_main(void)
             .password = s_runtime_settings.wifi_password,
             .country_code = s_runtime_settings.wifi_country_code,
             .bssid = s_runtime_settings.wifi_bssid,
+            .static_enabled = s_runtime_settings.wifi_static_enabled,
+            .static_ip = s_runtime_settings.wifi_static_ip,
+            .static_netmask = s_runtime_settings.wifi_static_netmask,
+            .static_gateway = s_runtime_settings.wifi_static_gateway,
+            .static_dns = s_runtime_settings.wifi_static_dns,
             .wait_for_ip = APP_WIFI_WAIT_FOR_IP,
             .connect_timeout_ms = APP_WIFI_CONNECT_TIMEOUT_MS,
             .max_retries = APP_WIFI_MAX_RETRIES,
         };
         esp_err_t wifi_err = wifi_mgr_init(&wifi_cfg);
         if (wifi_err != ESP_OK) {
-            ESP_LOGW(TAG_WIFI, "Wi-Fi init failed: %s", esp_err_to_name(wifi_err));
+            /* Credentials are valid but the link did not come up in time.  The
+             * dashboard stays up and wifi_recovery_task() keeps retrying - never
+             * drop into provisioning mode here, the configuration is intact. */
+            ESP_LOGW(TAG_WIFI,
+                     "Wi-Fi init failed: %s - keeping dashboard, starting background recovery",
+                     esp_err_to_name(wifi_err));
             ui_boot_splash_set_status(ui_i18n_get("boot.wifi_connect_failed", "Wi-Fi connect failed"));
         } else {
             wifi_ready = true;
-            time_sync_start(s_runtime_settings.ntp_server);
-            time_sync_wait_for_sync(8000);
+            /* Healthy link at boot: clear the reboot-loop budget. */
+            wifi_recovery_note_link_up();
             ui_boot_splash_set_status(ui_i18n_get("boot.wifi_connected", "Wi-Fi connected"));
         }
+
+        /* SNTP polls on its own, so it is safe (and useful) to start it even
+         * when the first association attempt failed: the clock self-corrects
+         * as soon as the link is back. The wait for the first sync happens
+         * further down, after the HTTP server is already listening - the first
+         * SNTP exchange costs several seconds and the web UI must not wait for
+         * it. */
+        time_sync_start(s_runtime_settings.ntp_server);
     } else {
         ESP_LOGW(TAG_WIFI, "No Wi-Fi credentials configured, starting setup AP");
     }
 
-    if (!wifi_ready) {
+    if (!has_wifi_credentials) {
         wifi_mgr_ap_config_t ap_cfg = {
             .ssid = NULL,
             .password = APP_SETUP_AP_PASSWORD,
@@ -236,6 +509,10 @@ void app_main(void)
             ESP_LOGW(TAG_WIFI, "Failed to start setup AP: %s", esp_err_to_name(ap_err));
             ui_boot_splash_set_status(ui_i18n_get("boot.offline_mode", "Offline mode"));
         }
+    } else if (!wifi_ready) {
+        /* Configured panel whose link failed at boot: keep the dashboard and
+         * heal in the background. */
+        wifi_recovery_start();
     }
 #else
     ESP_LOGW(TAG_WIFI, "No Wi-Fi backend enabled for target %s", CONFIG_IDF_TARGET);
@@ -243,16 +520,43 @@ void app_main(void)
 #endif
 
     boot_screen_mode_t boot_screen_mode = BOOT_SCREEN_DASHBOARD;
-    if (!wifi_ready) {
+    if (!has_wifi_credentials) {
+        /* Only a genuinely unconfigured panel shows the Wi-Fi setup screen. */
         boot_screen_mode = BOOT_SCREEN_WIFI_SETUP;
-    } else if (!runtime_settings_has_ha(&s_runtime_settings)) {
+    } else if (wifi_ready && !runtime_settings_has_ha(&s_runtime_settings)) {
         boot_screen_mode = BOOT_SCREEN_HA_SETUP;
     }
 
     ESP_ERROR_CHECK(layout_store_init());
     ESP_ERROR_CHECK(camera_store_init());
     ESP_ERROR_CHECK(theme_store_init());
+    /* theme_store_init() has just re-activated the persisted theme: that is the
+     * global theme the per-page overrides and the day/night schedule build on. */
+    ui_theme_router_init();
+    ui_theme_router_apply_settings(&s_runtime_settings);
+    /* The web UI can poll the API the moment the server listens, which is well
+     * before ha_client_start() runs: make sure the HA state mutex exists. */
+    esp_err_t ha_preinit_err = ha_client_preinit();
+    if (ha_preinit_err != ESP_OK) {
+        ESP_LOGE(TAG_APP, "HA client pre-init failed: %s", esp_err_to_name(ha_preinit_err));
+    }
     ESP_ERROR_CHECK(http_server_start());
+    boot_guard_stage("http");
+
+#if SOC_WIFI_SUPPORTED || CONFIG_ESP_HOSTED_ENABLED
+    /* The server is listening now, so the web UI answers while the first SNTP
+     * exchange settles. Re-apply the theme settings afterwards because the
+     * day/night schedule depends on the clock. */
+    if (wifi_ready) {
+        time_sync_wait_for_sync(8000);
+        ui_theme_router_apply_settings(&s_runtime_settings);
+    }
+#endif
+
+    panel_mqtt_init();
+    if (wifi_ready && runtime_settings_has_ha(&s_runtime_settings)) {
+        panel_mqtt_apply_settings(&s_runtime_settings);
+    }
 
     if (boot_screen_mode == BOOT_SCREEN_DASHBOARD) {
         ui_boot_splash_set_status(ui_i18n_get("boot.initializing_touch", "Initializing touch"));
@@ -262,10 +566,21 @@ void app_main(void)
         }
 
         ui_boot_splash_set_status(ui_i18n_get("boot.loading_dashboard", "Loading dashboard"));
+        boot_guard_stage("ui");
         ESP_ERROR_CHECK(ui_runtime_init());
         ESP_ERROR_CHECK(ui_runtime_reload_layout());
         ESP_ERROR_CHECK(ui_runtime_start());
         ui_boot_splash_hide();
+        boot_guard_stage("ui_ready");
+
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+        /* Start the camera wiring from a dedicated task: esp_video_init + the
+         * JPEG engine overflow the main task stack when run inline (the
+         * original bootloop cause). */
+        if (xTaskCreate(camera_boot_task, "camera_boot", 16 * 1024, NULL, 5, NULL) != pdPASS) {
+            ESP_LOGE(TAG_CAMERA, "Failed to create camera_boot task");
+        }
+#endif
 
         xiaozhi_config_t xz_cfg = {
             .server = s_runtime_settings.xiaozhi_server,
@@ -301,6 +616,12 @@ void app_main(void)
             }
         }
 
+        /* From here on the screensaver frame follows the microSD card: it is
+         * moved onto a card that is inserted and copied back to internal flash
+         * when the card is pulled, so the picture is never lost.  Registered
+         * only once the UI is up, because the sync needs the loaded frame. */
+        sd_card_set_event_callback(ui_screen_saver_wallpaper_sync);
+        ui_screen_saver_wallpaper_sync(SD_CARD_EVENT_MOUNTED);
         ha_client_config_t ha_cfg = {
             .ws_url = s_runtime_settings.ha_ws_url,
             .access_token = s_runtime_settings.ha_access_token,
@@ -310,6 +631,7 @@ void app_main(void)
         if (ha_err != ESP_OK) {
             ESP_LOGW(TAG_HA_CLIENT, "HA client start failed: %s", esp_err_to_name(ha_err));
         }
+        boot_guard_stage("ha");
         esp_err_t cover_err = ha_cover_fetcher_init();
         if (cover_err != ESP_OK) {
             ESP_LOGW(TAG_HA_CLIENT, "HA cover fetcher init failed: %s", esp_err_to_name(cover_err));
@@ -321,4 +643,30 @@ void app_main(void)
         app_show_ha_setup_screen();
         ESP_LOGW(TAG_HA_CLIENT, "HA settings missing, showing setup screen with web editor URL");
     }
+
+    if (xTaskCreate(auto_restart_task, "auto_restart", 3072, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGW(TAG_APP, "Failed to create auto-restart task");
+    }
+
+    /* Wi-Fi on this board runs over an ESP32-C6 through ESP-Hosted.  When that
+     * transport dies, the driver still reports "connected" (the flag is only
+     * cleared by a disconnect event, which never arrives), so the panel keeps
+     * running and drawing its UI while it is unreachable from the LAN.  The
+     * watchdog probes the LAN from the panel itself and escalates until it
+     * answers again. */
+    if (wifi_ready) {
+        esp_err_t health_err = net_health_start(s_runtime_settings.ha_ws_url);
+        if (health_err != ESP_OK) {
+            ESP_LOGW(TAG_APP, "Network liveness watchdog not started: %s", esp_err_to_name(health_err));
+        }
+    }
+
+    /* Confirms a pending OTA image once the panel is healthy (no-op when the
+     * running image is not awaiting rollback verification). */
+    boot_guard_start_confirm_task();
+
+    /* Steady state: everything after this point is UI, network and API traffic,
+     * so the stage names the running firmware rather than a boot step, and a
+     * crash from here on is not a boot problem. */
+    boot_guard_stage("idle");
 }

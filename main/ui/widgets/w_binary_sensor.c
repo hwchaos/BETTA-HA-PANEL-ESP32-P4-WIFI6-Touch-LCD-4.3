@@ -301,6 +301,7 @@ esp_err_t w_binary_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, u
     bool title_is_auto_id = (def->title[0] != '\0' && strcmp(def->title, def->id) == 0);
     if (def->binary_show_title && def->title[0] != '\0' && !title_is_auto_id) {
         lv_obj_t *title = lv_label_create(card);
+        lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
         ctx->title = title;
         lv_obj_set_style_text_color(title, lv_color_hex(APP_UI_COLOR_TEXT_MUTED), 0);
         lv_obj_set_style_text_font(title, binary_font_px(18), 0);
@@ -311,6 +312,7 @@ esp_err_t w_binary_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, u
     }
 
     lv_obj_t *state = lv_label_create(card);
+    lv_obj_add_flag(state, LV_OBJ_FLAG_USER_3);
     ctx->state = state;
     lv_label_set_long_mode(state, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(state, LV_TEXT_ALIGN_CENTER, 0);

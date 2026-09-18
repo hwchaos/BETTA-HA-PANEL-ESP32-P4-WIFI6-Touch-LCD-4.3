@@ -97,7 +97,8 @@ const theme_palette_t *theme_palette_active(void);
 const char *theme_palette_active_id(void);
 
 /* Built-in preset ids: "dark_v2" (default), "classic_v1", "light",
- * "ocean", "contrast". Unknown id returns NULL. */
+ * "ocean", "contrast", "oled" (pure-black AMOLED), "retro" (amber CRT).
+ * Unknown id returns NULL. */
 const theme_entry_t *theme_palette_find_builtin(const char *id);
 
 /* Enumerate built-in presets. Returns count; fills list up to max_count. */

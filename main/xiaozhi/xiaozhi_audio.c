@@ -21,6 +21,11 @@
 #include "bsp/esp32_p4_wifi6_touch_lcd_7b.h"
 #include "esp_codec_dev.h"
 #include "driver/i2s_std.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+
+#include "panel_radio.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -50,7 +55,46 @@ static int  g_volume = XZ_VOLUME_DEFAULT;
 #define DURATION_MS 150
 #define FREQ        1000
 
+/* Hand-over window when the microphone takes the codec back from a running
+ * radio stream: the stream sees the stop flag at its next read timeout. */
+#define XZ_OUTPUT_HANDOVER_MS 1500
+
 static int16_t g_beep_buffer[XZ_AUDIO_SAMPLE_RATE * DURATION_MS / 1000];
+
+/* The speaker is a single resource: the voice path opens it at 16 kHz mono,
+ * the radio stream borrows it at the stream's own rate. A mutex serialises
+ * open/close/volume and the exclusive flag tells the voice path that the
+ * radio owns the codec right now. */
+static StaticSemaphore_t g_lock_storage;
+static SemaphoreHandle_t g_lock = NULL;
+static portMUX_TYPE g_lock_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool g_output_exclusive = false;
+static uint32_t g_output_rate = XZ_AUDIO_SAMPLE_RATE;
+
+static void xz_audio_lock_init(void)
+{
+    if (g_lock != NULL) {
+        return;
+    }
+    portENTER_CRITICAL(&g_lock_mux);
+    if (g_lock == NULL) {
+        g_lock = xSemaphoreCreateMutexStatic(&g_lock_storage);
+    }
+    portEXIT_CRITICAL(&g_lock_mux);
+}
+
+static void xz_audio_lock(void)
+{
+    xz_audio_lock_init();
+    xSemaphoreTake(g_lock, portMAX_DELAY);
+}
+
+static void xz_audio_unlock(void)
+{
+    if (g_lock != NULL) {
+        xSemaphoreGive(g_lock);
+    }
+}
 
 /*
  * The BSP's internal default is 22050 Hz mono/16-bit. Xiaozhi (and Opus)
@@ -129,7 +173,7 @@ static void xz_audio_load_volume(void)
     nvs_close(h);
 }
 
-esp_err_t xz_audio_init(void)
+static esp_err_t xz_audio_init_locked(void)
 {
     if (g_ready) return ESP_OK;
 
@@ -157,6 +201,7 @@ esp_err_t xz_audio_init(void)
     }
 
     esp_codec_dev_sample_info_t fs = xz_audio_sample_info();
+    fs.sample_rate = g_output_rate;
 
     err = esp_codec_dev_open(g_speaker, &fs);
     if (err != ESP_OK) {
@@ -175,6 +220,108 @@ esp_err_t xz_audio_init(void)
     return ESP_OK;
 }
 
+esp_err_t xz_audio_init(void)
+{
+    xz_audio_lock();
+    const esp_err_t err = xz_audio_init_locked();
+    xz_audio_unlock();
+    return err;
+}
+
+/* --------------------------------------------------------- output sharing */
+
+/* Open the speaker at `rate` (mono / 16-bit) and re-apply the volume.
+ * esp_codec_dev_open() is a no-op on an already open device, so the speaker is
+ * always closed first to let the new sample rate reach the I2S clock. */
+static esp_err_t xz_audio_reopen_output(uint32_t rate)
+{
+    esp_err_t err = xz_audio_init_locked();
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (g_speaker == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_codec_dev_close(g_speaker);
+    esp_codec_dev_sample_info_t fs = xz_audio_sample_info();
+    fs.sample_rate = rate;
+    err = esp_codec_dev_open(g_speaker, &fs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "speaker reopen at %u Hz failed: %s", (unsigned)rate, esp_err_to_name(err));
+        return err;
+    }
+    g_output_rate = rate;
+    esp_codec_dev_set_out_vol(g_speaker, g_volume);
+    return ESP_OK;
+}
+
+esp_err_t xz_audio_acquire_output(uint32_t rate)
+{
+    if (rate == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xz_audio_lock();
+    esp_err_t err;
+    if (g_output_exclusive) {
+        err = ESP_ERR_INVALID_STATE;
+    } else if (g_mic_open) {
+        /* The microphones and the speaker share the I2S clocks: while a voice
+         * session holds the mic the output format must not change. */
+        err = ESP_ERR_INVALID_STATE;
+    } else {
+        err = xz_audio_reopen_output(rate);
+        if (err == ESP_OK) {
+            g_output_exclusive = true;
+            ESP_LOGI(TAG, "output taken by the radio at %u Hz", (unsigned)rate);
+        }
+    }
+    xz_audio_unlock();
+    return err;
+}
+
+esp_err_t xz_audio_release_output(void)
+{
+    xz_audio_lock();
+    esp_err_t err = ESP_OK;
+    if (g_output_exclusive) {
+        g_output_exclusive = false;
+        if (!g_mic_open) {
+            err = xz_audio_reopen_output(XZ_AUDIO_SAMPLE_RATE);
+        } else {
+            g_output_rate = XZ_AUDIO_SAMPLE_RATE;
+        }
+        ESP_LOGI(TAG, "output released back to the voice path");
+    }
+    xz_audio_unlock();
+    return err;
+}
+
+esp_err_t xz_audio_set_output_rate(uint32_t rate)
+{
+    if (rate == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    xz_audio_lock();
+    esp_err_t err = ESP_OK;
+    if (g_output_rate != rate) {
+        err = xz_audio_reopen_output(rate);
+    }
+    xz_audio_unlock();
+    return err;
+}
+
+uint32_t xz_audio_get_output_rate(void)
+{
+    return g_output_rate;
+}
+
+bool xz_audio_output_is_exclusive(void)
+{
+    return g_output_exclusive;
+}
+
 esp_err_t xz_audio_set_volume(int volume)
 {
     if (volume < 0) volume = 0;
@@ -182,16 +329,18 @@ esp_err_t xz_audio_set_volume(int volume)
 
     g_volume = volume;
 
-    esp_err_t err = xz_audio_init();
-    if (err != ESP_OK) return err;
-
-    err = esp_codec_dev_set_out_vol(g_speaker, g_volume);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Volume set failed: %s", esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "Volume set: %d%%", g_volume);
-        xz_audio_save_volume();
+    xz_audio_lock();
+    esp_err_t err = xz_audio_init_locked();
+    if (err == ESP_OK) {
+        err = esp_codec_dev_set_out_vol(g_speaker, g_volume);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Volume set failed: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "Volume set: %d%%", g_volume);
+            xz_audio_save_volume();
+        }
     }
+    xz_audio_unlock();
 
     return err;
 }
@@ -207,11 +356,17 @@ esp_err_t xz_audio_test_beep(void)
         ESP_LOGW(TAG, "Beep already running");
         return ESP_OK;
     }
+    if (g_output_exclusive) {
+        ESP_LOGW(TAG, "Speaker is playing a stream");
+        return ESP_ERR_INVALID_STATE;
+    }
 
     g_busy = true;
 
-    esp_err_t err = xz_audio_init();
+    xz_audio_lock();
+    esp_err_t err = xz_audio_init_locked();
     if (err != ESP_OK) {
+        xz_audio_unlock();
         g_busy = false;
         return err;
     }
@@ -226,6 +381,7 @@ esp_err_t xz_audio_test_beep(void)
     }
 
     err = esp_codec_dev_write(g_speaker, g_beep_buffer, samples * sizeof(int16_t));
+    xz_audio_unlock();
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Write failed: %s", esp_err_to_name(err));
@@ -239,23 +395,33 @@ esp_err_t xz_audio_test_beep(void)
 
 esp_err_t xz_audio_open_mic(void)
 {
-    esp_err_t err = xz_audio_init();
-    if (err != ESP_OK) {
-        return err;
-    }
-    if (g_mic_open) {
-        return ESP_OK;
+    /* A running radio stream owns the codec: ask it to stop and give it a
+     * moment to hand the speaker back before the mic format is set up. */
+    if (g_output_exclusive) {
+        ESP_LOGI(TAG, "stopping the radio to open the microphone");
+        panel_radio_stop();
+        for (int waited = 0; g_output_exclusive && waited < XZ_OUTPUT_HANDOVER_MS; waited += 25) {
+            vTaskDelay(pdMS_TO_TICKS(25));
+        }
+        if (g_output_exclusive) {
+            ESP_LOGW(TAG, "radio did not release the speaker in %d ms", XZ_OUTPUT_HANDOVER_MS);
+        }
     }
 
-    esp_codec_dev_sample_info_t fs = xz_audio_mic_sample_info();
-    if (esp_codec_dev_open(g_mic, &fs) != ESP_CODEC_DEV_OK) {
-        ESP_LOGE(TAG, "Failed to open mic device");
-        return ESP_FAIL;
+    xz_audio_lock();
+    esp_err_t err = xz_audio_init_locked();
+    if (err == ESP_OK && !g_mic_open) {
+        esp_codec_dev_sample_info_t fs = xz_audio_mic_sample_info();
+        if (esp_codec_dev_open(g_mic, &fs) != ESP_CODEC_DEV_OK) {
+            ESP_LOGE(TAG, "Failed to open mic device");
+            err = ESP_FAIL;
+        } else {
+            g_mic_open = true;
+            ESP_LOGI(TAG, "Mic opened: stereo %d ch, %d Hz", XZ_MIC_CHANNELS, XZ_AUDIO_SAMPLE_RATE);
+        }
     }
-    g_mic_open = true;
-    ESP_LOGI(TAG, "Mic opened: stereo %d ch, %d Hz", XZ_MIC_CHANNELS,
-             XZ_AUDIO_SAMPLE_RATE);
-    return ESP_OK;
+    xz_audio_unlock();
+    return err;
 }
 
 esp_err_t xz_audio_close_mic(void)
@@ -286,17 +452,25 @@ esp_err_t xz_audio_play(const int16_t *pcm, int sample_count)
     if (pcm == NULL || sample_count <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t err = xz_audio_init();
-    if (err != ESP_OK) {
-        return err;
+    if (g_output_exclusive) {
+        /* The radio stream is using the speaker; dropping the TTS chunk is
+         * better than corrupting the stream. */
+        ESP_LOGW(TAG, "speaker busy with a stream, dropping %d samples", sample_count);
+        return ESP_ERR_INVALID_STATE;
     }
-    int bytes = sample_count * sizeof(int16_t) * XZ_AUDIO_CHANNELS;
-    int w = esp_codec_dev_write(g_speaker, (void *)pcm, bytes);
-    if (w < 0) {
-        ESP_LOGW(TAG, "Speaker write failed: %d", w);
-        return ESP_FAIL;
+
+    xz_audio_lock();
+    esp_err_t err = xz_audio_init_locked();
+    if (err == ESP_OK) {
+        int bytes = sample_count * sizeof(int16_t) * XZ_AUDIO_CHANNELS;
+        int w = esp_codec_dev_write(g_speaker, (void *)pcm, bytes);
+        if (w < 0) {
+            ESP_LOGW(TAG, "Speaker write failed: %d", w);
+            err = ESP_FAIL;
+        }
     }
-    return ESP_OK;
+    xz_audio_unlock();
+    return err;
 }
 
 int xz_audio_read(int16_t *pcm, int max_frames)

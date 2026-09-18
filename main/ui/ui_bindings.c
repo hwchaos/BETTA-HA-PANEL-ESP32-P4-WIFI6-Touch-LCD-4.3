@@ -509,6 +509,77 @@ esp_err_t ui_bindings_set_light_effect(const char *entity_id, const char *effect
     return err;
 }
 
+static int ui_bindings_json_append_escaped(char *dst, size_t dst_len, int off, const char *src)
+{
+    if (dst == NULL || src == NULL) {
+        return off;
+    }
+    for (const char *p = src; *p != '\0' && off < (int)dst_len - 6; ++p) {
+        if (*p == '"' || *p == '\\') {
+            dst[off++] = '\\';
+        }
+        dst[off++] = *p;
+    }
+    return off;
+}
+
+esp_err_t ui_bindings_media_browse(const char *entity_id, const char *media_content_type,
+    const char *media_content_id, ha_client_response_cb_t cb, void *user)
+{
+    if (entity_id == NULL || entity_id[0] == '\0' || media_content_type == NULL ||
+        media_content_type[0] == '\0' || cb == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char payload[512] = {0};
+    int off = snprintf(payload, sizeof(payload), "{\"media_content_type\":\"");
+    off = ui_bindings_json_append_escaped(payload, sizeof(payload), off, media_content_type);
+    off += snprintf(payload + off, sizeof(payload) - off, "\",\"media_content_id\":\"");
+    off = ui_bindings_json_append_escaped(payload, sizeof(payload), off,
+        media_content_id != NULL ? media_content_id : "");
+    off += snprintf(payload + off, sizeof(payload) - off, "\"}");
+
+    return ha_client_call_service_with_response(HA_DOMAIN_MEDIA_PLAYER, "browse_media",
+        entity_id, payload, cb, user);
+}
+
+esp_err_t ui_bindings_media_search(const char *entity_id, const char *query,
+    ha_client_response_cb_t cb, void *user)
+{
+    if (entity_id == NULL || entity_id[0] == '\0' || query == NULL || query[0] == '\0' ||
+        cb == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char payload[512] = {0};
+    int off = snprintf(payload, sizeof(payload), "{\"search_query\":\"");
+    off = ui_bindings_json_append_escaped(payload, sizeof(payload), off, query);
+    off += snprintf(payload + off, sizeof(payload) - off, "\",\"media_content_type\":\"music_assistant\"}");
+
+    return ha_client_call_service_with_response(HA_DOMAIN_MEDIA_PLAYER, "search_media",
+        entity_id, payload, cb, user);
+}
+
+esp_err_t ui_bindings_media_play_item(const char *entity_id, const char *media_content_type,
+    const char *media_content_id)
+{
+    if (entity_id == NULL || entity_id[0] == '\0' || media_content_type == NULL ||
+        media_content_type[0] == '\0' || media_content_id == NULL || media_content_id[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char payload[640] = {0};
+    int off = snprintf(payload, sizeof(payload), "{\"entity_id\":\"");
+    off = ui_bindings_json_append_escaped(payload, sizeof(payload), off, entity_id);
+    off += snprintf(payload + off, sizeof(payload) - off, "\",\"media_content_type\":\"");
+    off = ui_bindings_json_append_escaped(payload, sizeof(payload), off, media_content_type);
+    off += snprintf(payload + off, sizeof(payload) - off, "\",\"media_content_id\":\"");
+    off = ui_bindings_json_append_escaped(payload, sizeof(payload), off, media_content_id);
+    off += snprintf(payload + off, sizeof(payload) - off, "\"}");
+
+    return ha_client_call_service(HA_DOMAIN_MEDIA_PLAYER, "play_media", payload);
+}
+
 esp_err_t ui_bindings_media_player_action(const char *entity_id, ui_bindings_media_action_t action)
 {
     if (entity_id == NULL || entity_id[0] == '\0') {

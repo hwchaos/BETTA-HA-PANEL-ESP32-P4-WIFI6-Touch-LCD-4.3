@@ -8,6 +8,8 @@
 
 #include "esp_err.h"
 
+#include "ha/ha_client.h"
+
 typedef enum {
     UI_BINDINGS_MEDIA_ACTION_PLAY_PAUSE = 0,
     UI_BINDINGS_MEDIA_ACTION_STOP,
@@ -47,3 +49,9 @@ esp_err_t ui_bindings_number_set_value(const char *entity_id, double value);
 
 /* Select domain: choose an option from the entity's option list. */
 esp_err_t ui_bindings_select_option(const char *entity_id, const char *option);
+esp_err_t ui_bindings_media_browse(const char *entity_id, const char *media_content_type,
+    const char *media_content_id, ha_client_response_cb_t cb, void *user);
+esp_err_t ui_bindings_media_search(const char *entity_id, const char *query,
+    ha_client_response_cb_t cb, void *user);
+esp_err_t ui_bindings_media_play_item(const char *entity_id, const char *media_content_type,
+    const char *media_content_id);

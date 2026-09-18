@@ -12,6 +12,13 @@
 #include "cJSON.h"
 
 #include "app_config.h"
+#include "ui/theme/theme_palette.h"
+#include "ui/ui_radio_page.h"
+
+/* JSON strings have no known maximum length, so quotes inside the fixed-size diagnostic
+ * buffers are bounded explicitly: an unbounded "%s" into a fixed buffer is an error at -O2
+ * (-Werror=format-truncation). 64 chars + the longest prefix still fit in messages[][96]. */
+#define LAYOUT_MSG_VALUE_MAX 64
 
 #define GRAPH_POINT_COUNT_MIN 16
 #define GRAPH_POINT_COUNT_MAX 64
@@ -93,9 +100,11 @@ static bool is_supported_widget_type(const char *type)
            (strcmp(type, "weather_3day") == 0) || (strcmp(type, "todo_list") == 0) ||
            (strcmp(type, "media_player") == 0) || (strcmp(type, "roborock_tile") == 0) ||
            (strcmp(type, "binary_sensor") == 0) || (strcmp(type, "presence") == 0) ||
-           (strcmp(type, "cover") == 0) ||
-           (strcmp(type, "lock") == 0) || (strcmp(type, "fan") == 0) || (strcmp(type, "select") == 0) ||
-           (strcmp(type, "number") == 0);
+           (strcmp(type, "alarm_tile") == 0) || (strcmp(type, "clock_alarm") == 0) ||
+           (strcmp(type, "cover") == 0) || (strcmp(type, "cover_tile") == 0) ||
+           (strcmp(type, "scene_tile") == 0) || (strcmp(type, "person_tile") == 0) ||
+           (strcmp(type, "timer_tile") == 0) || (strcmp(type, "lock") == 0) ||
+           (strcmp(type, "fan") == 0) || (strcmp(type, "select") == 0) || (strcmp(type, "number") == 0);
 }
 
 static bool is_supported_page_type(const char *type)
@@ -103,7 +112,9 @@ static bool is_supported_page_type(const char *type)
     if (type == NULL || type[0] == '\0') {
         return true;
     }
-    return strcmp(type, "dashboard") == 0 || strcmp(type, "energy_dashboard") == 0 || strcmp(type, "xiaozhi") == 0;
+    return strcmp(type, "dashboard") == 0 || strcmp(type, "energy_dashboard") == 0 ||
+           strcmp(type, "music_assistant") == 0 || strcmp(type, "radio") == 0 ||
+           strcmp(type, "xiaozhi") == 0;
 }
 
 typedef struct {
@@ -142,6 +153,23 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_w = 120;
         limits.min_h = 80;
 #endif
+    } else if (strcmp(type, "binary_sensor") == 0) {
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 90;
+        limits.min_h = 60;
+#else
+        limits.min_w = 120;
+        limits.min_h = 80;
+#endif
+    } else if (strcmp(type, "alarm_tile") == 0) {
+        /* Needs room for the status text plus the arm/disarm button row. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 150;
+        limits.min_h = 110;
+#else
+        limits.min_w = 200;
+        limits.min_h = 140;
+#endif
     } else if (strcmp(type, "button") == 0) {
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
         limits.min_w = 82;
@@ -168,6 +196,15 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #else
         limits.min_w = 220;
         limits.min_h = 140;
+#endif
+    } else if (strcmp(type, "clock_alarm") == 0) {
+        /* Needs room for the clock digits plus the optional date row. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 110;
+        limits.min_h = 80;
+#else
+        limits.min_w = 150;
+        limits.min_h = 110;
 #endif
     } else if (strcmp(type, "empty_tile") == 0) {
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
@@ -277,6 +314,50 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #endif
         limits.max_w = 480;
         limits.max_h = 480;
+    } else if (strcmp(type, "cover_tile") == 0) {
+        /* Icon, position value and progress bar, plus the optional button row. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 140;
+        limits.min_h = 110;
+#else
+        limits.min_w = 180;
+        limits.min_h = 140;
+#endif
+        limits.max_w = APP_CONTENT_BOX_WIDTH;
+        limits.max_h = APP_CONTENT_BOX_HEIGHT;
+    } else if (strcmp(type, "scene_tile") == 0) {
+        /* Icon plus the scene name - the whole tile is the button. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 96;
+        limits.min_h = 90;
+#else
+        limits.min_w = 120;
+        limits.min_h = 110;
+#endif
+        limits.max_w = 480;
+        limits.max_h = 480;
+    } else if (strcmp(type, "person_tile") == 0) {
+        /* Letter avatar plus the name and zone rows. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 110;
+        limits.min_h = 80;
+#else
+        limits.min_w = 140;
+        limits.min_h = 100;
+#endif
+        limits.max_w = 640;
+        limits.max_h = 480;
+    } else if (strcmp(type, "timer_tile") == 0) {
+        /* Countdown value plus the preset / start / pause button row. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+        limits.min_w = 110;
+        limits.min_h = 90;
+#else
+        limits.min_w = 140;
+        limits.min_h = 110;
+#endif
+        limits.max_w = 480;
+        limits.max_h = 480;
     }
 
     if (limits.max_w > APP_CONTENT_BOX_WIDTH) {
@@ -298,6 +379,12 @@ static const char *required_domain_for_widget_type(const char *type)
     }
     if (strcmp(type, "binary_sensor") == 0) {
         return "binary_sensor";
+    }
+    if (strcmp(type, "binary_sensor") == 0) {
+        return "binary_sensor";
+    }
+    if (strcmp(type, "alarm_tile") == 0) {
+        return "alarm_control_panel";
     }
     if (strcmp(type, "light_tile") == 0) {
         return "light";
@@ -332,7 +419,27 @@ static const char *required_domain_for_widget_type(const char *type)
     if (strcmp(type, "number") == 0) {
         return "number";
     }
+    if (strcmp(type, "cover_tile") == 0) {
+        return "cover";
+    }
+    if (strcmp(type, "scene_tile") == 0) {
+        return "scene";
+    }
+    if (strcmp(type, "person_tile") == 0) {
+        return "person";
+    }
+    if (strcmp(type, "timer_tile") == 0) {
+        return "timer";
+    }
     return NULL;
+}
+
+static bool widget_entity_id_optional(const char *type)
+{
+    /* These tiles also work without an entity and bind one when it is set. */
+    return type != NULL &&
+           (strcmp(type, "timer_tile") == 0 || strcmp(type, "cover_tile") == 0 ||
+               strcmp(type, "scene_tile") == 0 || strcmp(type, "person_tile") == 0);
 }
 
 static bool widget_entity_domain_valid(const char *type, const char *entity_id)
@@ -349,6 +456,12 @@ static bool widget_entity_domain_valid(const char *type, const char *entity_id)
     }
     if (strcmp(type, "presence") == 0) {
         return entity_in_domain(entity_id, "device_tracker") || entity_in_domain(entity_id, "person");
+    }
+    if (strcmp(type, "binary_sensor") == 0) {
+        return entity_in_domain(entity_id, "binary_sensor");
+    }
+    if (strcmp(type, "alarm_tile") == 0) {
+        return entity_in_domain(entity_id, "alarm_control_panel");
     }
     if (strcmp(type, "button") == 0) {
         return entity_in_domain(entity_id, "switch") || entity_in_domain(entity_id, "media_player") ||
@@ -371,6 +484,13 @@ static bool widget_entity_domain_valid(const char *type, const char *entity_id)
     if (strcmp(type, "empty_tile") == 0) {
         return true;
     }
+    if (strcmp(type, "clock_alarm") == 0) {
+        /* The clock tile has no entity of its own. */
+        return true;
+    }
+    if (widget_entity_id_optional(type) && entity_id[0] == '\0') {
+        return true;
+    }
 
     const char *required_domain = required_domain_for_widget_type(type);
     if (required_domain == NULL) {
@@ -381,7 +501,7 @@ static bool widget_entity_domain_valid(const char *type, const char *entity_id)
 
 static bool widget_requires_primary_entity(const char *type)
 {
-    return type == NULL || strcmp(type, "empty_tile") != 0;
+    return type == NULL || (strcmp(type, "empty_tile") != 0 && strcmp(type, "clock_alarm") != 0);
 }
 
 static bool is_hex_digit_char(char c)
@@ -422,6 +542,76 @@ static bool is_valid_slider_direction(const char *direction)
     return strcmp(direction, "auto") == 0 || strcmp(direction, "left_to_right") == 0 ||
            strcmp(direction, "right_to_left") == 0 || strcmp(direction, "bottom_to_top") == 0 ||
            strcmp(direction, "top_to_bottom") == 0;
+}
+
+static bool is_valid_tile_grad_dir(const char *direction)
+{
+    if (direction == NULL) {
+        return false;
+    }
+    return strcmp(direction, "none") == 0 || strcmp(direction, "hor") == 0 || strcmp(direction, "ver") == 0;
+}
+
+/* Which service flavour the alarm tile uses: auto detects Alarmo from the attributes. */
+static bool is_valid_alarm_backend(const char *backend)
+{
+    if (backend == NULL) {
+        return false;
+    }
+    return strcmp(backend, "auto") == 0 || strcmp(backend, "alarmo") == 0 || strcmp(backend, "builtin") == 0;
+}
+
+/* One or more of away|home|night|vacation|custom|disarm separated by commas or spaces. */
+static bool is_valid_alarm_modes(const char *modes)
+{
+    if (modes == NULL || modes[0] == '\0') {
+        return false;
+    }
+
+    bool found = false;
+    const char *cursor = modes;
+    while (cursor != NULL && cursor[0] != '\0') {
+        while (cursor[0] == ' ' || cursor[0] == ',' || cursor[0] == ';') {
+            cursor++;
+        }
+        const char *end = cursor;
+        while (end[0] != '\0' && end[0] != ',' && end[0] != ';' && end[0] != ' ') {
+            end++;
+        }
+        const size_t len = (size_t)(end - cursor);
+        if (len > 0) {
+            if (!((len == 4 && strncmp(cursor, "away", 4) == 0) || (len == 4 && strncmp(cursor, "home", 4) == 0) ||
+                  (len == 5 && strncmp(cursor, "night", 5) == 0) || (len == 6 && strncmp(cursor, "custom", 6) == 0) ||
+                  (len == 6 && strncmp(cursor, "disarm", 6) == 0) ||
+                  (len == 8 && strncmp(cursor, "vacation", 8) == 0))) {
+                return false;
+            }
+            found = true;
+        }
+        cursor = (end[0] == '\0') ? NULL : end;
+    }
+    return found;
+}
+
+static bool is_valid_tile_font_scale(const char *scale)
+{
+    if (scale == NULL) {
+        return false;
+    }
+    return strcmp(scale, "auto") == 0 || strcmp(scale, "s") == 0 || strcmp(scale, "m") == 0 ||
+           strcmp(scale, "l") == 0 || strcmp(scale, "xl") == 0;
+}
+
+static bool is_valid_optional_hex_rgb_color(const char *text)
+{
+    return text == NULL || text[0] == '\0' || is_valid_hex_rgb_color(text);
+}
+
+/* Accepts -1 (meaning "inherit the theme") or an integer inside min..max. */
+static bool is_valid_auto_or_int(const cJSON *item, int min, int max)
+{
+    return cJSON_IsNumber(item) && (double)item->valueint == item->valuedouble &&
+           item->valueint >= -1 && item->valueint <= max && (item->valueint >= min || item->valueint == -1);
 }
 
 static bool is_valid_button_mode(const char *mode)
@@ -519,6 +709,214 @@ static void validate_energy_page(cJSON *page, const char *page_id, layout_valida
     }
 }
 
+static void validate_music_entity_field(cJSON *music, const char *key, const char *page_id,
+    layout_validation_result_t *result)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(music, key);
+    if (item == NULL) {
+        return;
+    }
+
+    char msg[128];
+    if (!cJSON_IsString(item) || item->valuestring == NULL) {
+        snprintf(msg, sizeof(msg), "page %s music.%s must be a string", page_id != NULL ? page_id : "?", key);
+        layout_validation_add(result, msg);
+        return;
+    }
+
+    if (item->valuestring[0] == '\0') {
+        return;
+    }
+
+    if (!is_valid_entity_id(item->valuestring) || !entity_in_domain(item->valuestring, "media_player")) {
+        snprintf(msg, sizeof(msg), "page %s music.%s must be media_player.*", page_id != NULL ? page_id : "?", key);
+        layout_validation_add(result, msg);
+    }
+}
+
+/* Optional media_player entity override of a radio sub-object.  An empty string
+ * is valid: the page then uses the first media_player it can find. */
+static void validate_radio_entity_field(cJSON *radio, const char *key, const char *page_id,
+    layout_validation_result_t *result)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(radio, key);
+    if (item == NULL) {
+        return;
+    }
+
+    char msg[128];
+    if (!cJSON_IsString(item) || item->valuestring == NULL) {
+        snprintf(msg, sizeof(msg), "page %s: radio.%s must be string", page_id != NULL ? page_id : "?", key);
+        layout_validation_add(result, msg);
+        return;
+    }
+
+    if (item->valuestring[0] == '\0') {
+        return;
+    }
+
+    if (!is_valid_entity_id(item->valuestring) || !entity_in_domain(item->valuestring, "media_player")) {
+        snprintf(msg, sizeof(msg), "page %s: radio.%s must be media_player.*", page_id != NULL ? page_id : "?", key);
+        layout_validation_add(result, msg);
+    }
+}
+
+static void validate_music_page(cJSON *page, const char *page_id, layout_validation_result_t *result)
+{
+    cJSON *music = cJSON_GetObjectItemCaseSensitive(page, "music");
+    if (music == NULL) {
+        return;
+    }
+    if (!cJSON_IsObject(music)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "page %s: music must be object", page_id != NULL ? page_id : "?");
+        layout_validation_add(result, msg);
+        return;
+    }
+
+    validate_music_entity_field(music, "player_entity_id", page_id, result);
+
+    cJSON *players = cJSON_GetObjectItemCaseSensitive(music, "players");
+    if (players == NULL) {
+        return;
+    }
+    if (!cJSON_IsArray(players)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "page %s: music.players must be array", page_id != NULL ? page_id : "?");
+        layout_validation_add(result, msg);
+        return;
+    }
+
+    int n = cJSON_GetArraySize(players);
+    for (int i = 0; i < n; i++) {
+        cJSON *item = cJSON_GetArrayItem(players, i);
+        char msg[128];
+        if (!cJSON_IsString(item) || item->valuestring == NULL || item->valuestring[0] == '\0') {
+            snprintf(msg, sizeof(msg), "page %s music.players[%d] must be a string", page_id != NULL ? page_id : "?", i);
+            layout_validation_add(result, msg);
+        } else if (!is_valid_entity_id(item->valuestring) || !entity_in_domain(item->valuestring, "media_player")) {
+            snprintf(msg, sizeof(msg), "page %s music.players[%d] must be media_player.*",
+                page_id != NULL ? page_id : "?", i);
+            layout_validation_add(result, msg);
+        }
+    }
+}
+
+/* The "radio" page object:
+ *
+ *   { "entity": "media_player.salon", "columns": 3,
+ *     "stations": [ { "name": "RMF FM", "url": "https://...", "entity": "media_player.x" } ] }
+ *
+ * Every key is optional: with an empty station list the page falls back to the
+ * stations compiled into the firmware, so the list is not required. */
+static void validate_radio_page(cJSON *page, const char *page_id, layout_validation_result_t *result)
+{
+    cJSON *radio = cJSON_GetObjectItemCaseSensitive(page, "radio");
+    if (radio == NULL) {
+        return;
+    }
+    if (!cJSON_IsObject(radio)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "page %s: radio must be object", page_id != NULL ? page_id : "?");
+        layout_validation_add(result, msg);
+        return;
+    }
+
+    const char *pid = page_id != NULL ? page_id : "?";
+    char msg[128];
+
+    /* "player_entity_id" is the spelling of the first radio draft, kept so old
+     * stored layouts keep validating. */
+    validate_radio_entity_field(radio, "entity", pid, result);
+    validate_radio_entity_field(radio, "player_entity_id", pid, result);
+
+    cJSON *columns = cJSON_GetObjectItemCaseSensitive(radio, "columns");
+    if (columns != NULL &&
+        (!cJSON_IsNumber(columns) || columns->valueint < UI_RADIO_MIN_COLUMNS ||
+            columns->valueint > UI_RADIO_MAX_COLUMNS)) {
+        snprintf(msg, sizeof(msg), "page %s: radio.columns must be %d..%d", pid, UI_RADIO_MIN_COLUMNS,
+            UI_RADIO_MAX_COLUMNS);
+        layout_validation_add(result, msg);
+    }
+
+    /* Where the stream plays: "panel" (built-in speaker) or "ha" (media_player). */
+    cJSON *player_mode = cJSON_GetObjectItemCaseSensitive(radio, "player_mode");
+    if (player_mode != NULL) {
+        const char *value = cJSON_IsString(player_mode) ? player_mode->valuestring : NULL;
+        if (value == NULL || (strcmp(value, "panel") != 0 && strcmp(value, "ha") != 0)) {
+            snprintf(msg, sizeof(msg), "page %s: radio.player_mode must be \"panel\" or \"ha\"", pid);
+            layout_validation_add(result, msg);
+        }
+    }
+    cJSON *panel_flag = cJSON_GetObjectItemCaseSensitive(radio, "panel");
+    if (panel_flag != NULL && !cJSON_IsBool(panel_flag)) {
+        snprintf(msg, sizeof(msg), "page %s: radio.panel must be boolean", pid);
+        layout_validation_add(result, msg);
+    }
+
+    cJSON *stations = cJSON_GetObjectItemCaseSensitive(radio, "stations");
+    if (stations == NULL) {
+        return;
+    }
+    if (!cJSON_IsArray(stations)) {
+        snprintf(msg, sizeof(msg), "page %s: radio.stations must be array", pid);
+        layout_validation_add(result, msg);
+        return;
+    }
+
+    int count = cJSON_GetArraySize(stations);
+    if (count > UI_RADIO_MAX_STATIONS) {
+        snprintf(msg, sizeof(msg), "page %s: radio.stations has %d entries, max is %d", pid, count,
+            UI_RADIO_MAX_STATIONS);
+        layout_validation_add(result, msg);
+    }
+
+    for (int i = 0; i < count; i++) {
+        cJSON *station = cJSON_GetArrayItem(stations, i);
+        if (!cJSON_IsObject(station)) {
+            snprintf(msg, sizeof(msg), "page %s: radio.stations[%d] must be object", pid, i);
+            layout_validation_add(result, msg);
+            continue;
+        }
+
+        cJSON *name = cJSON_GetObjectItemCaseSensitive(station, "name");
+        if (!cJSON_IsString(name) || name->valuestring == NULL || name->valuestring[0] == '\0') {
+            snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].name is required", pid, i);
+            layout_validation_add(result, msg);
+        } else if (strlen(name->valuestring) >= UI_RADIO_STATION_NAME_LEN) {
+            snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].name is too long (max %d)", pid, i,
+                UI_RADIO_STATION_NAME_LEN - 1);
+            layout_validation_add(result, msg);
+        }
+
+        cJSON *url = cJSON_GetObjectItemCaseSensitive(station, "url");
+        if (!cJSON_IsString(url) || url->valuestring == NULL || url->valuestring[0] == '\0') {
+            snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].url is required", pid, i);
+            layout_validation_add(result, msg);
+        } else if (strlen(url->valuestring) >= UI_RADIO_STATION_URL_LEN) {
+            snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].url is too long (max %d)", pid, i,
+                UI_RADIO_STATION_URL_LEN - 1);
+            layout_validation_add(result, msg);
+        } else if (strncmp(url->valuestring, "http://", 7) != 0 && strncmp(url->valuestring, "https://", 8) != 0) {
+            snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].url must be http(s)", pid, i);
+            layout_validation_add(result, msg);
+        }
+
+        cJSON *entity = cJSON_GetObjectItemCaseSensitive(station, "entity");
+        if (entity != NULL) {
+            if (!cJSON_IsString(entity) || entity->valuestring == NULL) {
+                snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].entity must be string", pid, i);
+                layout_validation_add(result, msg);
+            } else if (entity->valuestring[0] != '\0' &&
+                       (!is_valid_entity_id(entity->valuestring) ||
+                           !entity_in_domain(entity->valuestring, "media_player"))) {
+                snprintf(msg, sizeof(msg), "page %s: radio.stations[%d].entity must be media_player.*", pid, i);
+                layout_validation_add(result, msg);
+            }
+        }
+    }
+}
+
 void layout_validation_clear(layout_validation_result_t *result)
 {
     if (result == NULL) {
@@ -536,8 +934,60 @@ void layout_validation_add(layout_validation_result_t *result, const char *msg)
     if (result->count >= APP_LAYOUT_MAX_ERRORS) {
         return;
     }
-    snprintf(result->messages[result->count], sizeof(result->messages[result->count]), "%s", msg);
+    char *slot = result->messages[result->count];
+    snprintf(slot, sizeof(result->messages[0]), "%.*s", (int)(sizeof(result->messages[0]) - 1U), msg);
     result->count++;
+}
+
+/* Validates the optional per-page background keys ("page_*"). */
+static void validate_page_style(cJSON *page, const char *page_id, layout_validation_result_t *result)
+{
+    static const char *const page_color_keys[] = {
+        "page_bg_color",
+        "page_bg_grad_color",
+    };
+    char msg[96];
+
+    for (size_t i = 0; i < sizeof(page_color_keys) / sizeof(page_color_keys[0]); ++i) {
+        cJSON *item = cJSON_GetObjectItemCaseSensitive(page, page_color_keys[i]);
+        if (item == NULL) {
+            continue;
+        }
+        if (!cJSON_IsString(item) || !is_valid_optional_hex_rgb_color(item->valuestring)) {
+            snprintf(msg, sizeof(msg), "page %s: %s must be hex RGB", page_id, page_color_keys[i]);
+            layout_validation_add(result, msg);
+        }
+    }
+
+    cJSON *grad_dir = cJSON_GetObjectItemCaseSensitive(page, "page_bg_grad_dir");
+    if (grad_dir != NULL && (!cJSON_IsString(grad_dir) || !is_valid_tile_grad_dir(grad_dir->valuestring))) {
+        snprintf(msg, sizeof(msg), "page %s: page_bg_grad_dir must be none|hor|ver", page_id);
+        layout_validation_add(result, msg);
+    }
+
+    cJSON *wallpaper = cJSON_GetObjectItemCaseSensitive(page, "page_wallpaper");
+    if (wallpaper != NULL && !cJSON_IsBool(wallpaper)) {
+        snprintf(msg, sizeof(msg), "page %s: page_wallpaper must be boolean", page_id);
+        layout_validation_add(result, msg);
+    }
+
+    cJSON *dim = cJSON_GetObjectItemCaseSensitive(page, "page_dim");
+    if (dim != NULL && (!cJSON_IsNumber(dim) || (double)dim->valueint != dim->valuedouble ||
+            dim->valueint < 0 || dim->valueint > 90)) {
+        snprintf(msg, sizeof(msg), "page %s: page_dim must be 0..90", page_id);
+        layout_validation_add(result, msg);
+    }
+
+    /* Optional per-page theme id: syntax only. An id that no longer exists is not an
+     * error - the router falls back to the global theme at runtime. */
+    cJSON *page_theme = cJSON_GetObjectItemCaseSensitive(page, "page_theme");
+    if (page_theme != NULL &&
+        (!cJSON_IsString(page_theme) || page_theme->valuestring == NULL ||
+            strlen(page_theme->valuestring) >= APP_MAX_THEME_ID_LEN)) {
+        snprintf(msg, sizeof(msg), "page %s: page_theme must be a theme id (< %d chars)", page_id,
+                 APP_MAX_THEME_ID_LEN);
+        layout_validation_add(result, msg);
+    }
 }
 
 static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t known_ids_len,
@@ -564,7 +1014,7 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
         snprintf(msg, sizeof(msg), "page[%u] widget[%u]: invalid id", (unsigned)page_index, (unsigned)widget_index);
         layout_validation_add(result, msg);
     } else if (strlen(id->valuestring) >= APP_MAX_WIDGET_ID_LEN) {
-        snprintf(msg, sizeof(msg), "widget id too long: %s", id->valuestring);
+        snprintf(msg, sizeof(msg), "widget id too long: %.*s", LAYOUT_MSG_VALUE_MAX, id->valuestring);
         layout_validation_add(result, msg);
     } else if (str_in_list(id->valuestring, known_widget_ids, APP_MAX_WIDGET_ID_LEN, known_ids_len)) {
         snprintf(msg, sizeof(msg), "duplicate widget id: %s", id->valuestring);
@@ -585,13 +1035,19 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
         requires_entity = widget_requires_primary_entity(type->valuestring);
     }
 
+    bool entity_optional = cJSON_IsString(type) && type->valuestring != NULL &&
+                           widget_entity_id_optional(type->valuestring);
+    bool entity_absent = !cJSON_IsString(entity_id) || entity_id->valuestring == NULL ||
+                         entity_id->valuestring[0] == '\0';
+
     if (requires_entity) {
-        if (!cJSON_IsString(entity_id) || !is_valid_entity_id(entity_id->valuestring)) {
+        if ((!cJSON_IsString(entity_id) || !is_valid_entity_id(entity_id->valuestring)) &&
+            !(entity_optional && entity_absent)) {
             snprintf(msg, sizeof(msg), "widget %s: invalid entity_id", cJSON_IsString(id) ? id->valuestring : "?");
             layout_validation_add(result, msg);
         }
 
-        if (cJSON_IsString(type) && type->valuestring != NULL && cJSON_IsString(entity_id) && entity_id->valuestring != NULL) {
+        if (!entity_absent && cJSON_IsString(type) && type->valuestring != NULL) {
             if (!widget_entity_domain_valid(type->valuestring, entity_id->valuestring)) {
                 if (strcmp(type->valuestring, "sensor") == 0) {
                     snprintf(msg, sizeof(msg), "widget %s: entity_id must be sensor.* or binary_sensor.*",
@@ -706,6 +1162,117 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
         }
     }
 
+    if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "binary_sensor") == 0) {
+        cJSON *binary_color_on = cJSON_GetObjectItemCaseSensitive(widget, "binary_color_on");
+        cJSON *binary_color_off = cJSON_GetObjectItemCaseSensitive(widget, "binary_color_off");
+        cJSON *binary_show_title = cJSON_GetObjectItemCaseSensitive(widget, "binary_show_title");
+        if (binary_color_on != NULL && !cJSON_IsString(binary_color_on)) {
+            snprintf(msg, sizeof(msg), "widget %s: binary_color_on must be a string", cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (binary_color_off != NULL && !cJSON_IsString(binary_color_off)) {
+            snprintf(msg, sizeof(msg), "widget %s: binary_color_off must be a string", cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (binary_color_on != NULL && cJSON_IsString(binary_color_on) && binary_color_on->valuestring != NULL &&
+            binary_color_on->valuestring[0] != '\0' && !is_valid_hex_rgb_color(binary_color_on->valuestring)) {
+            snprintf(msg, sizeof(msg), "widget %s: binary_color_on must be hex RGB", cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (binary_color_off != NULL && cJSON_IsString(binary_color_off) && binary_color_off->valuestring != NULL &&
+            binary_color_off->valuestring[0] != '\0' && !is_valid_hex_rgb_color(binary_color_off->valuestring)) {
+            snprintf(msg, sizeof(msg), "widget %s: binary_color_off must be hex RGB", cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (binary_show_title != NULL && !cJSON_IsBool(binary_show_title)) {
+            snprintf(msg, sizeof(msg), "widget %s: binary_show_title must be a boolean", cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+    }
+
+    if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "alarm_tile") == 0) {
+        cJSON *alarm_code = cJSON_GetObjectItemCaseSensitive(widget, "alarm_code");
+        cJSON *alarm_modes = cJSON_GetObjectItemCaseSensitive(widget, "alarm_modes");
+        cJSON *alarm_ask_code = cJSON_GetObjectItemCaseSensitive(widget, "alarm_ask_code");
+        cJSON *alarm_backend = cJSON_GetObjectItemCaseSensitive(widget, "alarm_backend");
+        cJSON *alarm_zone_label = cJSON_GetObjectItemCaseSensitive(widget, "alarm_zone_label");
+        cJSON *alarm_bool_fields[4] = {
+            cJSON_GetObjectItemCaseSensitive(widget, "alarm_show_sensors"),
+            cJSON_GetObjectItemCaseSensitive(widget, "alarm_show_bypassed"),
+            cJSON_GetObjectItemCaseSensitive(widget, "alarm_force_arm"),
+            cJSON_GetObjectItemCaseSensitive(widget, "alarm_skip_delay"),
+        };
+        static const char *alarm_bool_names[4] = {
+            "alarm_show_sensors", "alarm_show_bypassed", "alarm_force_arm", "alarm_skip_delay"
+        };
+        if (alarm_code != NULL && (!cJSON_IsString(alarm_code) || alarm_code->valuestring == NULL ||
+                                   strlen(alarm_code->valuestring) >= APP_MAX_ALARM_CODE_LEN)) {
+            snprintf(msg, sizeof(msg), "widget %s: alarm_code must be a string shorter than %d",
+                cJSON_IsString(id) ? id->valuestring : "?", APP_MAX_ALARM_CODE_LEN);
+            layout_validation_add(result, msg);
+        }
+        if (alarm_modes != NULL && (!cJSON_IsString(alarm_modes) || alarm_modes->valuestring == NULL ||
+                                    strlen(alarm_modes->valuestring) >= APP_MAX_ALARM_MODES_LEN ||
+                                    !is_valid_alarm_modes(alarm_modes->valuestring))) {
+            snprintf(msg, sizeof(msg),
+                "widget %s: alarm_modes must be a list of away|home|night|vacation|custom|disarm",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (alarm_ask_code != NULL && !cJSON_IsBool(alarm_ask_code)) {
+            snprintf(msg, sizeof(msg), "widget %s: alarm_ask_code must be a boolean",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (alarm_backend != NULL && (!cJSON_IsString(alarm_backend) || alarm_backend->valuestring == NULL ||
+                                      !is_valid_alarm_backend(alarm_backend->valuestring))) {
+            snprintf(msg, sizeof(msg), "widget %s: alarm_backend must be auto|alarmo|builtin",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+        if (alarm_zone_label != NULL && (!cJSON_IsString(alarm_zone_label) ||
+                                         alarm_zone_label->valuestring == NULL ||
+                                         strlen(alarm_zone_label->valuestring) >= APP_MAX_NAME_LEN)) {
+            snprintf(msg, sizeof(msg), "widget %s: alarm_zone_label must be a string shorter than %d",
+                cJSON_IsString(id) ? id->valuestring : "?", APP_MAX_NAME_LEN);
+            layout_validation_add(result, msg);
+        }
+        for (size_t i = 0; i < 4; i++) {
+            if (alarm_bool_fields[i] != NULL && !cJSON_IsBool(alarm_bool_fields[i])) {
+                snprintf(msg, sizeof(msg), "widget %s: %s must be a boolean",
+                    cJSON_IsString(id) ? id->valuestring : "?", alarm_bool_names[i]);
+                layout_validation_add(result, msg);
+            }
+        }
+    }
+
+    if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "clock_alarm") == 0) {
+        cJSON *clock_seconds = cJSON_GetObjectItemCaseSensitive(widget, "clock_show_seconds");
+        cJSON *clock_date = cJSON_GetObjectItemCaseSensitive(widget, "clock_show_date");
+        const char *widget_name = cJSON_IsString(id) ? id->valuestring : "?";
+
+        if (clock_seconds != NULL && !cJSON_IsBool(clock_seconds)) {
+            snprintf(msg, sizeof(msg), "widget %s: clock_show_seconds must be a boolean", widget_name);
+            layout_validation_add(result, msg);
+        }
+        if (clock_date != NULL && !cJSON_IsBool(clock_date)) {
+            snprintf(msg, sizeof(msg), "widget %s: clock_show_date must be a boolean", widget_name);
+            layout_validation_add(result, msg);
+        }
+    }
+
+    if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "sensor") == 0) {
+        cJSON *sensor_value_color = cJSON_GetObjectItemCaseSensitive(widget, "sensor_value_color");
+        if (sensor_value_color != NULL) {
+            if (!cJSON_IsString(sensor_value_color) || sensor_value_color->valuestring == NULL ||
+                (sensor_value_color->valuestring[0] != '\0' && !is_valid_hex_rgb_color(sensor_value_color->valuestring))) {
+                snprintf(msg, sizeof(msg), "widget %s: sensor_value_color must be hex RGB",
+                    cJSON_IsString(id) ? id->valuestring : "?");
+                layout_validation_add(result, msg);
+            }
+        }
+    }
+
     if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "button") == 0) {
         if (button_accent_color != NULL) {
             if (!cJSON_IsString(button_accent_color) || button_accent_color->valuestring == NULL ||
@@ -804,6 +1371,73 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
                     cJSON_IsString(id) ? id->valuestring : "?");
                 layout_validation_add(result, msg);
             }
+        }
+    }
+
+    {
+        static const char *const tile_color_keys[] = {
+            "tile_bg_color",
+            "tile_bg_grad_color",
+            "tile_border_color",
+            "tile_text_color",
+            "tile_title_color",
+            "tile_label_color",
+            "tile_value_color",
+            "tile_icon_color",
+        };
+        for (size_t i = 0; i < sizeof(tile_color_keys) / sizeof(tile_color_keys[0]); ++i) {
+            cJSON *item = cJSON_GetObjectItemCaseSensitive(widget, tile_color_keys[i]);
+            if (item == NULL) {
+                continue;
+            }
+            if (!cJSON_IsString(item) || !is_valid_optional_hex_rgb_color(item->valuestring)) {
+                snprintf(msg, sizeof(msg), "widget %s: %s must be hex RGB",
+                    cJSON_IsString(id) ? id->valuestring : "?", tile_color_keys[i]);
+                layout_validation_add(result, msg);
+            }
+        }
+
+        cJSON *tile_bg_grad_dir = cJSON_GetObjectItemCaseSensitive(widget, "tile_bg_grad_dir");
+        if (tile_bg_grad_dir != NULL &&
+            (!cJSON_IsString(tile_bg_grad_dir) || !is_valid_tile_grad_dir(tile_bg_grad_dir->valuestring))) {
+            snprintf(msg, sizeof(msg), "widget %s: tile_bg_grad_dir must be none|hor|ver",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+
+        cJSON *tile_font_scale = cJSON_GetObjectItemCaseSensitive(widget, "tile_font_scale");
+        if (tile_font_scale != NULL &&
+            (!cJSON_IsString(tile_font_scale) || !is_valid_tile_font_scale(tile_font_scale->valuestring))) {
+            snprintf(msg, sizeof(msg), "widget %s: tile_font_scale must be auto|s|m|l|xl",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
+
+        static const struct {
+            const char *key;
+            int max;
+        } tile_int_keys[] = {
+            { "tile_border_width", 16 },
+            { "tile_radius", 128 },
+            { "tile_opacity", 100 },
+        };
+        for (size_t i = 0; i < sizeof(tile_int_keys) / sizeof(tile_int_keys[0]); ++i) {
+            cJSON *item = cJSON_GetObjectItemCaseSensitive(widget, tile_int_keys[i].key);
+            if (item == NULL) {
+                continue;
+            }
+            if (!is_valid_auto_or_int(item, 0, tile_int_keys[i].max)) {
+                snprintf(msg, sizeof(msg), "widget %s: %s must be -1 or 0..%d",
+                    cJSON_IsString(id) ? id->valuestring : "?", tile_int_keys[i].key, tile_int_keys[i].max);
+                layout_validation_add(result, msg);
+            }
+        }
+
+        cJSON *tile_shadow = cJSON_GetObjectItemCaseSensitive(widget, "tile_shadow");
+        if (tile_shadow != NULL && !cJSON_IsBool(tile_shadow)) {
+            snprintf(msg, sizeof(msg), "widget %s: tile_shadow must be a boolean",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
         }
     }
 
@@ -906,12 +1540,14 @@ bool layout_validate_json(const char *json, layout_validation_result_t *result)
         char msg[96];
         bool is_energy_dashboard_page = false;
         bool is_xiaozhi_page = false;
+        bool is_music_assistant_page = false;
+        bool is_radio_page = false;
 
         if (!cJSON_IsString(page_id) || page_id->valuestring == NULL || strlen(page_id->valuestring) == 0U) {
             snprintf(msg, sizeof(msg), "page[%u]: invalid id", (unsigned)i);
             layout_validation_add(result, msg);
         } else if (strlen(page_id->valuestring) >= APP_MAX_PAGE_ID_LEN) {
-            snprintf(msg, sizeof(msg), "page id too long: %s", page_id->valuestring);
+            snprintf(msg, sizeof(msg), "page id too long: %.*s", LAYOUT_MSG_VALUE_MAX, page_id->valuestring);
             layout_validation_add(result, msg);
         } else if (str_in_list(page_id->valuestring, known_page_ids, APP_MAX_PAGE_ID_LEN, known_page_ids_len)) {
             snprintf(msg, sizeof(msg), "duplicate page id: %s", page_id->valuestring);
@@ -931,10 +1567,42 @@ bool layout_validate_json(const char *json, layout_validation_result_t *result)
                 is_energy_dashboard_page = true;
             } else if (strcmp(page_type->valuestring, "xiaozhi") == 0) {
                 is_xiaozhi_page = true;
+            } else if (strcmp(page_type->valuestring, "music_assistant") == 0) {
+                is_music_assistant_page = true;
+            } else if (strcmp(page_type->valuestring, "radio") == 0) {
+                is_radio_page = true;
             }
         }
 
+        if (is_radio_page) {
+            validate_page_style(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
+            validate_radio_page(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
+            if (widgets != NULL && !cJSON_IsArray(widgets)) {
+                snprintf(msg, sizeof(msg), "page %s: widgets must be array",
+                    cJSON_IsString(page_id) ? page_id->valuestring : "?");
+                layout_validation_add(result, msg);
+            } else if (cJSON_IsArray(widgets) && cJSON_GetArraySize(widgets) > 0) {
+                snprintf(msg, sizeof(msg), "page %s: radio pages cannot contain widgets",
+                    cJSON_IsString(page_id) ? page_id->valuestring : "?");
+                layout_validation_add(result, msg);
+            }
+            continue;
+        } else if (is_music_assistant_page) {
+            validate_page_style(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
+            validate_music_page(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
+            if (widgets != NULL && !cJSON_IsArray(widgets)) {
+                snprintf(msg, sizeof(msg), "page %s: widgets must be array", cJSON_IsString(page_id) ? page_id->valuestring : "?");
+                layout_validation_add(result, msg);
+            } else if (cJSON_IsArray(widgets) && cJSON_GetArraySize(widgets) > 0) {
+                snprintf(msg, sizeof(msg), "page %s: music_assistant pages cannot contain widgets",
+                    cJSON_IsString(page_id) ? page_id->valuestring : "?");
+                layout_validation_add(result, msg);
+            }
+            continue;
+        }
+
         if (is_energy_dashboard_page) {
+            validate_page_style(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
             validate_energy_page(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
             if (widgets != NULL && !cJSON_IsArray(widgets)) {
                 snprintf(msg, sizeof(msg), "page %s: widgets must be array", cJSON_IsString(page_id) ? page_id->valuestring : "?");
@@ -964,6 +1632,8 @@ bool layout_validate_json(const char *json, layout_validation_result_t *result)
             layout_validation_add(result, msg);
             continue;
         }
+
+        validate_page_style(page, cJSON_IsString(page_id) ? page_id->valuestring : "?", result);
 
         int widget_count = cJSON_GetArraySize(widgets);
         if (widget_count > APP_MAX_WIDGETS_PER_PAGE) {

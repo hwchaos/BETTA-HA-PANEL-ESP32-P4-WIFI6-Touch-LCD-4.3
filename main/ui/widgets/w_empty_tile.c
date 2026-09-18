@@ -31,6 +31,7 @@ esp_err_t w_empty_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_w
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_width(title, def->w - 32);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_20, LV_PART_MAIN);

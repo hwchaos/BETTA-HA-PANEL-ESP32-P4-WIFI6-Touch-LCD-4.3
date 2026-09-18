@@ -4,7 +4,12 @@
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+# Required by the freeze forensics in diag/system_log.c: on a UI watchdog stall
+# the panel writes a full task table (name/state/priority/stack high-water mark)
+# into the persistent log before restarting, so a freeze can be attributed to a
+# specific blocked task instead of being guessed at.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 
 # Use custom partition table with OTA slots and LittleFS storage partition
@@ -161,3 +166,9 @@ CONFIG_LV_USE_SNAPSHOT=y
 
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360
+
+# microSD: long file names on the FAT volume.  Without LFN the "panel-<timestamp>.log"
+# export name is rejected by FatFs ("Cannot open ... for writing"), which broke the
+# log-export feature, and user-copied wallpapers cannot keep their PC file names.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255

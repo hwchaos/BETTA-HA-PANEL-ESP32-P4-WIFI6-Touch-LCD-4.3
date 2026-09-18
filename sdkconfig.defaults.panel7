@@ -8,6 +8,37 @@
 CONFIG_APP_PANEL_VARIANT_7INCH_1024=y
 # CONFIG_APP_PANEL_VARIANT_4INCH_720 is not set
 
+# -O2 keeps more of every caller's frame live, and the dashboard build below
+# runs inside the main task: with the stock 8 KB the newlib snprintf path
+# ("Loading dashboard" -> ui_runtime_init/reload_layout/start) overflows the
+# task stack and the panel boot-loops with a stack protection fault.
+# 16 KB matches what the other in-house -O2 builds settle on.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# The interrupt handlers run on a separate per-core stack, and the 2096 B
+# kconfig floor (that value is the minimum the ELF coredump format allows) is
+# far too small for this variant: the MIPI-DSI, CSI/ISP camera, GDMA, SDIO and
+# L2CACHE interrupt chains nest deep enough to walk core 1's ISR stack down to
+# its very last byte.  The hardware stack guard then traps the next nested
+# frame - "Stack protection fault" (mcause 27 = ETS_ASSIST_DEBUG_INUM), which
+# reboots the panel; on the wall that shows up as the brief light blue flash.
+# 6144 B gives each core 3x the headroom and leaves enough room for the panic
+# handler and the coredump to run on a stack that is not already exhausted
+# (they need ~2 KB of it, which is what forces the 2096 B floor above).
+# Costs 2 x 4 KB of internal RAM; the L2MEM high block still keeps ~280 kB of
+# internal heap free.
+CONFIG_FREERTOS_ISR_STACKSIZE=6144
+
+# --- Performance: optimise the application for speed (-O2) ---
+# Same trade-off the S3 panels already use (sdkconfig.panels3): the web UI is
+# served gzip-only and this variant has a 9 MB app slot, so the ~250 kB that
+# -O2 adds over the -Og default costs nothing that matters here (the image is
+# ~4.4 MB of 9 MB) and buys noticeably faster LVGL/i18n/JSON code paths.
+# Keep the bootloader small instead - it is only ever copied out of flash.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# CONFIG_COMPILER_OPTIMIZATION_DEBUG is not set
+# CONFIG_COMPILER_OPTIMIZATION_SIZE is not set
+
 # --- BSP display/touch: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024x600 MIPI-DSI EK79007 + GT911) ---
 # RGB565 is the 7B BSP default; the DPI frame-buffer count is inherited from
 # the common sdkconfig.defaults (CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2).
@@ -21,3 +52,143 @@ CONFIG_LV_USE_LODEPNG=y
 # bootloader/second-stage will refuse to boot this image.
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y
+
+# --- LVGL memory / font backend (must match ui/lv_psram_mem.c) ---
+# lv_psram_mem.c overrides lv_malloc_core/lv_free_core/lv_realloc_core, which
+# only works with LVGL's custom-allocator mode; the common defaults select the
+# clib backend, so switch it back here.
+# CONFIG_LV_USE_CLIB_MALLOC is not set
+CONFIG_LV_USE_CUSTOM_MALLOC=y
+CONFIG_LV_USE_FONT_COMPRESSED=y
+
+# --- ESP-Hosted HTTP digest auth: needed by the cover/camera image fetcher ---
+# ha_cover_fetcher.c uses HTTP_AUTH_TYPE_DIGEST for authenticated cover and
+# camera snapshot downloads; without this the 401 -> Digest retry is compiled
+# out and those fetches always fail.
+CONFIG_ESP_HTTP_CLIENT_ENABLE_DIGEST_AUTH=y
+
+# --- Built-in OV5647 MIPI-CSI camera (factory camera of the 7B panel) ---
+# The sensor sits on the shared BSP I2C bus (SCL=GPIO8, SDA=GPIO7) which the
+# GT911 touch controller already owns; local_camera.c reuses that bus handle
+# as the SCCB interface.
+#
+# Sensor mode: 1280x960 RAW10 with 2x2 binning @45fps.  It matches the
+# 1024x600 panel far better than the OV5647 driver default (800x800 RAW8) and
+# keeps ~2.4 MB of RGB565 per frame instead of the ~4.1 MB a 1920x1080 RAW10
+# mode needs - 1080p plus the ESP-Hosted Wi-Fi stack eats the internal DMA
+# heap on this board class.  800x800 RAW8 stays available as a fallback mode:
+# switch CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS <-> ...RAW8_800X800_50FPS
+# together with the matching CONFIG_CAMERA_OV5647_MIPI_DEFAULT_FMT_* line.
+CONFIG_CAMERA_OV5647=y
+# CONFIG_CAMERA_OV5647_MIPI_RAW8_800X640_50FPS is not set
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
+# CONFIG_CAMERA_OV5647_MIPI_RAW8_800X1280_50FPS is not set
+CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS=y
+# CONFIG_CAMERA_OV5647_MIPI_RAW10_1920X1080_30FPS is not set
+CONFIG_CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1280X960_BINNING_45FPS=y
+
+# --- Application feature toggles ---
+# Built-in camera: on-panel preview, /api/camera/{snapshot,status,motion,stream}
+# and motion wake.  Enabled by default for the 7B panel.
+CONFIG_APP_FEATURE_LOCAL_CAMERA=y
+CONFIG_APP_LOCAL_CAMERA_MOTION_WAKE=y
+CONFIG_APP_LOCAL_CAMERA_JPEG_QUALITY=55
+
+# --- ESP Video framework (V4L2 MIPI-CSI stack) ---
+# The video device registers a /dev/videoX VFS node and the panel already
+# mounts several filesystems (FATFS SD, web assets, littlefs), so the default
+# 8 VFS slots are exhausted and esp_video_init fails with
+# "Failed to register video VFS dev name=video0".  Raise the limit.
+CONFIG_VFS_MAX_COUNT=16
+CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=y
+CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=y
+# The ISP pipeline controller is what binds the MIPI-CSI device to the ISP on
+# ESP32-P4: without it the RAW10 OV5647 frames are never converted to RGB565
+# and /dev/video0 delivers no frames (camera "running" but never ready).
+CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
+CONFIG_ESP_VIDEO_ENABLE_DATA_PREPROCESSING=n
+CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER=y
+CONFIG_ESP_VIDEO_ENABLE_SWAP_SHORT=n
+CONFIG_ESP_VIDEO_ENABLE_SWAP_BYTE=n
+
+# --- 32 MB flash: 32-bit (4-byte) flash addressing ---------------------
+# The board carries a 32 MB flash chip, so the second OTA slot sits at
+# 0x1220000 (18 MB) - past the 16 MB limit of the default 24-bit flash cache
+# mapping.  With the plain mapping esp_ota_end() -> esp_image_verify() ->
+# spi_flash_mmap() cannot map the freshly written image:
+#     E flash_mmap: Address 0x01220000 is out of range for 24bit flash mapping
+#     E esp_image: bootloader_mmap(0x1220020, 0x1c4a18) failed
+#     E esp_ota_ops: New image failed verification
+# so an update could only ever land in ota_0 (0x920000) and never in ota_1.
+# These two options switch the flash cache to 4-byte addressing, which makes
+# the whole 32 MB range mappable and lets OTA use both slots.
+# (CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH is the quad/DIO variant and is
+# only selectable because CONFIG_SOC_SPI_MEM_SUPPORT_CACHE_32BIT_ADDR_MAP=y; it
+# is gated behind the experimental-features switch.)
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y
+
+# --- SD/FATFS: long file names on the SD card -------------------------
+# The default (CONFIG_FATFS_LFN_NONE) limits FatFs to 8.3 names, which breaks
+# every user-facing file on the card:
+#   * /sd/logs/panel-YYYYMMDD-HHMMSS.log  -> fopen() fails, log export dead
+#   * wallpaper/photo upload with a PC file name (IMG_1234.jpg) -> 8.3 only
+# LFN_HEAP keeps the 255-char name buffer in the heap (not on the 8 KB task
+# stacks) and only allocates while a long name is actually open.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+
+# --- Log level: allow DEBUG/VERBOSE at runtime -------------------------
+# The compiled-in default stays INFO (3), so nothing gets noisier by itself,
+# but the *maximum* level is raised to VERBOSE.  Without this, ESP_LOGD() and
+# ESP_LOGV() are compiled out entirely and the runtime "log_verbosity" setting
+# - and the in-panel log ring - can never show anything below INFO, which made
+# "the screen flashes but the log says nothing" impossible to diagnose.
+# CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT is not set
+# CONFIG_LOG_MAXIMUM_LEVEL_NONE is not set
+# CONFIG_LOG_MAXIMUM_LEVEL_ERROR is not set
+# CONFIG_LOG_MAXIMUM_LEVEL_WARN is not set
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+# CONFIG_LOG_MAXIMUM_LEVEL_DEBUG is not set
+# CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE is not set
+CONFIG_LOG_MAXIMUM_LEVEL=3
+
+# --- LVGL log module ---------------------------------------------------
+# Compiled in (WARN level by default) so LVGL complaints - failed object
+# creations, invalid drawing parameters, style/API misuse - land in
+# /littlefs/logs/system.log via diag/lvgl_log_bridge.c instead of being
+# silently dropped.  Raise CONFIG_LV_LOG_LEVEL to 0 (TRACE) only while
+# chasing a drawing bug: it is extremely chatty.
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_LOG_LEVEL_WARN=y
+CONFIG_LV_LOG_LEVEL=2
+# CONFIG_LV_LOG_PRINTF is not set
+CONFIG_LV_LOG_USE_TIMESTAMP=y
+CONFIG_LV_LOG_USE_FILE_LINE=y
+
+# --- Crash forensics: core dump into flash -------------------------------
+# The spontaneous reboots that make the panel flash light blue are PANICs, and
+# the panic backtrace only ever goes to the UART console - the persistent ring
+# log keeps just the "reset=PANIC(4)" marker, which is why they could never be
+# attributed to a task.  With core dump to flash the panic handler stores the
+# failing task's TCB/registers/stack in the `coredump` partition (carved out of
+# the unused ota_1 slot - OTA is not supported on this panel), and main/diag/
+# crash_core.c reports the summary at the next boot through the ring log and
+# /api/crash.  ELF keeps the raw dump readable by `idf.py coredump-info`.
+# DRAM capture is off on purpose: it stores the whole .data/.bss/heap and the
+# dump would no longer fit in the partition.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+# CONFIG_ESP_COREDUMP_ENABLE_TO_UART is not set
+# CONFIG_ESP_COREDUMP_ENABLE_TO_NONE is not set
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+# CONFIG_ESP_COREDUMP_CAPTURE_DRAM is not set
+CONFIG_ESP_COREDUMP_CHECK_BOOT=y
+CONFIG_ESP_COREDUMP_LOGS=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=24
+# The CONFIG_ESP_COREDUMP_DECODE_* choice does not exist for the flash
+# destination (it only selects how IDF Monitor handles UART dumps), so decoding
+# is done by main/diag/crash_core.c instead - which has the advantage that the
+# report also ends up in the persistent log.  Core dumps to flash are collected
+# on a dedicated DRAM stack (CONFIG_ESP_COREDUMP_USE_STACK_SIZE), which kconfig
+# enables on its own whenever task stacks may be allocated in PSRAM.

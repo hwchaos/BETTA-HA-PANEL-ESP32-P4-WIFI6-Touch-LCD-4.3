@@ -6,6 +6,12 @@
 #   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults.s3;sdkconfig.defaults.panels3" ...
 # or the CMake preset "panels3" (see CMakePresets.json).
 
+# --- Compiler optimization ---
+# -O2 (performance) instead of the -Og debug default: -Og was the main reason the
+# panel felt sluggish. -O2 costs some flash, but the WebUI is embedded gzipped now
+# (components/webui/CMakeLists.txt), which more than pays for it.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
 # --- Panel variant selector (drives app_config.h + display/touch init) ---
 CONFIG_APP_PANEL_VARIANT_S3_480=y
 # CONFIG_APP_PANEL_VARIANT_4INCH_720 is not set
@@ -13,3 +19,49 @@ CONFIG_APP_PANEL_VARIANT_S3_480=y
 
 # --- Touch controller (GT911 capacitive on most CYD 4848S040 batches) ---
 CONFIG_ESP_LCD_TOUCH_MAX_POINTS=5
+
+# --- RGB panel DMA recovery ---
+# RESTART_IN_VSYNC resets the GDMA channel on EVERY VBlank. IDF documents that
+# this can itself cause a single-frame desync: if the VSync interrupt runs late,
+# the LCD controller has already read the first bytes and the reset re-sends
+# them, which shows up as a one-frame shift / thin dashes at the left edge.
+# It only needs to be enabled when the DMA categorically cannot keep up.
+# Without it the driver restarts only when it actually detects a shortfall
+# (bb_eof_count < expect_eof_count), so healthy frames are left untouched and
+# a real underrun still self-heals within a frame or two.
+# CONFIG_LCD_RGB_RESTART_IN_VSYNC is not set
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
+
+# --- Parity with the build that runs on the wall panel ---
+# These live in the maintainer's local sdkconfig, but they are behaviour, not
+# preference: without them a clean clone builds a look-alike that renders
+# differently and cannot read the microSD screensaver images. Keep them here so
+# "clone and build" really reproduces the shipped panel firmware.
+#
+# FATFS: the microSD screensaver stores user images under their normal names.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+# FATFS_CODEPAGE is a Kconfig choice, so it has to be selected through its member.
+CONFIG_FATFS_CODEPAGE_852=y
+# CONFIG_FATFS_CODEPAGE_437 is not set
+#
+# Wi-Fi / TCP: a smaller RX block-ack window and a capped out-of-order queue keep
+# the single-radio panel stable while the HA WebSocket, MQTT and the WebUI overlap.
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=4
+#
+# LVGL: the panel is RGB565 and blends with the same rounding as the wall unit.
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_COLOR_MIX_ROUND_OFS=128
+CONFIG_LV_OBJ_STYLE_CACHE=n
+# The mono theme is unused on a colour panel.
+CONFIG_LV_USE_THEME_MONO=n
+#
+# LVGL assertions stay on: a misuse aborts with a backtrace instead of painting
+# garbage into the framebuffer. The include is the deprecated spelling of the
+# assert handler; its migration warning would otherwise fire once per file.
+CONFIG_LV_USE_ASSERT_NULL=y
+CONFIG_LV_USE_ASSERT_MALLOC=y
+CONFIG_LV_ASSERT_HANDLER_INCLUDE="assert.h"
+CONFIG_LV_DISABLE_ASSERT_HANDLER_INCLUDE_WARNING=y

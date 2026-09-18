@@ -27,16 +27,20 @@ typedef struct {
     bool enabled;
 } camera_entry_t;
 
-/* Ensures the file exists (writing an empty list on first boot). */
+/* Ensures the file exists (writing an empty list on first boot).  Files saved in
+ * a legacy shape (envelope keys such as {"value":[…],"Count":n}) are rewritten in
+ * the canonical array form, so the cameras page always sees the stored cameras. */
 esp_err_t camera_store_init(void);
 
 /* Loads up to *count_out entries into `entries` (caller provides an array of
  * APP_MAX_CAMERAS). Returns the number of valid entries in *count_out. */
 esp_err_t camera_store_load(camera_entry_t *entries, size_t *count_out);
 
-/* Validates and persists a JSON array payload (must be an array). */
+/* Persists a JSON payload after validating it: a body whose entries are all
+ * invalid (envelope, missing URL/entity) is rejected instead of emptying the
+ * camera list. */
 esp_err_t camera_store_save_json(const char *json);
 
-/* Serializes the current on-disk list to a freshly allocated JSON string.
- * Caller frees with free(). */
+/* Serializes the current on-disk list to a freshly allocated JSON array (legacy
+ * envelopes are unwrapped, invalid entries dropped). Caller frees with free(). */
 esp_err_t camera_store_load_json(char **json_out);

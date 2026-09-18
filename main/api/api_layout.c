@@ -9,11 +9,11 @@
 #include "cJSON.h"
 #include "esp_log.h"
 
-#include "app_events.h"
 #include "app_config.h"
 #include "ha/ha_client.h"
 #include "layout/layout_store.h"
 #include "layout/layout_validate.h"
+#include "ui/ui_runtime.h"
 #include "util/log_tags.h"
 
 static void set_json_headers(httpd_req_t *req)
@@ -67,6 +67,39 @@ static esp_err_t api_layout_send_validation_error(httpd_req_t *req, const layout
     return err;
 }
 
+/* The layout was stored, but the panel could not rebuild itself from it. The
+ * editor needs to know: reporting success here is what made an unapplied
+ * page-look change look like a rendering bug. */
+static esp_err_t api_layout_send_apply_error(httpd_req_t *req, esp_err_t err)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *errors = cJSON_CreateArray();
+    char message[128];
+    if (root == NULL || errors == NULL) {
+        cJSON_Delete(root);
+        cJSON_Delete(errors);
+        return httpd_resp_send_500(req);
+    }
+
+    snprintf(message, sizeof(message),
+             "Layout saved but the panel could not apply it (%s)", esp_err_to_name(err));
+    cJSON_AddBoolToObject(root, "ok", false);
+    cJSON_AddItemToArray(errors, cJSON_CreateString(message));
+    cJSON_AddItemToObject(root, "errors", errors);
+    cJSON_AddStringToObject(root, "detail", esp_err_to_name(err));
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload == NULL) {
+        return httpd_resp_send_500(req);
+    }
+
+    set_json_headers(req);
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    esp_err_t send_err = httpd_resp_sendstr(req, payload);
+    cJSON_free(payload);
+    return send_err;
+}
+
 esp_err_t api_layout_put_handler(httpd_req_t *req)
 {
     if (req->content_len <= 0 || req->content_len > APP_LAYOUT_MAX_JSON_LEN) {
@@ -103,8 +136,12 @@ esp_err_t api_layout_put_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
 
-    app_event_t event = {.type = EV_LAYOUT_UPDATED};
-    app_events_publish(&event, pdMS_TO_TICKS(20));
+    esp_err_t apply_err = ui_runtime_request_layout_reload();
+    if (apply_err != ESP_OK) {
+        ESP_LOGW(TAG_LAYOUT, "Layout saved but UI rebuild failed: %s", esp_err_to_name(apply_err));
+        return api_layout_send_apply_error(req, apply_err);
+    }
+
     esp_err_t ha_notify_err = ha_client_notify_layout_updated();
     if (ha_notify_err != ESP_OK) {
         ESP_LOGW(TAG_LAYOUT, "Failed to notify HA client about layout update: %s", esp_err_to_name(ha_notify_err));

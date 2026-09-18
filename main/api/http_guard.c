@@ -16,6 +16,8 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 
+#include "app_config.h"
+#include "diag/system_log.h"
 #include "util/log_tags.h"
 
 #define HTTP_GUARD_MAX_ACTIVE_REQUESTS 4
@@ -95,6 +97,94 @@ static bool is_api_request(const httpd_req_t *req)
         return false;
     }
     return strncmp(req->uri, "/api/", 5) == 0;
+}
+
+/* ---- request tracing ----------------------------------------------------
+ * Every request that reaches a guarded handler is traced.  Plain successful
+ * GETs (the WebUI/HA polling traffic) go to ESP_LOGD so they only appear at
+ * verbosity >= 4, while anything notable - a write, a rejection, a failing
+ * handler or a slow request - is recorded in the persistent log immediately
+ * and handed to the screen flash detector, so a flash seen seconds after a
+ * request can be attributed to it. */
+static const char *http_method_name(int method)
+{
+    switch (method) {
+    case HTTP_GET: return "GET";
+    case HTTP_POST: return "POST";
+    case HTTP_PUT: return "PUT";
+    case HTTP_DELETE: return "DELETE";
+    case HTTP_HEAD: return "HEAD";
+    case HTTP_OPTIONS: return "OPTIONS";
+    case HTTP_PATCH: return "PATCH";
+    default: return "OTHER";
+    }
+}
+
+static void req_client_ip(httpd_req_t *req, char *out, size_t out_len)
+{
+    out[0] = '\0';
+    int sockfd = httpd_req_to_sockfd(req);
+    if (sockfd < 0) {
+        return;
+    }
+    struct sockaddr_storage addr = {0};
+    socklen_t addr_len = sizeof(addr);
+    if (getpeername(sockfd, (struct sockaddr *)&addr, &addr_len) != 0) {
+        return;
+    }
+    if (addr.ss_family == AF_INET && addr_len >= sizeof(struct sockaddr_in)) {
+        inet_ntoa_r(((const struct sockaddr_in *)&addr)->sin_addr, out, out_len);
+    }
+#if LWIP_IPV6
+    else if (addr.ss_family == AF_INET6 && addr_len >= sizeof(struct sockaddr_in6)) {
+        inet6_ntoa_r(((const struct sockaddr_in6 *)&addr)->sin6_addr, out, out_len);
+    }
+#endif
+}
+
+static void req_query_suffix(httpd_req_t *req, char *out, size_t out_len)
+{
+    out[0] = '\0';
+    if (out_len < 3) {
+        return;
+    }
+    size_t qlen = httpd_req_get_url_query_len(req);
+    char query[160];
+    if (qlen == 0 || qlen >= sizeof(query) || (qlen + 2) > out_len) {
+        return;
+    }
+    if (httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK) {
+        snprintf(out, out_len, "?%.*s", (int)(out_len - 2), query);
+    }
+}
+
+static void log_request_result(httpd_req_t *req, esp_err_t err, int64_t elapsed_ms, const char *reject_reason)
+{
+    char ip[48];
+    char query[128];
+    req_client_ip(req, ip, sizeof(ip));
+    req_query_suffix(req, query, sizeof(query));
+
+    const char *method = http_method_name(req->method);
+    bool notable = (reject_reason != NULL) || (err != ESP_OK) || (req->method != HTTP_GET) ||
+                   (elapsed_ms >= APP_HTTP_SLOW_LOG_MS);
+
+    if (!notable) {
+        ESP_LOGD(TAG_HTTP, "%s %s%s from %s len=%u -> %s in %lld ms", method, req->uri, query,
+                 ip[0] != '\0' ? ip : "?", (unsigned)req->content_len, esp_err_to_name(err),
+                 (long long)elapsed_ms);
+        return;
+    }
+
+    if (reject_reason != NULL) {
+        system_log_event(TAG_HTTP, "%s %s%s from %s REJECTED (%s)", method, req->uri, query,
+                         ip[0] != '\0' ? ip : "?", reject_reason);
+        return;
+    }
+
+    system_log_event(TAG_HTTP, "%s %s%s from %s len=%u -> %s in %lld ms", method, req->uri, query,
+                     ip[0] != '\0' ? ip : "?", (unsigned)req->content_len, esp_err_to_name(err),
+                     (long long)elapsed_ms);
 }
 
 static bool rate_limit_allow(uint32_t client_key)
@@ -263,6 +353,7 @@ esp_err_t http_guard_handle(httpd_req_t *req, http_guard_handler_t next_handler)
     esp_err_t init_err = http_guard_init();
     if (init_err != ESP_OK) {
         ESP_LOGW(TAG_HTTP, "HTTP guard init failed: %s", esp_err_to_name(init_err));
+        log_request_result(req, ESP_ERR_NO_MEM, 0, "guard init failed");
         return send_busy(req, "503 Service Unavailable", "Service unavailable");
     }
 
@@ -285,9 +376,11 @@ esp_err_t http_guard_handle(httpd_req_t *req, http_guard_handler_t next_handler)
     xSemaphoreGive(s_guard_lock);
 
     if (!allow_rate) {
+        log_request_result(req, ESP_ERR_INVALID_STATE, 0, "rate limit");
         return send_busy(req, "429 Too Many Requests", "Too many requests");
     }
     if (!allow_concurrency) {
+        log_request_result(req, ESP_ERR_INVALID_STATE, 0, "too many concurrent requests");
         return send_busy(req, "429 Too Many Requests", "Too many concurrent requests");
     }
 
@@ -297,10 +390,26 @@ esp_err_t http_guard_handle(httpd_req_t *req, http_guard_handler_t next_handler)
             active_release(key);
             xSemaphoreGive(s_guard_lock);
         }
+        log_request_result(req, ESP_ERR_TIMEOUT, 0, "server busy");
         return send_busy(req, "503 Service Unavailable", "Server busy");
     }
 
+    /* The httpd runs its handlers from a single task, so this marker names the
+     * request that is blocking the whole API if the panel ever freezes.  It is
+     * left set on purpose when a handler never returns. */
+    int64_t started_ms = esp_timer_get_time() / 1000;
+    system_log_note_http(req->uri);
     esp_err_t err = next_handler(req);
+    system_log_note_http(NULL);
+
+    int64_t elapsed_ms = (esp_timer_get_time() / 1000) - started_ms;
+    if (elapsed_ms >= APP_HTTP_SLOW_LOG_MS) {
+        ESP_LOGW(TAG_HTTP, "slow request %s %s took %lld ms",
+                 (req->method == HTTP_GET) ? "GET" : ((req->method == HTTP_POST) ? "POST" : "OTHER"),
+                 req->uri, (long long)elapsed_ms);
+    }
+    log_request_result(req, err, elapsed_ms, NULL);
+
     xSemaphoreGive(s_active_sem);
     if (enforce_api_limits) {
         xSemaphoreTake(s_guard_lock, portMAX_DELAY);

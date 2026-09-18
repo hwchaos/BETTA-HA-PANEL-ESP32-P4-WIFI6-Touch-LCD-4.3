@@ -26,6 +26,11 @@ static int s_display_brightness = -1;
 static int s_active_brightness = APP_DISPLAY_ACTIVE_BRIGHTNESS_PERCENT;
 static int s_dim_brightness = APP_DISPLAY_DIM_BRIGHTNESS_PERCENT;
 static uint32_t s_dim_timeout_ms = APP_DISPLAY_DIM_TIMEOUT_MS;
+static int64_t s_last_activity_ms = 0;
+static display_activity_cb_t s_activity_cb = NULL;
+/* The driver's own dim policy is enabled by default; the shared screensaver
+ * disables it when it takes over the backlight. */
+static bool s_power_policy_enabled = true;
 
 static lvgl_port_cfg_t display_port_cfg(void)
 {
@@ -102,10 +107,18 @@ void display_set_power_config(const display_power_config_t *cfg)
 static void display_dim_timer_cb(void *arg)
 {
     (void)arg;
-    if (!s_display_ready) {
+    if (!s_display_ready || !s_power_policy_enabled) {
         return;
     }
     (void)display_set_brightness_percent(s_dim_brightness);
+}
+
+void display_set_power_policy_enabled(bool enabled)
+{
+    s_power_policy_enabled = enabled;
+    if (!enabled && s_dim_timer != NULL && esp_timer_is_active(s_dim_timer)) {
+        (void)esp_timer_stop(s_dim_timer);
+    }
 }
 
 static esp_err_t display_dim_timer_init(void)
@@ -126,7 +139,7 @@ static esp_err_t display_dim_timer_init(void)
 
 static void display_restart_dim_timer(void)
 {
-    if (s_dim_timer == NULL) {
+    if (s_dim_timer == NULL || !s_power_policy_enabled) {
         return;
     }
     if (esp_timer_is_active(s_dim_timer)) {
@@ -144,8 +157,28 @@ void display_note_activity(void)
     if (!s_display_ready) {
         return;
     }
-    (void)display_set_brightness_percent(APP_DISPLAY_ACTIVE_BRIGHTNESS_PERCENT);
+    s_last_activity_ms = esp_timer_get_time() / 1000;
+    bool owned = false;
+    if (s_activity_cb != NULL) {
+        owned = s_activity_cb();
+    }
+    if (!owned) {
+        (void)display_set_brightness_percent(APP_DISPLAY_ACTIVE_BRIGHTNESS_PERCENT);
+    }
     display_restart_dim_timer();
+}
+
+void display_set_activity_callback(display_activity_cb_t cb)
+{
+    s_activity_cb = cb;
+}
+
+int64_t display_ms_since_activity(void)
+{
+    if (!s_display_ready) {
+        return 0;
+    }
+    return (esp_timer_get_time() / 1000) - s_last_activity_ms;
 }
 
 esp_err_t display_init(void)

@@ -26,6 +26,7 @@
 #include "freertos/semphr.h"
 
 #include "app_config.h"
+#include "diag/system_log.h"
 #include "drivers/display_init.h"
 #include "ha/ha_client.h"
 #include "ui/fonts/app_text_fonts.h"
@@ -399,6 +400,7 @@ static lv_obj_t *w_todo_ensure_placeholder_label(w_todo_ctx_t *ctx)
     }
     if (ctx->placeholder_label == NULL) {
         lv_obj_t *lbl = lv_label_create(ctx->list_container);
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_USER_2);
         lv_obj_set_width(lbl, LV_PCT(100));
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_set_style_text_font(lbl, APP_FONT_TEXT_18, LV_PART_MAIN);
@@ -511,11 +513,13 @@ static lv_obj_t *w_todo_ensure_row(w_todo_ctx_t *ctx, size_t slot)
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *badge_label = lv_label_create(badge);
+    lv_obj_add_flag(badge_label, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(badge_label, "");
     lv_obj_set_style_text_font(badge_label, LV_FONT_DEFAULT, LV_PART_MAIN);
     lv_obj_center(badge_label);
 
     lv_obj_t *text = lv_label_create(row);
+    lv_obj_add_flag(text, LV_OBJ_FLAG_USER_2);
     lv_label_set_long_mode(text, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(text, APP_FONT_TEXT_18, LV_PART_MAIN);
     lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
@@ -962,6 +966,7 @@ static void w_todo_item_event_cb(lv_event_t *e)
 /* ----- Periodic tick ---------------------------------------------------- */
 static void w_todo_tick_cb(lv_timer_t *timer)
 {
+    system_log_note_lvgl_cb("w_todo_tick_cb");
     if (timer == NULL) {
         return;
     }
@@ -1109,6 +1114,7 @@ esp_err_t w_todo_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t *title = lv_label_create(header);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_style_text_color(title, theme_default_color_text_primary(), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_22, LV_PART_MAIN);
@@ -1116,6 +1122,7 @@ esp_err_t w_todo_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_
     lv_obj_set_flex_grow(title, 1);
 
     lv_obj_t *status = lv_label_create(header);
+    lv_obj_add_flag(status, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(status, "");
     lv_obj_set_style_text_font(status, APP_FONT_TEXT_18, LV_PART_MAIN);
     lv_obj_set_style_pad_left(status, 10, LV_PART_MAIN);

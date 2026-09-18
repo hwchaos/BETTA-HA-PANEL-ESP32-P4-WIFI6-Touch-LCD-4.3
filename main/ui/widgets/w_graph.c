@@ -21,9 +21,15 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "app_config.h"
+#include "app_task.h"
+#include "diag/dsi_underrun_watch.h"
+#include "diag/storage_guard.h"
+#include "sd/sd_card.h"
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_memory.h"
+#include "ui/ui_value_anim.h"
 #include "ui/theme/theme_default.h"
 
 #define GRAPH_POINTS_MIN 16
@@ -59,12 +65,20 @@
 #define GRAPH_HISTORY_MAX_SAMPLES 4096
 #define GRAPH_HISTORY_SAVE_INTERVAL_SEC 120U
 #define GRAPH_HISTORY_PERSIST_QUEUE_LEN 4U
+/* Upper bound on how long the persist task waits for a flash-writer pause to
+ * lift before it drops a snapshot.  The pause only covers esp_ota_end(). */
+#define GRAPH_HISTORY_PAUSE_MAX_WAIT_MS 8000
 #define GRAPH_HISTORY_PERSIST_TASK_STACK 4096
 #define GRAPH_HISTORY_PERSIST_TASK_PRIO 2
 
 #define GRAPH_HISTORY_FILE_MAGIC 0x47525048U
 #define GRAPH_HISTORY_FILE_VERSION 1U
+/* History lives on the microSD card when one is mounted, because a write to
+ * the internal flash parks both cores with the caches disabled and stalls the
+ * MIPI-DSI scan-out for as long as the erase/program takes - which is what
+ * makes the whole panel flash.  The internal filesystem is only a fallback. */
 #define GRAPH_HISTORY_DIR "/littlefs/graphs"
+#define GRAPH_HISTORY_DIR_SD APP_SD_MOUNT_POINT "/graphs"
 #define GRAPH_HISTORY_PATH_MAX 128
 
 #define GRAPH_VALUE_SCALE 10
@@ -98,6 +112,7 @@ typedef struct {
     lv_chart_series_t *series;
 
     char unit[16];
+    char history_id[APP_MAX_WIDGET_ID_LEN];
     char history_path[GRAPH_HISTORY_PATH_MAX];
     graph_sample_t history[GRAPH_HISTORY_MAX_SAMPLES];
     int history_count;
@@ -129,6 +144,7 @@ typedef struct {
 
 static const char *TAG = "w_graph";
 static bool s_graph_history_dir_ready = false;
+static const char *s_graph_history_dir_ready_for = NULL;
 static QueueHandle_t s_graph_persist_queue = NULL;
 static TaskHandle_t s_graph_persist_task = NULL;
 
@@ -381,25 +397,49 @@ static void graph_sanitize_widget_id(const char *widget_id, char *dst, size_t ds
     }
 }
 
+static const char *graph_history_dir(void)
+{
+    return sd_card_is_mounted() ? GRAPH_HISTORY_DIR_SD : GRAPH_HISTORY_DIR;
+}
+
 static bool graph_ensure_history_dir(void)
 {
-    if (s_graph_history_dir_ready) {
+    const char *dir = graph_history_dir();
+
+    /* The card can be inserted or removed at any time, so a previous "the
+     * directory is there" verdict only holds for the storage it was made for. */
+    if (s_graph_history_dir_ready && s_graph_history_dir_ready_for == dir) {
         return true;
     }
+    s_graph_history_dir_ready = false;
 
     struct stat st = {0};
-    if (stat(GRAPH_HISTORY_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
+    if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
         s_graph_history_dir_ready = true;
+        s_graph_history_dir_ready_for = dir;
         return true;
     }
 
-    (void)mkdir(GRAPH_HISTORY_DIR, 0775);
-    if (stat(GRAPH_HISTORY_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
+    (void)mkdir(dir, 0775);
+    if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
         s_graph_history_dir_ready = true;
+        s_graph_history_dir_ready_for = dir;
         return true;
     }
 
     return false;
+}
+
+static void graph_build_history_path_in(const char *dir, const char *widget_id, char *dst, size_t dst_size)
+{
+    if (dir == NULL || dst == NULL || dst_size == 0) {
+        return;
+    }
+    dst[0] = '\0';
+
+    char safe_id[APP_MAX_WIDGET_ID_LEN] = {0};
+    graph_sanitize_widget_id(widget_id, safe_id, sizeof(safe_id));
+    snprintf(dst, dst_size, "%s/%s.grph", dir, safe_id);
 }
 
 static void graph_build_history_path(const char *widget_id, char *dst, size_t dst_size)
@@ -413,9 +453,7 @@ static void graph_build_history_path(const char *widget_id, char *dst, size_t ds
         return;
     }
 
-    char safe_id[APP_MAX_WIDGET_ID_LEN] = {0};
-    graph_sanitize_widget_id(widget_id, safe_id, sizeof(safe_id));
-    snprintf(dst, dst_size, "%s/%s.grph", GRAPH_HISTORY_DIR, safe_id);
+    graph_build_history_path_in(graph_history_dir(), widget_id, dst, dst_size);
 }
 
 static void graph_history_drop_oldest(w_graph_ctx_t *ctx, int drop_count)
@@ -468,13 +506,38 @@ static void graph_history_trim_retention(w_graph_ctx_t *ctx, uint32_t newest_buc
     graph_history_drop_oldest(ctx, drop);
 }
 
+static esp_err_t graph_history_load_file(w_graph_ctx_t *ctx, const char *path);
+
 static esp_err_t graph_history_load(w_graph_ctx_t *ctx)
 {
     if (ctx == NULL || ctx->history_path[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
 
-    FILE *f = fopen(ctx->history_path, "rb");
+    esp_err_t err = graph_history_load_file(ctx, ctx->history_path);
+    if (err == ESP_ERR_NOT_FOUND && ctx->history_id[0] != '\0' &&
+        strncmp(ctx->history_path, GRAPH_HISTORY_DIR_SD, strlen(GRAPH_HISTORY_DIR_SD)) == 0) {
+        /* First start with a card present: the history written before this
+         * firmware version still sits in the internal filesystem.  Take it
+         * over once; the next save lands on the card. */
+        char legacy[GRAPH_HISTORY_PATH_MAX];
+        graph_build_history_path_in(GRAPH_HISTORY_DIR, ctx->history_id, legacy, sizeof(legacy));
+        err = graph_history_load_file(ctx, legacy);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "graph history moved to the card (widget %s)", ctx->history_id);
+            ctx->history_dirty = true;
+        }
+    }
+    return err;
+}
+
+static esp_err_t graph_history_load_file(w_graph_ctx_t *ctx, const char *path)
+{
+    if (ctx == NULL || path == NULL || path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    FILE *f = fopen(path, "rb");
     if (f == NULL) {
         return ESP_ERR_NOT_FOUND;
     }
@@ -518,8 +581,24 @@ static esp_err_t graph_history_save_buffer(const char *history_path, const graph
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Keep the freeze witnesses honest about who owns the storage right now:
+     * a card write shows up as SD traffic, a filesystem write as time spent
+     * inside the internal flash (which is the stall the driver turns into the
+     * full-screen flash). */
+    const bool on_sd = strncmp(history_path, APP_SD_MOUNT_POINT, strlen(APP_SD_MOUNT_POINT)) == 0;
+    if (on_sd) {
+        dsi_bus_activity_begin(DSI_BUS_SD);
+    } else {
+        storage_guard_flash_op_begin(FLASH_OP_GRAPH);
+    }
+
     FILE *f = fopen(history_path, "wb");
     if (f == NULL) {
+        if (on_sd) {
+            dsi_bus_activity_end(DSI_BUS_SD);
+        } else {
+            storage_guard_flash_op_end(FLASH_OP_GRAPH);
+        }
         return ESP_FAIL;
     }
 
@@ -533,6 +612,11 @@ static esp_err_t graph_history_save_buffer(const char *history_path, const graph
     size_t written = fwrite(&header, 1U, sizeof(header), f);
     if (written != sizeof(header)) {
         fclose(f);
+        if (on_sd) {
+            dsi_bus_activity_end(DSI_BUS_SD);
+        } else {
+            storage_guard_flash_op_end(FLASH_OP_GRAPH);
+        }
         return ESP_FAIL;
     }
 
@@ -540,11 +624,21 @@ static esp_err_t graph_history_save_buffer(const char *history_path, const graph
         written = fwrite(history, sizeof(graph_sample_t), (size_t)history_count, f);
         if (written != (size_t)history_count) {
             fclose(f);
+            if (on_sd) {
+                dsi_bus_activity_end(DSI_BUS_SD);
+            } else {
+                storage_guard_flash_op_end(FLASH_OP_GRAPH);
+            }
             return ESP_FAIL;
         }
     }
 
     fclose(f);
+    if (on_sd) {
+        dsi_bus_activity_end(DSI_BUS_SD);
+    } else {
+        storage_guard_flash_op_end(FLASH_OP_GRAPH);
+    }
     return ESP_OK;
 }
 
@@ -557,6 +651,23 @@ static void graph_persist_task(void *arg)
             continue;
         }
         if (job == NULL) {
+            continue;
+        }
+
+        /* esp_ota_end() reprograms MMU pages while this build executes code and
+         * rodata from PSRAM through the same MMU; a flash write from here would
+         * reset the chip (rst:0x7 HP_WDT).  Hold the snapshot in RAM until the
+         * window closes - the wait is bounded well below the interval at which
+         * the next snapshot is produced. */
+        int waited_ms = 0;
+        while (storage_guard_flash_writers_paused() && waited_ms < GRAPH_HISTORY_PAUSE_MAX_WAIT_MS) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            waited_ms += 20;
+        }
+        if (storage_guard_flash_writers_paused()) {
+            ESP_LOGW(TAG, "history save skipped: flash writers still paused after %d ms (%s)",
+                waited_ms, job->history_path);
+            free(job);
             continue;
         }
 
@@ -584,8 +695,8 @@ static void graph_persist_start_once(void)
     }
 
     if (s_graph_persist_task == NULL) {
-        BaseType_t created = xTaskCreate(graph_persist_task, "graph_persist", GRAPH_HISTORY_PERSIST_TASK_STACK, NULL,
-            GRAPH_HISTORY_PERSIST_TASK_PRIO, &s_graph_persist_task);
+        BaseType_t created = app_task_create(graph_persist_task, "graph_persist", GRAPH_HISTORY_PERSIST_TASK_STACK,
+            NULL, GRAPH_HISTORY_PERSIST_TASK_PRIO, &s_graph_persist_task);
         if (created != pdPASS) {
             ESP_LOGW(TAG, "failed to start graph persist task");
             vQueueDelete(s_graph_persist_queue);
@@ -644,7 +755,20 @@ static bool graph_history_enqueue_persist(const w_graph_ctx_t *ctx, uint32_t buc
 
 static void graph_history_try_persist(w_graph_ctx_t *ctx, uint32_t bucket_ts, bool force)
 {
-    if (ctx == NULL || ctx->history_path[0] == '\0' || !ctx->history_dirty) {
+    if (ctx == NULL || !ctx->history_dirty) {
+        return;
+    }
+
+    /* The card can appear or disappear while this widget lives, so re-resolve
+     * the path whenever the active storage no longer matches the one the path
+     * was built for (and retry a path whose directory did not exist yet). */
+    const bool path_on_sd = strncmp(ctx->history_path, APP_SD_MOUNT_POINT, strlen(APP_SD_MOUNT_POINT)) == 0;
+    if (ctx->history_id[0] != '\0' &&
+        (ctx->history_path[0] == '\0' || sd_card_is_mounted() != path_on_sd)) {
+        graph_build_history_path(ctx->history_id, ctx->history_path, sizeof(ctx->history_path));
+    }
+
+    if (ctx->history_path[0] == '\0') {
         return;
     }
 
@@ -1407,16 +1531,19 @@ esp_err_t w_graph_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget
     theme_default_style_card(card);
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_style_text_color(title, theme_default_color_text_muted(), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_20, LV_PART_MAIN);
 
     lv_obj_t *value = lv_label_create(card);
+    lv_obj_add_flag(value, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(value, "--");
     lv_obj_set_style_text_color(value, theme_default_color_text_primary(), LV_PART_MAIN);
     lv_obj_set_style_text_font(value, APP_FONT_TEXT_20, LV_PART_MAIN);
 
     lv_obj_t *meta = lv_label_create(card);
+    lv_obj_add_flag(meta, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(meta, "");
     lv_obj_set_style_text_color(meta, theme_default_color_text_muted(), LV_PART_MAIN);
     lv_obj_set_style_text_font(meta, APP_FONT_TEXT_20, LV_PART_MAIN);
@@ -1466,7 +1593,8 @@ esp_err_t w_graph_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget
     }
     ctx->unavailable = true;
     ctx->unit[0] = '\0';
-    graph_build_history_path(def->id, ctx->history_path, sizeof(ctx->history_path));
+    snprintf(ctx->history_id, sizeof(ctx->history_id), "%s", def->id);
+    graph_build_history_path(ctx->history_id, ctx->history_path, sizeof(ctx->history_path));
     if (ctx->history_path[0] != '\0') {
         (void)graph_history_load(ctx);
         if (ctx->history_count > 0) {
@@ -1542,7 +1670,7 @@ void w_graph_apply_state(ui_widget_instance_t *instance, const ha_state_t *state
 
     char value_text[48] = {0};
     graph_format_value(value_text, sizeof(value_text), numeric, ctx->unit);
-    lv_label_set_text(ctx->value_label, value_text);
+    ui_value_anim_set_text(ctx->value_label, value_text);
 
     uint32_t bucket_ts = graph_current_bucket_ts();
     bool history_changed = graph_history_append_or_update(ctx, bucket_ts, numeric, NULL);

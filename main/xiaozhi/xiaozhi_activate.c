@@ -59,7 +59,12 @@
 #define XZ_ACT_MESSAGE_MAX    256
 #define XZ_ACT_URL_MAX        (APP_XIAOZHI_OTA_URL_MAX_LEN + 16)
 #define XZ_ACT_BODY_MAX       1024
-#define XZ_ACT_STACK          8192
+/* The activation task runs esp_http_client over HTTPS with the CA
+ * bundle attached, so the mbedTLS handshake + certificate verification
+ * chain stacks on top of this function's own ~3.5 KB frame (URLs, ws
+ * token, pairing hint). 8 KB overflowed (stack-protection fault inside
+ * vsnprintf); 20 KB leaves a comfortable margin. */
+#define XZ_ACT_STACK          20480
 #define XZ_ACT_HTTP_TIMEOUT_MS 20000
 
 /* Retry pacing (mirrors the official ota.cc behaviour). */
@@ -436,6 +441,10 @@ static void activate_task_fn(void *arg)
     xz_ui_show_overlay("Xiaozhi AI", "", "Laczenie z chmura Xiaozhi...");
 
     for (;;) {
+        ESP_LOGI(TAG, "stack hwm=%u B free (of %d)",
+                 (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+                 (int)XZ_ACT_STACK);
+
         /* --- 1) check-version ------------------------------------- */
         char *info = build_system_info_json(device_id, client_id);
         if (info == NULL) {

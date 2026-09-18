@@ -41,6 +41,9 @@
 #ifndef APP_HAVE_POPPINS_REGULAR_40
 #define APP_HAVE_POPPINS_REGULAR_40 0
 #endif
+#ifndef APP_HAVE_CLOCK_DIGITS_84
+#define APP_HAVE_CLOCK_DIGITS_84 0
+#endif
 
 #if APP_HAVE_POPPINS_REGULAR_12
 LV_FONT_DECLARE(poppins_regular_12);
@@ -197,4 +200,11 @@ LV_FONT_DECLARE(poppins_regular_40);
 #define APP_FONT_DISPLAY_40 (&lv_font_montserrat_40)
 #else
 #define APP_FONT_DISPLAY_40 APP_FONT_DISPLAY_38
+#endif
+
+#if APP_HAVE_CLOCK_DIGITS_84
+LV_FONT_DECLARE(clock_digits_84);
+#define APP_FONT_CLOCK_84 (&clock_digits_84)
+#else
+#define APP_FONT_CLOCK_84 APP_FONT_DISPLAY_40
 #endif

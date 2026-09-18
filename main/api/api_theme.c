@@ -10,9 +10,11 @@
 #include "cJSON.h"
 #include "esp_log.h"
 
-#include "app_events.h"
 #include "ui/theme/theme_palette.h"
 #include "ui/theme/theme_store.h"
+#include "ui/ui_pages.h"
+#include "ui/ui_runtime.h"
+#include "ui/ui_theme_router.h"
 
 static const char *TAG = "api_theme";
 
@@ -191,9 +193,13 @@ static esp_err_t api_themes_active_put(httpd_req_t *req)
         return api_theme_send_error(req, "404 Not Found", "theme not found");
     }
     (void)theme_store_set_active_id(id_copy);
-    {
-        app_event_t event = {.type = EV_LAYOUT_UPDATED};
-        (void)app_events_publish(&event, pdMS_TO_TICKS(20));
+    /* The global theme changed: the per-page overrides and the day/night
+     * schedule are resolved against it. */
+    ui_theme_router_set_base_id(id_copy);
+    if (ui_runtime_request_layout_reload_on_page(ui_pages_current_id()) != ESP_OK) {
+        ESP_LOGW(TAG, "active theme stored as %s but the UI rebuild failed", id_copy);
+        return api_theme_send_error(req, "503 Service Unavailable",
+                                   "theme stored but the panel could not apply it");
     }
     ESP_LOGI(TAG, "active theme set to %s", id_copy);
 
@@ -262,8 +268,9 @@ static esp_err_t api_themes_custom_put(httpd_req_t *req)
     /* If the active theme is being updated, re-apply it. */
     if (strcmp(entry.id, theme_palette_active_id()) == 0) {
         theme_palette_set_active(&entry.palette, entry.id, entry.name);
-        app_event_t event = {.type = EV_LAYOUT_UPDATED};
-        (void)app_events_publish(&event, pdMS_TO_TICKS(20));
+        if (ui_runtime_request_layout_reload() != ESP_OK) {
+            ESP_LOGW(TAG, "updated theme %s saved but the UI rebuild failed", entry.id);
+        }
     }
 
     cJSON *resp = cJSON_CreateObject();
@@ -300,9 +307,15 @@ static esp_err_t api_themes_custom_delete(httpd_req_t *req)
     if (strcmp(id, theme_palette_active_id()) == 0) {
         (void)theme_palette_activate_by_id("dark_v2");
         (void)theme_store_set_active_id("dark_v2");
-        app_event_t event = {.type = EV_LAYOUT_UPDATED};
-        (void)app_events_publish(&event, pdMS_TO_TICKS(20));
+        ui_theme_router_set_base_id("dark_v2");
+        if (ui_runtime_request_layout_reload_on_page(ui_pages_current_id()) != ESP_OK) {
+            ESP_LOGW(TAG, "active theme deleted, fallback to dark_v2 but the UI rebuild failed");
+        }
     }
+
+    /* A page override may point at the theme that just disappeared: drop it so
+     * the pages fall back to the global look instead of a stale id. */
+    ui_theme_router_forget_theme(id);
 
     api_theme_set_headers(req);
     return httpd_resp_sendstr(req, "{\"ok\":true}");

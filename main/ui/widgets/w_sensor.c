@@ -14,7 +14,9 @@
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_memory.h"
+#include "ui/ui_value_anim.h"
 #include "ui/theme/theme_default.h"
+#include "diag/system_log.h"
 
 #if LV_FONT_MONTSERRAT_24
 #define SENSOR_VALUE_FONT_SMALL APP_FONT_TEXT_24
@@ -78,8 +80,54 @@ typedef struct {
     int64_t last_update_ms;
     bool has_timestamp;
     bool unavailable;
+    bool has_value_color;
+    lv_color_t value_color;
     lv_timer_t *age_timer;
 } w_sensor_ctx_t;
+
+static bool sensor_is_hex_digit(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static int sensor_hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return 0;
+}
+
+static bool sensor_parse_hex_color(const char *text, lv_color_t *out_color)
+{
+    if (text == NULL || out_color == NULL) {
+        return false;
+    }
+    size_t len = strlen(text);
+    if (len > 0 && text[0] == '#') {
+        text++;
+        len--;
+    }
+    if (len != 6) {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++) {
+        if (!sensor_is_hex_digit(text[i])) {
+            return false;
+        }
+    }
+    uint8_t r = (uint8_t)((sensor_hex_nibble(text[0]) << 4) | sensor_hex_nibble(text[1]));
+    uint8_t g = (uint8_t)((sensor_hex_nibble(text[2]) << 4) | sensor_hex_nibble(text[3]));
+    uint8_t b = (uint8_t)((sensor_hex_nibble(text[4]) << 4) | sensor_hex_nibble(text[5]));
+    *out_color = lv_color_make(r, g, b);
+    return true;
+}
 
 static bool sensor_state_is_unavailable(const char *state_text)
 {
@@ -87,6 +135,48 @@ static bool sensor_state_is_unavailable(const char *state_text)
         return true;
     }
     return strcmp(state_text, "unavailable") == 0 || strcmp(state_text, "unknown") == 0;
+}
+
+static bool sensor_parse_float_relaxed(const char *text, float *out_value)
+{
+    if (text == NULL || out_value == NULL || text[0] == '\0') {
+        return false;
+    }
+
+    char buf[40] = {0};
+    size_t n = strnlen(text, sizeof(buf) - 1U);
+    for (size_t i = 0; i < n; i++) {
+        buf[i] = (text[i] == ',') ? '.' : text[i];
+    }
+    buf[n] = '\0';
+
+    char *end = NULL;
+    float parsed = strtof(buf, &end);
+    if (end == buf) {
+        return false;
+    }
+    *out_value = parsed;
+    return true;
+}
+
+static void sensor_format_numeric_value(char *dst, size_t dst_size, float value, const char *unit)
+{
+    if (dst == NULL || dst_size == 0) {
+        return;
+    }
+
+    int whole = (int)value;
+    float frac = value - (float)whole;
+    if (frac < 0.0f) {
+        frac = -frac;
+    }
+    bool show_decimal = frac >= 0.05f;
+
+    if (unit != NULL && unit[0] != '\0') {
+        snprintf(dst, dst_size, show_decimal ? "%.1f %s" : "%.0f %s", (double)value, unit);
+    } else {
+        snprintf(dst, dst_size, show_decimal ? "%.1f" : "%.0f", (double)value);
+    }
 }
 
 static int64_t sensor_now_ms(void)
@@ -121,7 +211,7 @@ static void sensor_set_value_text(w_sensor_ctx_t *ctx, const char *text)
     if (ctx == NULL || ctx->value_label == NULL) {
         return;
     }
-    lv_label_set_text(ctx->value_label, (text != NULL && text[0] != '\0') ? text : "--");
+    ui_value_anim_set_text(ctx->value_label, (text != NULL && text[0] != '\0') ? text : "--");
 }
 
 static void sensor_update_age_label(w_sensor_ctx_t *ctx)
@@ -235,12 +325,14 @@ static void sensor_apply_unavailable(w_sensor_ctx_t *ctx)
     ctx->has_timestamp = false;
     ctx->last_update_ms = 0;
     sensor_set_value_text(ctx, ui_i18n_get("common.unavailable", "unavailable"));
+    lv_obj_set_style_text_color(ctx->value_label, theme_default_color_text_muted(), LV_PART_MAIN);
     sensor_update_age_label(ctx);
     sensor_apply_layout(ctx);
 }
 
 static void sensor_age_timer_cb(lv_timer_t *timer)
 {
+    system_log_note_lvgl_cb("sensor_age_timer_cb");
     if (timer == NULL) {
         return;
     }
@@ -293,16 +385,19 @@ esp_err_t w_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_obj_set_style_pad_bottom(card, 10, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_style_text_color(title, theme_default_color_text_muted(), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_20, LV_PART_MAIN);
 
     lv_obj_t *value = lv_label_create(card);
+    lv_obj_add_flag(value, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(value, "--");
     lv_obj_set_style_text_color(value, theme_default_color_text_primary(), LV_PART_MAIN);
     lv_obj_set_style_text_font(value, SENSOR_VALUE_FONT_MEDIUM, LV_PART_MAIN);
 
     lv_obj_t *age = lv_label_create(card);
+    lv_obj_add_flag(age, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(age, ui_i18n_get("sensor.age.just_now", "just now"));
     lv_obj_set_style_text_color(age, theme_default_color_text_muted(), LV_PART_MAIN);
     lv_obj_set_style_text_font(age, SENSOR_META_FONT, LV_PART_MAIN);
@@ -321,6 +416,10 @@ esp_err_t w_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     ctx->last_update_ms = 0;
     ctx->has_timestamp = false;
     ctx->unavailable = false;
+    ctx->has_value_color = sensor_parse_hex_color(def->sensor_value_color, &ctx->value_color);
+    if (ctx->has_value_color) {
+        lv_obj_set_style_text_color(value, ctx->value_color, LV_PART_MAIN);
+    }
     ctx->age_timer = lv_timer_create(sensor_age_timer_cb, 30000, ctx);
 
     lv_obj_add_event_cb(card, w_sensor_event_cb, LV_EVENT_DELETE, ctx);
@@ -360,7 +459,12 @@ void w_sensor_apply_state(ui_widget_instance_t *instance, const ha_state_t *stat
         }
     }
 
-    if (unit != NULL && unit[0] != '\0') {
+    float numeric = 0.0f;
+    bool is_numeric = sensor_parse_float_relaxed(state->state, &numeric);
+
+    if (is_numeric) {
+        sensor_format_numeric_value(value_text, sizeof(value_text), numeric, unit);
+    } else if (unit != NULL && unit[0] != '\0') {
         snprintf(value_text, sizeof(value_text), "%s %s", state->state, unit);
     } else {
         snprintf(value_text, sizeof(value_text), "%s", state->state);
@@ -375,6 +479,8 @@ void w_sensor_apply_state(ui_widget_instance_t *instance, const ha_state_t *stat
     ctx->has_timestamp = ctx->last_update_ms > 0;
 
     sensor_set_value_text(ctx, value_text);
+    lv_obj_set_style_text_color(ctx->value_label,
+        ctx->has_value_color ? ctx->value_color : theme_default_color_text_primary(), LV_PART_MAIN);
     sensor_update_age_label(ctx);
     sensor_apply_layout(ctx);
 }

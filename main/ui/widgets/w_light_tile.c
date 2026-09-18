@@ -16,6 +16,7 @@
 #include "ha/ha_model.h"
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_bindings.h"
+#include "ui/ui_slider_touch.h"
 #include "ui/fonts/mdi_font_registry.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_memory.h"
@@ -59,6 +60,10 @@ typedef struct {
     char *effect_list;
     lv_coord_t configured_min_dim;
     bool long_press_active;
+    bool slider_dragging;
+    bool slider_click_guard;
+    int slider_last_sent_value;
+    uint32_t slider_last_send_ms;
 } w_light_tile_ctx_t;
 
 #define ICON_CP_MDI_LIGHTBULB_ON 0xF06E8U
@@ -71,6 +76,15 @@ typedef struct {
 #define LIGHT_FX_ROW_H 52
 #define LIGHT_FX_BTN_H 44
 #define LIGHT_FX_POOL_MAX 8
+
+/* The LVGL slider only accepts presses on its knob and is thinner than a
+ * fingertip, so dimming is driven by the card: any press inside this band
+ * around the track starts a brightness drag. */
+#define LIGHT_SLIDER_TOUCH_PAD 10
+#define LIGHT_SLIDER_TOUCH_MIN_HEIGHT 32
+#define LIGHT_SLIDER_TOUCH_SIDE_PAD 4
+#define LIGHT_SLIDER_SEND_INTERVAL_MS 150
+
 static const char *TAG = "w_light_tile";
 
 typedef enum {
@@ -109,7 +123,8 @@ static const light_tile_layout_t LIGHT_LAYOUT_COMPACT = {
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
     .title_bottom = -28,
 #else
-    .title_bottom = -40,
+    /* Keeps the 42 px icon clear of the title in short (150 px) COMPACT cards. */
+    .title_bottom = -26,
 #endif
     .top_label_y = 0,
     .slider_side_margin = 14,
@@ -1269,6 +1284,8 @@ static void light_popup_effect_button_event_cb(lv_event_t *event)
     }
 }
 
+static void light_popup_effect_event_cb(lv_event_t *event);
+
 static void light_popup_delete_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_DELETE) {
@@ -1496,6 +1513,7 @@ static void light_popup_add_band_panel(light_popup_ctx_t *popup, lv_obj_t *card,
         lv_obj_set_style_shadow_width(popup->temp_slider, 0, LV_PART_KNOB);
         lv_obj_add_event_cb(popup->temp_slider, light_popup_temp_slider_event_cb, LV_EVENT_VALUE_CHANGED, popup);
         lv_obj_add_event_cb(popup->temp_slider, light_popup_temp_slider_event_cb, LV_EVENT_RELEASED, popup);
+        ui_slider_touch_enable(popup->temp_slider);
 
         popup->warm_label = lv_label_create(popup->band_panel);
         lv_label_set_text(popup->warm_label, ui_i18n_get("light.warm", "Warm"));
@@ -1559,6 +1577,7 @@ static void light_popup_add_band_panel(light_popup_ctx_t *popup, lv_obj_t *card,
         lv_obj_set_style_shadow_width(popup->rgb_slider, 0, LV_PART_KNOB);
         lv_obj_add_event_cb(popup->rgb_slider, light_popup_rgb_slider_event_cb, LV_EVENT_VALUE_CHANGED, popup);
         lv_obj_add_event_cb(popup->rgb_slider, light_popup_rgb_slider_event_cb, LV_EVENT_RELEASED, popup);
+        ui_slider_touch_enable(popup->rgb_slider);
     }
 
     light_popup_update_rgb_preview(popup);
@@ -1780,6 +1799,121 @@ static void w_light_tile_open_color_popup(w_light_tile_ctx_t *ctx)
     light_popup_show_band(popup, initial_mode);
 }
 
+/* True when the press landed in the touch band that surrounds the slider track. */
+static bool light_slider_hit_band_contains(lv_obj_t *card, lv_obj_t *slider, const lv_point_t *point)
+{
+    if (card == NULL || slider == NULL || point == NULL || lv_obj_has_flag(slider, LV_OBJ_FLAG_HIDDEN)) {
+        return false;
+    }
+
+    lv_area_t slider_area = {0};
+    lv_area_t card_area = {0};
+    lv_obj_get_coords(slider, &slider_area);
+    lv_obj_get_coords(card, &card_area);
+
+    const lv_coord_t track_h = (slider_area.y2 - slider_area.y1) + 1;
+    if (track_h <= 0) {
+        return false;
+    }
+    lv_coord_t band_h = track_h + (LIGHT_SLIDER_TOUCH_PAD * 2);
+    if (band_h < LIGHT_SLIDER_TOUCH_MIN_HEIGHT) {
+        band_h = LIGHT_SLIDER_TOUCH_MIN_HEIGHT;
+    }
+
+    lv_coord_t band_top = slider_area.y1 - ((band_h - track_h) / 2);
+    lv_coord_t band_bottom = band_top + band_h - 1;
+    if (band_top < card_area.y1 + 2) {
+        band_top = card_area.y1 + 2;
+    }
+    if (band_bottom > card_area.y2 - 2) {
+        band_bottom = card_area.y2 - 2;
+    }
+
+    if (point->y < band_top || point->y > band_bottom) {
+        return false;
+    }
+    return point->x >= (slider_area.x1 - LIGHT_SLIDER_TOUCH_SIDE_PAD) &&
+           point->x <= (slider_area.x2 + LIGHT_SLIDER_TOUCH_SIDE_PAD);
+}
+
+static int light_slider_value_at_x(lv_obj_t *slider, lv_coord_t x)
+{
+    lv_area_t slider_area = {0};
+    lv_obj_get_coords(slider, &slider_area);
+    const lv_coord_t width = (slider_area.x2 - slider_area.x1) + 1;
+    if (width <= 0) {
+        return 0;
+    }
+
+    lv_coord_t rel = x - slider_area.x1;
+    if (rel < 0) {
+        rel = 0;
+    }
+    if (rel >= width) {
+        rel = width - 1;
+    }
+    return clamp_percent((int)(((rel * 100) + (width / 2)) / width));
+}
+
+/* Sends brightness to HA while dragging. `force` bypasses the throttle so a
+ * plain tap reacts immediately; repeated values are never re-sent. */
+static bool light_slider_send(w_light_tile_ctx_t *ctx, int value, bool force)
+{
+    if (ctx == NULL) {
+        return false;
+    }
+    value = clamp_percent(value);
+    const uint32_t now = lv_tick_get();
+    if (!force && (uint32_t)(now - ctx->slider_last_send_ms) < LIGHT_SLIDER_SEND_INTERVAL_MS) {
+        return false;
+    }
+    if (!force && value == ctx->slider_last_sent_value) {
+        return false;
+    }
+
+    ctx->slider_last_send_ms = now;
+    if (ui_bindings_set_slider_value(ctx->entity_id, value) == ESP_OK) {
+        ctx->slider_last_sent_value = value;
+        return true;
+    }
+    ESP_LOGW(TAG, "brightness %d%% for %s rejected", value, ctx->entity_id);
+    return false;
+}
+
+/* Light-weight update used on every drag step; the full tile refresh only runs
+ * once the finger is lifted. */
+static void light_slider_show_drag_value(lv_obj_t *card, int value)
+{
+    light_tile_widgets_t w = {0};
+    if (!light_get_widgets(card, &w)) {
+        return;
+    }
+    lv_slider_set_value(w.slider, clamp_percent(value), LV_ANIM_OFF);
+    light_set_value_label(w.value_label, value);
+}
+
+static void light_slider_begin_drag(w_light_tile_ctx_t *ctx, lv_obj_t *card, lv_obj_t *slider, const lv_point_t *point)
+{
+    const int value = light_slider_value_at_x(slider, point->x);
+    ctx->slider_dragging = true;
+    ctx->slider_last_send_ms = lv_tick_get();
+    ctx->brightness = value;
+    ctx->is_on = value > 0;
+    light_slider_show_drag_value(card, value);
+    light_slider_send(ctx, value, true);
+}
+
+static void light_slider_end_drag(w_light_tile_ctx_t *ctx, bool guard_click)
+{
+    const int value = clamp_percent(ctx->brightness);
+    ctx->slider_dragging = false;
+    if (guard_click) {
+        ctx->slider_click_guard = true;
+    }
+    light_slider_send(ctx, value, true);
+    light_apply_visual(ctx->card, ctx, value > 0, value, (value > 0) ? "ON" : "OFF");
+}
+
 static void w_light_tile_card_event_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -1788,7 +1922,62 @@ static void w_light_tile_card_event_cb(lv_event_t *event)
         return;
     }
 
-    if (code == LV_EVENT_LONG_PRESSED) {
+    if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
+        if (code == LV_EVENT_PRESSED) {
+            /* A new touch always starts a fresh interaction. */
+            ctx->slider_click_guard = false;
+        }
+        if (!ctx->can_dim || ctx->unavailable) {
+            return;
+        }
+        light_tile_widgets_t w = {0};
+        if (!light_get_widgets(ctx->card, &w)) {
+            return;
+        }
+        if (code == LV_EVENT_PRESSING) {
+            if (!ctx->slider_dragging) {
+                return;
+            }
+            lv_indev_t *indev = lv_indev_active();
+            lv_point_t point = {0};
+            if (indev == NULL) {
+                return;
+            }
+            lv_indev_get_point(indev, &point);
+            const int value = light_slider_value_at_x(w.slider, point.x);
+            if (value == ctx->brightness) {
+                return;
+            }
+            ctx->brightness = value;
+            ctx->is_on = value > 0;
+            light_slider_show_drag_value(ctx->card, value);
+            light_slider_send(ctx, value, false);
+            return;
+        }
+
+        lv_indev_t *indev = lv_indev_active();
+        lv_point_t point = {0};
+        if (indev == NULL) {
+            return;
+        }
+        lv_indev_get_point(indev, &point);
+        if (light_slider_hit_band_contains(ctx->card, w.slider, &point)) {
+            light_slider_begin_drag(ctx, ctx->card, w.slider, &point);
+        }
+    } else if (code == LV_EVENT_RELEASED) {
+        if (ctx->slider_dragging) {
+            light_slider_end_drag(ctx, true);
+        }
+    } else if (code == LV_EVENT_PRESS_LOST) {
+        if (ctx->slider_dragging) {
+            /* The pointer left the tile; keep the value reached so far but let
+             * the next tap toggle power again. */
+            light_slider_end_drag(ctx, false);
+        }
+    } else if (code == LV_EVENT_LONG_PRESSED) {
+        if (ctx->slider_dragging) {
+            return;
+        }
         if (ctx->unavailable || (!ctx->can_color && !ctx->can_color_temp && !ctx->can_effect)) {
             return;
         }
@@ -1803,11 +1992,15 @@ static void w_light_tile_card_event_cb(lv_event_t *event)
             ctx->long_press_active = false;
             return;
         }
+        if (ctx->slider_click_guard) {
+            ctx->slider_click_guard = false;
+            return;
+        }
         if (ctx->unavailable) {
             return;
         }
 
-        lv_obj_t *card = lv_event_get_target(event);
+        lv_obj_t *card = ctx->card;
         bool prev_is_on = ctx->is_on;
         int prev_brightness = ctx->brightness;
         bool prev_unavailable = ctx->unavailable;
@@ -1836,8 +2029,8 @@ static void w_light_tile_card_event_cb(lv_event_t *event)
                 (ctx->is_on ? "ON" : "OFF"));
         }
     } else if (code == LV_EVENT_SIZE_CHANGED) {
-        lv_obj_t *card = lv_event_get_target(event);
-        light_apply_visual(card, ctx, ctx->is_on, ctx->brightness, ctx->unavailable ? "unavailable" : (ctx->is_on ? "ON" : "OFF"));
+        light_apply_visual(ctx->card, ctx, ctx->is_on, ctx->brightness,
+            ctx->unavailable ? "unavailable" : (ctx->is_on ? "ON" : "OFF"));
     } else if (code == LV_EVENT_DELETE) {
         if (ctx->popup_overlay != NULL) {
             lv_obj_t *overlay = ctx->popup_overlay;
@@ -1848,60 +2041,11 @@ static void w_light_tile_card_event_cb(lv_event_t *event)
             free(ctx->effect_list);
             ctx->effect_list = NULL;
         }
+        if (ctx->effect_list != NULL) {
+            free(ctx->effect_list);
+            ctx->effect_list = NULL;
+        }
         free(ctx);
-    }
-}
-
-static void w_light_tile_slider_event_cb(lv_event_t *event)
-{
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED) {
-        return;
-    }
-
-    w_light_tile_ctx_t *ctx = (w_light_tile_ctx_t *)lv_event_get_user_data(event);
-    lv_obj_t *slider = lv_event_get_target(event);
-    lv_obj_t *card = (slider != NULL) ? lv_obj_get_parent(slider) : NULL;
-    lv_obj_t *value_label = (card != NULL) ? lv_obj_get_child(card, 4) : NULL;
-    int value = (slider != NULL) ? lv_slider_get_value(slider) : 0;
-
-    if (ctx != NULL && !ctx->can_dim) {
-        return;
-    }
-
-    if (code == LV_EVENT_VALUE_CHANGED) {
-        if (ctx != NULL) {
-            ctx->brightness = clamp_percent(value);
-        }
-        light_set_value_label(value_label, value);
-        return;
-    }
-
-    if (ctx != NULL) {
-        bool prev_is_on = ctx->is_on;
-        int prev_brightness = ctx->brightness;
-        bool prev_unavailable = ctx->unavailable;
-
-        int next_brightness = clamp_percent(value);
-        bool next_is_on = (next_brightness > 0);
-
-        esp_err_t err = ui_bindings_set_slider_value(ctx->entity_id, next_brightness);
-        if (err == ESP_OK) {
-            ctx->brightness = next_brightness;
-            ctx->is_on = next_is_on;
-            ctx->unavailable = false;
-            if (card != NULL) {
-                light_apply_visual(card, ctx, ctx->is_on, ctx->brightness, ctx->is_on ? "ON" : "OFF");
-            }
-        } else {
-            ctx->is_on = prev_is_on;
-            ctx->brightness = prev_brightness;
-            ctx->unavailable = prev_unavailable;
-            if (card != NULL) {
-                light_apply_visual(card, ctx, ctx->is_on, ctx->brightness, ctx->unavailable ? "unavailable" :
-                    (ctx->is_on ? "ON" : "OFF"));
-            }
-        }
     }
 }
 
@@ -1935,6 +2079,7 @@ esp_err_t w_light_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_w
     lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 8);
 
     lv_obj_t *title = lv_label_create(card);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, def->title[0] ? def->title : def->id);
     lv_obj_set_width(title, def->w);
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_16, LV_PART_MAIN);
@@ -1942,6 +2087,7 @@ esp_err_t w_light_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_w
     lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, -46);
 
     lv_obj_t *state_label = lv_label_create(card);
+    lv_obj_add_flag(state_label, LV_OBJ_FLAG_USER_2);
     lv_label_set_text(state_label, ui_i18n_get("common.off", "OFF"));
     lv_obj_set_style_text_font(state_label, APP_FONT_TEXT_16, LV_PART_MAIN);
     lv_obj_align(state_label, LV_ALIGN_TOP_LEFT, 0, 2);
@@ -1956,8 +2102,12 @@ esp_err_t w_light_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_w
     lv_slider_set_value(slider, 0, LV_ANIM_OFF);
     lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_clear_flag(slider, LV_OBJ_FLAG_EVENT_BUBBLE);
+    /* The slider only reacts to presses on its knob; the card handles the whole
+     * touch band instead so the track is as easy to grab as the knob. */
+    lv_obj_clear_flag(slider, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *value_label = lv_label_create(card);
+    lv_obj_add_flag(value_label, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(value_label, "0 %");
     lv_obj_set_style_text_font(value_label, APP_FONT_TEXT_16, LV_PART_MAIN);
     lv_obj_align(value_label, LV_ALIGN_TOP_RIGHT, 0, 2);
@@ -2008,13 +2158,20 @@ esp_err_t w_light_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_w
     ctx->current_effect[0] = '\0';
     ctx->effect_list = NULL;
     ctx->configured_min_dim = configured_min_dim;
+    ctx->long_press_active = false;
+    ctx->slider_dragging = false;
+    ctx->slider_click_guard = false;
+    ctx->slider_last_sent_value = -1;
+    ctx->slider_last_send_ms = 0;
 
+    lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_PRESSED, ctx);
+    lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_PRESSING, ctx);
+    lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_RELEASED, ctx);
+    lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_PRESS_LOST, ctx);
     lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_CLICKED, ctx);
     lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_LONG_PRESSED, ctx);
     lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_SIZE_CHANGED, ctx);
     lv_obj_add_event_cb(card, w_light_tile_card_event_cb, LV_EVENT_DELETE, ctx);
-    lv_obj_add_event_cb(slider, w_light_tile_slider_event_cb, LV_EVENT_VALUE_CHANGED, ctx);
-    lv_obj_add_event_cb(slider, w_light_tile_slider_event_cb, LV_EVENT_RELEASED, ctx);
 
     light_apply_visual(card, ctx, false, 0, "OFF");
     out_instance->ctx = ctx;
@@ -2054,8 +2211,15 @@ void w_light_tile_apply_state(ui_widget_instance_t *instance, const ha_state_t *
     int brightness = caps.brightness_percent;
     w_light_tile_ctx_t *ctx = (w_light_tile_ctx_t *)instance->ctx;
     if (ctx != NULL) {
-        ctx->is_on = is_on;
-        ctx->brightness = brightness;
+        if (ctx->slider_dragging) {
+            /* Home Assistant echoes the brightness we are still dragging;
+             * keep the value under the finger until the drag ends. */
+            is_on = ctx->is_on;
+            brightness = ctx->brightness;
+        } else {
+            ctx->is_on = is_on;
+            ctx->brightness = brightness;
+        }
         ctx->unavailable = false;
         ctx->can_dim = caps.can_dim;
         ctx->can_color = caps.can_color;

@@ -26,6 +26,7 @@
 
 #include "app_config.h"
 #include "app_events.h"
+#include "ha/ha_alarm_events.h"
 #include "ha/ha_energy_model.h"
 #include "ha/ha_light_capabilities.h"
 #include "ha/ha_model.h"
@@ -254,6 +255,13 @@ typedef struct {
     uint8_t priority_sync_count;
     int64_t next_priority_sync_unix_ms;
     uint32_t ws_error_streak;
+    uint32_t ws_connect_count;
+    /* WS session (ws_connect_count value) that already got the Alarmo event
+     * subscribes; a different value means they have to be re-sent. */
+    uint32_t alarm_events_sub_session;
+    uint32_t ws_disconnect_count;
+    uint32_t ws_recover_count;
+    int64_t ws_last_session_ms;
     ha_bg_budget_level_t bg_budget_level;
     int64_t bg_budget_level_since_unix_ms;
     int64_t bg_budget_last_log_unix_ms;
@@ -389,6 +397,10 @@ static const int64_t HA_WS_PING_TIMEOUT_MIN_MS = 45000;
 static const int64_t HA_WIFI_DOWN_RECOVERY_MS = 45000;
 static const int64_t HA_WIFI_FORCE_RECOVER_COOLDOWN_MS = 30000;
 static const int64_t HA_AUTH_RETRY_INTERVAL_MS = 1000;
+/* A healthy session authenticates within a few hundred milliseconds.  If the
+   auth_required frame never reaches us the link stays silent, so the ping
+   timeout and the disconnect path can never notice it. */
+static const int64_t HA_WS_AUTH_STALL_RECONNECT_MS = 5000;
 static const int64_t HA_INITIAL_LAYOUT_SYNC_RETRY_INTERVAL_MS = 6000;
 static const int64_t HA_PERIODIC_LAYOUT_SYNC_RETRY_INTERVAL_MS = 120000;
 static const int64_t HA_PRIORITY_SYNC_RETRY_INTERVAL_MS = 1500;
@@ -443,14 +455,22 @@ static const int64_t HA_WS_ENTITIES_SUBSCRIBE_STEP_DELAY_MS = 150;
  * HA) the stream will simply never include it, so without this watchdog
  * initial_layout_sync_done would stay false forever and every heavy-gated
  * call (todo.get_items, weather forecast, energy stats batches, …) would
- * be blocked indefinitely.  5 s is well beyond the observed end-to-end
- * latency (~100 ms per entity) and small enough that the user only sees
- * a brief "loading" flicker on a broken layout. */
-static const int64_t HA_WS_ENTITIES_SUBSCRIBE_COMPLETION_TIMEOUT_MS = 5000;
+ * be blocked indefinitely.  12 s is well beyond the observed end-to-end
+ * latency (~100 ms per entity) even on a loaded HA instance, and small
+ * enough that the user only sees a brief "loading" flicker on a broken
+ * layout.  Any entity that arrives *after* the watchdog fired is
+ * retracted from the missing list by ha_client_mark_entities_seen(), so
+ * a slow (but healthy) HA no longer produces a permanent false alarm in
+ * the web editor. */
+static const int64_t HA_WS_ENTITIES_SUBSCRIBE_COMPLETION_TIMEOUT_MS = 12000;
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
 static const int64_t HA_LIGHT_DISCOVERY_WS_STABLE_DELAY_MS = 30000;
 static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_STABLE_DELAY_MS = 8000;
-static const int64_t HA_LIGHT_DISCOVERY_PAGE_STEP_DELAY_MS = 1000;
+/* Lowered from 1000 ms: a large domain (light: 165 entities) needs 11 template
+ * pages and the page step delay dominated the total picker load time (~12 s).
+ * The requests are plain HTTP on one connection and stay sequential, so ~350 ms
+ * still leaves the WebSocket plenty of airtime. */
+static const int64_t HA_LIGHT_DISCOVERY_PAGE_STEP_DELAY_MS = 350;
 #else
 static const int64_t HA_LIGHT_DISCOVERY_WS_STABLE_DELAY_MS = 45000;
 static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_STABLE_DELAY_MS = 12000;
@@ -458,6 +478,13 @@ static const int64_t HA_LIGHT_DISCOVERY_PAGE_STEP_DELAY_MS = 700;
 #endif
 static const int64_t HA_LIGHT_DISCOVERY_RETRY_DELAY_MS = 6000;
 static const int64_t HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS = 5000;
+/* The "discovery waiting" line repeats for as long as the wait lasts, which on
+ * a busy panel is minutes, so its interval doubles per repeat up to this cap.
+ * The wait itself is unchanged - only the narration is slowed down. */
+static const int64_t HA_LIGHT_DISCOVERY_WAIT_LOG_MAX_INTERVAL_MS = 60000;
+/* Written and read only by the ha_client task loop, so it needs no locking.
+ * It is re-armed whenever the client state is reset (last_wait_log == 0). */
+static int64_t s_light_discovery_wait_log_backoff_ms = HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS;
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
 static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_FREE_BYTES = (96U * 1024U);
 static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_LARGEST_BYTES = (48U * 1024U);
@@ -466,8 +493,15 @@ static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_LARGEST_BYTES = (20
 #else
 static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_FREE_BYTES = (180U * 1024U);
 static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_LARGEST_BYTES = (80U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_FREE_BYTES = (120U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_LARGEST_BYTES = (48U * 1024U);
+static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_FREE_BYTES = (64U * 1024U);
+/* HA is reached over plain HTTP here, so a template page costs only the HTTP
+ * client's 2 KiB rx + 1 KiB tx buffers of internal RAM - the response body is
+ * capped at 16 KiB and lives in PSRAM, and cJSON is hooked to PSRAM.  The
+ * former 120 KiB/48 KiB gates were sized for a TLS handshake and were
+ * unreachable on this board, whose largest contiguous internal block settles
+ * around 31 KiB: the entity picker then waited forever with
+ * "reason=internal_block_priority". */
+static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_LARGEST_BYTES = (24U * 1024U);
 #endif
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_PAYLOAD_FALLBACK_CAP = 4096U;
@@ -491,12 +525,27 @@ static const bool HA_HTTP_KEEP_ALIVE = true;
  * block while still having enough PSRAM for the small template-page request. */
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
 static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_WAIT_ESCALATE_MS = 3000;
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_FREE_BYTES = (24U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_LARGEST_BYTES = (8U * 1024U);
+/* 24 KiB was unreachable while a large light discovery is cached: the panel then
+ * idles around 22 KiB internal free and refreshes stalled with
+ * "reason=internal_heap_priority" until unrelated background work freed memory.
+ * The discovery item caches live in PSRAM; the template page itself only needs the
+ * 1 KiB HTTP rx buffer, the 768 B tx buffer and a small JSON parse tree, so 18 KiB
+ * of internal free space is ample. */
+static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_FREE_BYTES = (18U * 1024U);
+/* The S3 480 panel settles on a ~7.5 KiB largest internal block once the HA
+ * WebSocket and the UI are up, which kept the template page permanently deferred
+ * ("reason=internal_block_priority") and left the entity picker pending forever.
+ * The template page itself only needs small internal buffers: the response body is
+ * allocated from PSRAM (capped at 4 KiB) and the HTTP rx/tx buffers are 1 KiB/768 B,
+ * so 6 KiB of contiguous internal heap plus the 18 KiB free floor above is enough. */
+static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_LARGEST_BYTES = (6U * 1024U);
 #else
 static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_WAIT_ESCALATE_MS = 8000;
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_FREE_BYTES = (72U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_LARGEST_BYTES = (40U * 1024U);
+/* Last-resort floor once the user has been waiting for the picker: barely above
+ * what the request itself allocates (2 KiB + 1 KiB HTTP buffers), so the picker
+ * always finishes instead of sitting in "internal_block_priority" forever. */
+static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_FREE_BYTES = (40U * 1024U);
+static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_LARGEST_BYTES = (8U * 1024U);
 #endif
 /* Internal heap on ESP32-P4 can be low in normal operation due to DMA/internal reservations.
    Tune thresholds to avoid permanent "protect" on healthy WS-only idle. */
@@ -544,6 +593,7 @@ static bool ha_client_is_tls_bad_input_data(int tls_stack_err);
 static void ha_client_priority_sync_queue_push_locked(const char *entity_id);
 static size_t ha_client_collect_layout_entity_ids(char *entity_ids, size_t max_count, bool *out_need_weather_forecast);
 static bool ha_client_layout_needs_ha_energy(void);
+static esp_err_t ha_client_send_subscribe_alarm_events(void);
 static bool ha_client_entity_is_weather(const char *entity_id);
 static bool ha_client_entity_id_in_list(const char *entity_ids, size_t entity_count, const char *entity_id);
 static void ha_client_queue_weather_priority_sync_from_layout(int64_t now_ms);
@@ -587,6 +637,16 @@ static size_t s_ws_rx_buf_cap = 0;
 static int s_ws_rx_len = 0;
 static int s_ws_rx_expected_len = 0;
 static bool s_ws_rx_overflow = false;
+
+/* Counts link-recovery escalations for /api/diagnostics. */
+static void ha_client_note_link_recover(void)
+{
+    xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+    if (s_client.ws_recover_count < UINT32_MAX) {
+        s_client.ws_recover_count++;
+    }
+    xSemaphoreGive(s_client.mutex);
+}
 
 static esp_err_t ha_client_force_recover_with_escalation(bool prefer_transport, const char *reason, bool *out_used_transport)
 {
@@ -1362,7 +1422,12 @@ static void safe_copy_cstr(char *dst, size_t dst_size, const char *src)
         dst[0] = '\0';
         return;
     }
-    size_t n = strnlen(src, dst_size - 1U);
+    /* Explicit loop instead of strnlen(): with -O2 GCC inlines this helper and rejects
+     * strnlen(src, dst_size - 1) when src is a smaller known array (-Werror=stringop-overread). */
+    size_t n = 0;
+    while (n + 1U < dst_size && src[n] != '\0') {
+        n++;
+    }
     memcpy(dst, src, n);
     dst[n] = '\0';
 }
@@ -2554,6 +2619,15 @@ static bool ha_client_serialize_media_player_attrs_compact(cJSON *src_attrs, cha
     cJSON *is_volume_muted = cJSON_GetObjectItemCaseSensitive(src_attrs, "is_volume_muted");
     if (cJSON_IsBool(is_volume_muted)) {
         cJSON_AddBoolToObject(compact, "is_volume_muted", cJSON_IsTrue(is_volume_muted));
+        any = true;
+    }
+
+    /* Keep app_id so the music page can tell Music Assistant players apart from
+     * native integrations (e.g. native WiiM/LinkPlay) that do not support MA
+     * playlist browsing. */
+    cJSON *app_id = cJSON_GetObjectItemCaseSensitive(src_attrs, "app_id");
+    if (cJSON_IsString(app_id) && app_id->valuestring != NULL && app_id->valuestring[0] != '\0') {
+        cJSON_AddStringToObject(compact, "app_id", app_id->valuestring);
         any = true;
     }
 
@@ -3932,6 +4006,28 @@ static size_t ha_client_collect_layout_entity_ids(char *entity_ids, size_t max_c
                 continue;
             }
 
+            if (cJSON_IsString(page_type) && page_type->valuestring != NULL &&
+                strcmp(page_type->valuestring, "music_assistant") == 0) {
+                cJSON *music = cJSON_GetObjectItemCaseSensitive(page, "music");
+                if (cJSON_IsObject(music)) {
+                    ha_client_collect_entity_id(music, "player_entity_id", entity_ids, &count, max_count);
+                    cJSON *players = cJSON_GetObjectItemCaseSensitive(music, "players");
+                    if (cJSON_IsArray(players)) {
+                        int n = cJSON_GetArraySize(players);
+                        for (int i = 0; i < n && count < max_count; i++) {
+                            cJSON *item = cJSON_GetArrayItem(players, i);
+                            if (cJSON_IsString(item) && item->valuestring != NULL && item->valuestring[0] != '\0' &&
+                                !ha_client_entity_id_in_list(entity_ids, count, item->valuestring)) {
+                                char *dst = entity_ids + (count * APP_MAX_ENTITY_ID_LEN);
+                                safe_copy_cstr(dst, APP_MAX_ENTITY_ID_LEN, item->valuestring);
+                                count++;
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
             cJSON *widgets = cJSON_GetObjectItemCaseSensitive(page, "widgets");
             if (!cJSON_IsArray(widgets)) {
                 continue;
@@ -5188,6 +5284,31 @@ static esp_err_t ha_client_send_subscribe_state_changed(void)
     return err;
 }
 
+/* Alarmo fires arm/disarm results as bus events (alarmo_failed_to_arm,
+ * alarmo_command_success); they never show up in the entity attributes, so the
+ * alarm tile can only explain a refused arming when it listens to them.
+ * One subscribe message per event type, sent once per WS session. */
+static esp_err_t ha_client_send_subscribe_alarm_events(void)
+{
+    for (size_t i = 0; i < HA_ALARM_EVENT_TYPES; i++) {
+        cJSON *root = cJSON_CreateObject();
+        if (root == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+        cJSON_AddNumberToObject(root, "id", (double)ha_client_next_message_id());
+        cJSON_AddStringToObject(root, "type", "subscribe_events");
+        cJSON_AddStringToObject(root, "event_type", ha_alarm_event_type_names[i]);
+        esp_err_t err = ha_client_send_json(root);
+        cJSON_Delete(root);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG_HA_CLIENT, "Failed to subscribe to %s", ha_alarm_event_type_names[i]);
+            return err;
+        }
+    }
+    ESP_LOGI(TAG_HA_CLIENT, "Subscribed to %u Alarmo events", (unsigned)HA_ALARM_EVENT_TYPES);
+    return ESP_OK;
+}
+
 static esp_err_t ha_client_send_ping(uint32_t *out_ping_id)
 {
     cJSON *root = cJSON_CreateObject();
@@ -5481,6 +5602,40 @@ static void ha_client_mark_entities_seen(const char *entity_id)
             safe_copy_cstr(seen_slot, APP_MAX_ENTITY_ID_LEN, entity_id);
             s_client.entities_sub_seen_count++;
         }
+    }
+
+    /* The initial-sync watchdog may already have published this entity as
+     * "not in HA" -- a loaded HA instance can deliver the payload after the
+     * completion timeout.  Retract it, otherwise the web editor keeps
+     * warning about an entity that is actually streaming state. */
+    for (uint16_t i = 0; i < s_client.missing_entities_count && i < HA_MISSING_ENTITIES_REPORT_MAX; i++) {
+        if (strncmp(s_client.missing_entities[i], entity_id, APP_MAX_ENTITY_ID_LEN) != 0) {
+            continue;
+        }
+        for (uint16_t j = i + 1U;
+             j < s_client.missing_entities_count && j < HA_MISSING_ENTITIES_REPORT_MAX; j++) {
+            safe_copy_cstr(s_client.missing_entities[j - 1U], APP_MAX_ENTITY_ID_LEN,
+                           s_client.missing_entities[j]);
+        }
+        s_client.missing_entities_count--;
+        s_client.missing_entities[s_client.missing_entities_count][0] = '\0';
+        if (s_client.missing_entities_total > 0) {
+            s_client.missing_entities_total--;
+        }
+        s_client.missing_entities_updated_unix_ms = ha_client_now_ms();
+        break;
+    }
+
+    /* Only HA_MISSING_ENTITIES_REPORT_MAX ids fit in the report, so the entries
+     * beyond that cap can never be retracted one by one: the counter would stay
+     * wrong until the next watchdog run and the editor would keep warning about
+     * entities that are actually streaming state.  Once every subscribed target
+     * has delivered a payload the snapshot is obsolete, so drop it. */
+    if (s_client.entities_sub_target_count > 0 &&
+        s_client.entities_sub_seen_count >= s_client.entities_sub_target_count) {
+        s_client.missing_entities_total = 0;
+        s_client.missing_entities_count = 0;
+        s_client.missing_entities_updated_unix_ms = ha_client_now_ms();
     }
     xSemaphoreGive(s_client.mutex);
 }
@@ -6105,6 +6260,11 @@ static void ha_client_handle_event_message(cJSON *root)
         return;
     }
 
+    if (ha_alarm_events_matches(event_type->valuestring)) {
+        ha_alarm_events_push(event_type->valuestring, data, ha_client_now_ms());
+        return;
+    }
+
     if (strcmp(event_type->valuestring, "state_changed") == 0) {
         cJSON *new_state = cJSON_GetObjectItemCaseSensitive(data, "new_state");
         cJSON *entity_id = cJSON_GetObjectItemCaseSensitive(data, "entity_id");
@@ -6426,6 +6586,9 @@ static void ha_client_ws_event_cb(const ha_ws_event_t *event, void *user_ctx)
         s_client.last_rx_unix_ms = ws_connected_now_ms;
         s_client.ws_last_connected_unix_ms = ws_connected_now_ms;
         s_client.ws_error_streak = 0;
+        if (s_client.ws_connect_count < UINT32_MAX) {
+            s_client.ws_connect_count++;
+        }
         xSemaphoreGive(s_client.mutex);
         break;
     case HA_WS_EVENT_DISCONNECTED:
@@ -6452,6 +6615,10 @@ static void ha_client_ws_event_cb(const ha_ws_event_t *event, void *user_ctx)
             s_client.ws_short_session_strikes = 0;
         }
         ws_short_session_strikes = s_client.ws_short_session_strikes;
+        if (s_client.ws_disconnect_count < UINT32_MAX) {
+            s_client.ws_disconnect_count++;
+        }
+        s_client.ws_last_session_ms = ws_session_age_ms;
         s_client.authenticated = false;
         s_client.pending_send_auth = false;
         s_client.next_auth_retry_unix_ms = 0;
@@ -6618,6 +6785,8 @@ static void ha_client_task(void *arg)
         int64_t next_energy_sync_unix_ms = 0;
         bool rest_enabled = false;
         uint32_t ws_error_streak = 0;
+        uint32_t ws_connect_count = 0;
+        uint32_t alarm_events_sub_session = 0;
         int64_t ws_priority_boost_until_unix_ms = 0;
         int last_ws_tls_stack_err = 0;
         int64_t last_ws_bad_input_unix_ms = 0;
@@ -6690,6 +6859,8 @@ static void ha_client_task(void *arg)
         next_energy_sync_unix_ms = s_client.next_energy_sync_unix_ms;
         rest_enabled = s_client.rest_enabled;
         ws_error_streak = s_client.ws_error_streak;
+        ws_connect_count = s_client.ws_connect_count;
+        alarm_events_sub_session = s_client.alarm_events_sub_session;
         ws_priority_boost_until_unix_ms = s_client.ws_priority_boost_until_unix_ms;
         last_ws_tls_stack_err = s_client.last_ws_tls_stack_err;
         last_ws_bad_input_unix_ms = s_client.last_ws_bad_input_unix_ms;
@@ -6702,6 +6873,11 @@ static void ha_client_task(void *arg)
             ha_client_discovery_domain_or_default(s_client.light_discovery_domain));
         light_discovery_next_step_unix_ms = s_client.light_discovery_next_step_unix_ms;
         light_discovery_last_wait_log_unix_ms = s_client.light_discovery_last_wait_log_unix_ms;
+        if (light_discovery_last_wait_log_unix_ms == 0) {
+            /* Client state was reset (new discovery, reconnect, retry): narrate
+             * the next wait at full rate again. */
+            s_light_discovery_wait_log_backoff_ms = HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS;
+        }
         light_discovery_started_unix_ms = s_client.light_discovery_started_unix_ms;
         light_discovery_template_offset = s_client.light_discovery_template_offset;
         if (connected && authenticated && wifi_up) {
@@ -6856,6 +7032,7 @@ static void ha_client_task(void *arg)
             esp_err_t recover_err = ha_client_force_recover_with_escalation(
                 prefer_transport_recover, "ws-short-session-strikes", &used_transport_recover);
             if (recover_err == ESP_OK) {
+                ha_client_note_link_recover();
                 if (used_transport_recover) {
                     ESP_LOGW(TAG_HA_CLIENT,
                         "Forced C6 transport recover due to repeated short WS sessions (strike=%u/%u)",
@@ -6909,6 +7086,7 @@ static void ha_client_task(void *arg)
             esp_err_t recover_err = ha_client_force_recover_with_escalation(
                 prefer_transport_recover, "ws-connect-error-streak", &used_transport_recover);
             if (recover_err == ESP_OK) {
+                ha_client_note_link_recover();
                 if (used_transport_recover) {
                     ESP_LOGW(TAG_HA_CLIENT,
                         "Forced C6 transport recover due to WS connect error streak=%u",
@@ -6959,6 +7137,30 @@ static void ha_client_task(void *arg)
             xSemaphoreTake(s_client.mutex, portMAX_DELAY);
             s_client.authenticated = false;
             s_client.pending_send_auth = false;
+            s_client.pending_send_pong = false;
+            s_client.pending_pong_id = 0;
+            xSemaphoreGive(s_client.mutex);
+            last_ws_restart_ms = now_ms - HA_WS_RESTART_INTERVAL_MS;
+            continue;
+        }
+
+        /* Recovery for a session that is open but never authenticated.  When the
+           auth_required frame is lost (for example because the rx queue is
+           flushed right after connect) no traffic flows at all, so neither the
+           ping timeout nor the disconnect path can detect the dead link and the
+           panel would stay silent until a reboot. */
+        if (connected && !authenticated && ws_last_connected_unix_ms > 0 &&
+            (now_ms - ws_last_connected_unix_ms) >= HA_WS_AUTH_STALL_RECONNECT_MS) {
+            ESP_LOGW(TAG_HA_CLIENT,
+                "HA session open for %" PRId64 " ms without authentication; forcing websocket reconnect",
+                (now_ms - ws_last_connected_unix_ms));
+            xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+            s_client.ws_error_streak++;
+            s_client.pending_send_auth = false;
+            xSemaphoreGive(s_client.mutex);
+            ha_ws_stop();
+            xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+            s_client.authenticated = false;
             s_client.pending_send_pong = false;
             s_client.pending_pong_id = 0;
             xSemaphoreGive(s_client.mutex);
@@ -7129,9 +7331,10 @@ static void ha_client_task(void *arg)
                     xSemaphoreTake(s_client.mutex, portMAX_DELAY);
                     s_client.light_discovery_last_wait_log_unix_ms = 0;
                     xSemaphoreGive(s_client.mutex);
+                    s_light_discovery_wait_log_backoff_ms = HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS;
                     (void)ha_client_light_discovery_template_step(light_discovery_template_offset, page_size);
                 } else if ((now_ms - light_discovery_last_wait_log_unix_ms) >=
-                           HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS) {
+                           s_light_discovery_wait_log_backoff_ms) {
                     const char *reason = "unknown";
                     if (pending_subscribe) {
                         reason = "subscriptions";
@@ -7167,6 +7370,14 @@ static void ha_client_task(void *arg)
                     xSemaphoreTake(s_client.mutex, portMAX_DELAY);
                     s_client.light_discovery_last_wait_log_unix_ms = now_ms;
                     xSemaphoreGive(s_client.mutex);
+                    if (s_light_discovery_wait_log_backoff_ms < HA_LIGHT_DISCOVERY_WAIT_LOG_MAX_INTERVAL_MS) {
+                        s_light_discovery_wait_log_backoff_ms *= 2;
+                        if (s_light_discovery_wait_log_backoff_ms >
+                            HA_LIGHT_DISCOVERY_WAIT_LOG_MAX_INTERVAL_MS) {
+                            s_light_discovery_wait_log_backoff_ms =
+                                HA_LIGHT_DISCOVERY_WAIT_LOG_MAX_INTERVAL_MS;
+                        }
+                    }
                 }
             } else if (APP_HA_LIGHT_DISCOVERY_REGISTRY_ENABLED) {
                 size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
@@ -7276,6 +7487,15 @@ static void ha_client_task(void *arg)
                 xSemaphoreGive(s_client.mutex);
             }
         }
+        /* Alarmo event subscribes: one-shot per WS session. ws_connect_count
+         * changes on every reconnect, so no disconnect path has to reset this. */
+        if (connected && authenticated && alarm_events_sub_session != ws_connect_count) {
+            if (ha_client_send_subscribe_alarm_events() == ESP_OK) {
+                xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+                s_client.alarm_events_sub_session = ws_connect_count;
+                xSemaphoreGive(s_client.mutex);
+            }
+        }
         /* Watchdog: if all subscribe_entities steps have gone out but the
          * HA entities stream hasn't delivered an `added` payload for every
          * entity within the timeout, force-complete the initial sync so
@@ -7363,11 +7583,12 @@ static void ha_client_task(void *arg)
             if (watchdog_fired) {
                 ESP_LOGW(TAG_HA_CLIENT,
                     "Initial sync watchdog: forcing done after %lld ms (seen=%u/%u, missing=%u). "
-                    "Heavy-gated requests were blocked; check the layout for renamed/deleted entities.",
+                    "Heavy-gated requests were blocked; the payloads listed below had not arrived yet "
+                    "and are retracted automatically once HA delivers them.",
                     (long long)(now_ms - entities_sub_all_sent_unix_ms),
                     (unsigned)seen_local, (unsigned)target_local, (unsigned)missing_total);
                 for (uint16_t i = 0; i < missing_count; i++) {
-                    ESP_LOGW(TAG_HA_CLIENT, "  missing entity (not in HA): %s", missing[i]);
+                    ESP_LOGW(TAG_HA_CLIENT, "  no entities payload yet: %s", missing[i]);
                 }
                 if (missing_total > missing_count) {
                     ESP_LOGW(TAG_HA_CLIENT, "  (+%u more missing entities not listed)",
@@ -7658,6 +7879,17 @@ static void cjson_psram_free(void *ptr)
     free(ptr);
 }
 
+esp_err_t ha_client_preinit(void)
+{
+    if (s_client.mutex == NULL) {
+        s_client.mutex = xSemaphoreCreateMutex();
+        if (s_client.mutex == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    return ESP_OK;
+}
+
 esp_err_t ha_client_start(const ha_client_config_t *cfg)
 {
     if (cfg == NULL || cfg->ws_url == NULL || cfg->access_token == NULL || cfg->ws_url[0] == '\0' ||
@@ -7676,11 +7908,8 @@ esp_err_t ha_client_start(const ha_client_config_t *cfg)
         s_cjson_hooks_set = true;
     }
 
-    if (s_client.mutex == NULL) {
-        s_client.mutex = xSemaphoreCreateMutex();
-        if (s_client.mutex == NULL) {
-            return ESP_ERR_NO_MEM;
-        }
+    if (ha_client_preinit() != ESP_OK) {
+        return ESP_ERR_NO_MEM;
     }
     if (s_client.ws_rx_queue == NULL) {
         s_client.ws_rx_queue = xQueueCreate(APP_HA_QUEUE_LENGTH, sizeof(ha_ws_rx_msg_t));
@@ -8228,6 +8457,26 @@ void ha_client_get_diagnostics(ha_client_diagnostics_t *out)
     xSemaphoreGive(s_client.mutex);
 }
 
+void ha_client_get_link_stats(ha_client_link_stats_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    if (s_client.mutex == NULL) {
+        return;
+    }
+    xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+    out->connect_count = s_client.ws_connect_count;
+    out->disconnect_count = s_client.ws_disconnect_count;
+    out->recover_count = s_client.ws_recover_count;
+    out->error_streak = s_client.ws_error_streak;
+    out->short_session_strikes = s_client.ws_short_session_strikes;
+    out->last_connected_unix_ms = s_client.ws_last_connected_unix_ms;
+    out->last_session_ms = s_client.ws_last_session_ms;
+    xSemaphoreGive(s_client.mutex);
+}
+
 bool ha_client_get_http_context(ha_client_http_ctx_t *out)
 {
     if (out == NULL) return false;
@@ -8272,6 +8521,16 @@ void ha_client_set_aux_http_pressure(bool active, int64_t hold_ms)
 
 bool ha_client_heavy_gate_is_busy(void)
 {
+    if (s_client.mutex == NULL) {
+        /* The API server answers requests before ha_client_start() runs, so a
+         * diagnostics poll can arrive first: nothing can be in flight yet. */
+        static bool s_reported_uninitialised = false;
+        if (!s_reported_uninitialised) {
+            s_reported_uninitialised = true;
+            ESP_LOGW(TAG_HA_CLIENT, "Heavy gate queried before HA client init; reporting idle");
+        }
+        return false;
+    }
     xSemaphoreTake(s_client.mutex, portMAX_DELAY);
     int64_t now_ms = esp_timer_get_time() / 1000;
     bool busy = ha_client_heavy_in_flight_locked() ||

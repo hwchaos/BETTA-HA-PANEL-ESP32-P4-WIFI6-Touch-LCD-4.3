@@ -72,6 +72,13 @@ void ha_cover_fetcher_cancel(void *user);
 /* Free an image buffer obtained through a ha_cover_cb_t callback. */
 void ha_cover_result_release(ha_cover_result_t *result);
 
+/* Hold or release the worker.  While paused the fetcher finishes the request it
+ * is already running and then leaves every following request in the queue, so
+ * no TLS download, decode or large buffer allocation runs concurrently with
+ * flash work.  Used by the OTA upload to keep the panel quiet while the new
+ * image is written and verified (see docs/WAVESHARE-7B-PORT.md §6.3). */
+void ha_cover_fetcher_set_paused(bool paused);
+
 #ifdef __cplusplus
 }
 #endif

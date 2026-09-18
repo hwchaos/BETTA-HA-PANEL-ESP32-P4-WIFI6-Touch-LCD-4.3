@@ -17,6 +17,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "driver/gpio.h"
+#include "lwip/ip4_addr.h"
 #include "soc/soc_caps.h"
 
 #if CONFIG_ESP_HOSTED_ENABLED
@@ -76,6 +77,17 @@ static esp_timer_handle_t s_reconnect_timer = NULL;
 static uint8_t s_pending_reconnect_reason = 0;
 static int s_pending_reconnect_attempt = 0;
 static int s_wifi_scan_last_status = 0;
+
+/* Link statistics exposed through /api/diagnostics. Written from the Wi-Fi
+ * event handler (the ESP event task) and the reconnect timer, so only plain
+ * word-sized fields that tolerate benign races are kept here. */
+static uint32_t s_wifi_connect_count = 0;
+static uint32_t s_wifi_disconnect_count = 0;
+static uint16_t s_wifi_reconnect_count = 0;
+static uint16_t s_wifi_recover_count = 0;
+static uint8_t s_wifi_last_disconnect_reason = 0;
+static int64_t s_wifi_last_connect_ms = 0;
+static int64_t s_wifi_last_session_ms = 0;
 
 static esp_err_t wifi_mgr_force_reconnect_internal(bool allow_transport_escalation);
 
@@ -239,7 +251,7 @@ static bool wifi_mgr_request_connect(bool force, const char *ctx)
     return true;
 }
 
-static esp_err_t wifi_mgr_get_ip_for_netif(esp_netif_t *netif, char *out, size_t out_len)
+static esp_err_t wifi_mgr_get_addr_for_netif(esp_netif_t *netif, bool gateway, char *out, size_t out_len)
 {
     if (out == NULL || out_len == 0) {
         return ESP_ERR_INVALID_ARG;
@@ -258,7 +270,14 @@ static esp_err_t wifi_mgr_get_ip_for_netif(esp_netif_t *netif, char *out, size_t
         return ESP_ERR_NOT_FOUND;
     }
 
-    snprintf(out, out_len, IPSTR, IP2STR(&ip_info.ip));
+    if (gateway) {
+        if (ip_info.gw.addr == 0) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        snprintf(out, out_len, IPSTR, IP2STR(&ip_info.gw));
+    } else {
+        snprintf(out, out_len, IPSTR, IP2STR(&ip_info.ip));
+    }
     return ESP_OK;
 }
 
@@ -310,6 +329,9 @@ static int64_t wifi_mgr_schedule_reconnect(uint8_t reason, int attempt_no)
     int64_t delay_ms = wifi_mgr_compute_reconnect_delay_ms(reason, attempt_no);
     s_pending_reconnect_reason = reason;
     s_pending_reconnect_attempt = attempt_no;
+    if (s_wifi_reconnect_count < UINT16_MAX) {
+        s_wifi_reconnect_count++;
+    }
 
     if (s_reconnect_timer == NULL) {
         const esp_timer_create_args_t timer_args = {
@@ -449,6 +471,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
         uint8_t reason = (disc != NULL) ? (uint8_t)disc->reason : 0;
         s_wifi_connected = false;
+        s_wifi_last_disconnect_reason = reason;
+        if (s_wifi_disconnect_count < UINT32_MAX) {
+            s_wifi_disconnect_count++;
+        }
         if (disc != NULL) {
             ESP_LOGW(TAG_WIFI, "Wi-Fi disconnected, reason=%d (%s)",
                 (int)disc->reason, wifi_reason_to_str((uint8_t)disc->reason));
@@ -485,6 +511,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         s_last_recover_disc_conn_ms = 0;
         s_last_recover_stop_start_ms = 0;
         wifi_mgr_reset_reconnect_state();
+        if (s_wifi_last_connect_ms > 0) {
+            s_wifi_last_session_ms = esp_timer_get_time() / 1000 - s_wifi_last_connect_ms;
+        }
+        s_wifi_last_connect_ms = esp_timer_get_time() / 1000;
+        if (s_wifi_connect_count < UINT32_MAX) {
+            s_wifi_connect_count++;
+        }
 #if APP_WIFI_DISABLE_POWER_SAVE
         esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
         if (ps_err != ESP_OK) {
@@ -909,6 +942,63 @@ static esp_err_t wifi_mgr_ensure_stack_initialized(void)
     return ESP_OK;
 }
 
+static bool wifi_mgr_parse_ipv4(const char *str, esp_ip4_addr_t *out)
+{
+    if (str == NULL || str[0] == '\0' || out == NULL) {
+        return false;
+    }
+    ip4_addr_t addr;
+    if (!ip4addr_aton(str, &addr)) {
+        return false;
+    }
+    out->addr = addr.addr;
+    return true;
+}
+
+static esp_err_t wifi_mgr_apply_static_ip(const wifi_mgr_config_t *cfg)
+{
+    if (cfg == NULL || !cfg->static_enabled) {
+        return ESP_OK;
+    }
+    if (s_wifi_sta_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_netif_ip_info_t ip_info = {0};
+    if (!wifi_mgr_parse_ipv4(cfg->static_ip, &ip_info.ip) ||
+        !wifi_mgr_parse_ipv4(cfg->static_netmask, &ip_info.netmask) ||
+        !wifi_mgr_parse_ipv4(cfg->static_gateway, &ip_info.gw)) {
+        ESP_LOGW(TAG_WIFI, "Invalid static IP config, falling back to DHCP");
+        return ESP_OK;
+    }
+
+    esp_err_t err = esp_netif_dhcpc_stop(s_wifi_sta_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        ESP_LOGW(TAG_WIFI, "esp_netif_dhcpc_stop failed: %s", esp_err_to_name(err));
+    }
+    err = esp_netif_set_ip_info(s_wifi_sta_netif, &ip_info);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_WIFI, "esp_netif_set_ip_info failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG_WIFI, "Static IP configured (ip=%s netmask=%s gw=%s dns=%s)",
+        cfg->static_ip, cfg->static_netmask, cfg->static_gateway,
+        (cfg->static_dns != NULL && cfg->static_dns[0] != '\0') ? cfg->static_dns : "(none)");
+
+    esp_ip4_addr_t dns4;
+    if (wifi_mgr_parse_ipv4(cfg->static_dns, &dns4)) {
+        esp_netif_dns_info_t dns_info = {0};
+        dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+        dns_info.ip.u_addr.ip4 = dns4;
+        err = esp_netif_set_dns_info(s_wifi_sta_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG_WIFI, "esp_netif_set_dns_info failed: %s", esp_err_to_name(err));
+        }
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t wifi_mgr_init(const wifi_mgr_config_t *cfg)
 {
     if (cfg == NULL || cfg->ssid == NULL || cfg->ssid[0] == '\0') {
@@ -941,6 +1031,10 @@ esp_err_t wifi_mgr_init(const wifi_mgr_config_t *cfg)
         if (s_wifi_sta_netif == NULL) {
             return ESP_FAIL;
         }
+    }
+    err = wifi_mgr_apply_static_ip(cfg);
+    if (err != ESP_OK) {
+        return err;
     }
 
     wifi_config_t wifi_cfg = {0};
@@ -1098,6 +1192,9 @@ static esp_err_t wifi_mgr_force_reconnect_internal(bool allow_transport_escalati
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (s_wifi_recover_count < UINT16_MAX) {
+        s_wifi_recover_count++;
+    }
     s_wifi_connected = false;
     s_last_connect_request_ms = 0;
     wifi_mgr_reset_reconnect_state();
@@ -1270,7 +1367,18 @@ esp_err_t wifi_mgr_get_sta_ip(char *out, size_t out_len)
     (void)out_len;
     return ESP_ERR_NOT_SUPPORTED;
 #else
-    return wifi_mgr_get_ip_for_netif(s_wifi_sta_netif, out, out_len);
+    return wifi_mgr_get_addr_for_netif(s_wifi_sta_netif, false, out, out_len);
+#endif
+}
+
+esp_err_t wifi_mgr_get_sta_gateway(char *out, size_t out_len)
+{
+#if !SOC_WIFI_SUPPORTED && !CONFIG_ESP_HOSTED_ENABLED
+    (void)out;
+    (void)out_len;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    return wifi_mgr_get_addr_for_netif(s_wifi_sta_netif, true, out, out_len);
 #endif
 }
 
@@ -1281,7 +1389,7 @@ esp_err_t wifi_mgr_get_ap_ip(char *out, size_t out_len)
     (void)out_len;
     return ESP_ERR_NOT_SUPPORTED;
 #else
-    return wifi_mgr_get_ip_for_netif(s_wifi_ap_netif, out, out_len);
+    return wifi_mgr_get_addr_for_netif(s_wifi_ap_netif, false, out, out_len);
 #endif
 }
 
@@ -1329,6 +1437,21 @@ esp_err_t wifi_mgr_get_sta_rssi(int8_t *out_rssi_dbm)
     *out_rssi_dbm = ap_info.rssi;
     return ESP_OK;
 #endif
+}
+
+esp_err_t wifi_mgr_get_link_stats(wifi_mgr_link_stats_t *out_stats)
+{
+    if (out_stats == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    out_stats->connect_count = s_wifi_connect_count;
+    out_stats->disconnect_count = s_wifi_disconnect_count;
+    out_stats->reconnect_count = s_wifi_reconnect_count;
+    out_stats->hard_recover_count = s_wifi_recover_count;
+    out_stats->last_disconnect_reason = s_wifi_last_disconnect_reason;
+    out_stats->last_connect_uptime_ms = s_wifi_last_connect_ms;
+    out_stats->last_session_ms = s_wifi_last_session_ms;
+    return ESP_OK;
 }
 
 esp_err_t wifi_mgr_scan(wifi_mgr_scan_result_t *results, size_t max_results, size_t *out_count)

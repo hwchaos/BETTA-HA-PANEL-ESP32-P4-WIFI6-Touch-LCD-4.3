@@ -30,7 +30,7 @@ static const int TOUCH_GT911_POST_RESET_MS = 140;
 static void touch_activity_event_cb(lv_event_t *event)
 {
     (void)event;
-    display_note_activity();
+    display_note_activity_from("touch");
 }
 
 static lv_display_t *touch_get_display(void)

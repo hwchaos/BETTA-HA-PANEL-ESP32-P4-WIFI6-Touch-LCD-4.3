@@ -9,17 +9,31 @@
 
 #include "lvgl.h"
 
+#include "settings/runtime_settings.h"
+
 typedef void (*ui_pages_show_cb_t)(const char *page_id, uint16_t index);
 /* Simple notification callback (no payload), e.g. topbar gear press or a
  * finished page rebuild. Runs on the LVGL UI task. */
 typedef void (*ui_pages_action_cb_t)(void);
 
+/* App pages that live in the top bar instead of the bottom bar. Their
+ * shortcuts appear as soon as a page with the matching id is registered. */
+#define UI_RADIO_PAGE_ID   "radio"
+#define UI_WEATHER_PAGE_ID "pogoda"
+
 void ui_pages_init(void);
 void ui_pages_reset(void);
 lv_obj_t *ui_pages_add(const char *page_id, const char *title);
+/* Same as ui_pages_add(), but the page gets no bottom bar tab - it is reached
+ * through its own top bar entry point (used by the radio and weather apps). */
+lv_obj_t *ui_pages_add_hidden(const char *page_id, const char *title);
+lv_obj_t *ui_pages_add_ex(const char *page_id, const char *title, bool in_nav);
 bool ui_pages_show(const char *page_id);
 bool ui_pages_show_index(uint16_t index);
 bool ui_pages_next(void);
+/* Page id/title by list position; empty string for an out-of-range index. */
+const char *ui_pages_id_at(uint16_t index);
+const char *ui_pages_title_at(uint16_t index);
 const char *ui_pages_current_id(void);
 /* Register a single callback that is invoked whenever the active page
  * changes (after the new page has been made visible).  Passing NULL
@@ -36,3 +50,11 @@ uint16_t ui_pages_count(void);
 void ui_pages_set_topbar_status(
     bool wifi_connected, bool wifi_setup_ap_active, bool api_connected, bool api_initial_sync_done);
 void ui_pages_set_topbar_datetime(const struct tm *timeinfo);
+/* Apply the top bar settings (visibility, colours, icon style) and re-lay the
+ * top bar out.  Safe to call from any task. */
+void ui_pages_apply_topbar_settings(const runtime_settings_t *settings);
+/* Re-lay the top bar out with the current settings. Used after a layout reload
+ * changed the set of pages: the app shortcuts (radio / weather) come and go
+ * with them. Safe to call from any task. */
+void ui_pages_refresh_topbar(void);
+void ui_pages_apply_bottom_bar_settings(const runtime_settings_t *settings);

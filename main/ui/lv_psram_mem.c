@@ -11,6 +11,8 @@
  * compile to nothing and requires the application to provide the core
  * allocation functions declared in lv_mem.h.
  */
+#include "ui/ui_lvgl_mem.h"
+
 #include "lvgl.h"
 
 /* Link-time anchor: app_main() references this so the object is always pulled
@@ -36,6 +38,52 @@ static const char *TAG = "lv_psram_mem";
 #define LV_PSRAM_FALLBACK (MALLOC_CAP_8BIT)
 #define LV_PSRAM_ALIGN    8u
 
+/* Usage counters consumed by /api/diagnostics (ui_lvgl_mem_get_stats). */
+static ui_lvgl_mem_stats_t s_stats;
+
+static void lv_psram_account_alloc(size_t real_size)
+{
+    __atomic_add_fetch(&s_stats.used_bytes, real_size, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&s_stats.alloc_count, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&s_stats.block_count, 1, __ATOMIC_RELAXED);
+
+    size_t peak = __atomic_load_n(&s_stats.peak_bytes, __ATOMIC_RELAXED);
+    size_t used = __atomic_load_n(&s_stats.used_bytes, __ATOMIC_RELAXED);
+    while (used > peak && !__atomic_compare_exchange_n(&s_stats.peak_bytes, &peak, used, false, __ATOMIC_RELAXED,
+        __ATOMIC_RELAXED)) {
+    }
+}
+
+static void lv_psram_account_free(size_t real_size)
+{
+    size_t used = __atomic_load_n(&s_stats.used_bytes, __ATOMIC_RELAXED);
+    if (real_size <= used) {
+        __atomic_sub_fetch(&s_stats.used_bytes, real_size, __ATOMIC_RELAXED);
+    } else {
+        __atomic_store_n(&s_stats.used_bytes, (size_t)0, __ATOMIC_RELAXED);
+    }
+    __atomic_sub_fetch(&s_stats.block_count, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&s_stats.free_count, 1, __ATOMIC_RELAXED);
+}
+
+void ui_lvgl_mem_get_stats(ui_lvgl_mem_stats_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    out->used_bytes = __atomic_load_n(&s_stats.used_bytes, __ATOMIC_RELAXED);
+    out->peak_bytes = __atomic_load_n(&s_stats.peak_bytes, __ATOMIC_RELAXED);
+    out->block_count = __atomic_load_n(&s_stats.block_count, __ATOMIC_RELAXED);
+    out->alloc_count = __atomic_load_n(&s_stats.alloc_count, __ATOMIC_RELAXED);
+    out->free_count = __atomic_load_n(&s_stats.free_count, __ATOMIC_RELAXED);
+    out->fail_count = __atomic_load_n(&s_stats.fail_count, __ATOMIC_RELAXED);
+}
+
+void ui_lvgl_mem_reset_peak(void)
+{
+    __atomic_store_n(&s_stats.peak_bytes, __atomic_load_n(&s_stats.used_bytes, __ATOMIC_RELAXED), __ATOMIC_RELAXED);
+}
+
 /* Every allocation is prefixed with an 8-byte header so the payload keeps
  * LV_PSRAM_ALIGN alignment (heap_caps_aligned_alloc only guarantees the block
  * base) and lv_realloc_core() knows how many bytes to copy when it has to move
@@ -60,17 +108,20 @@ static void *psram_alloc(size_t size)
         h = heap_caps_aligned_alloc(LV_PSRAM_ALIGN, total, LV_PSRAM_FALLBACK);
     }
     if (h == NULL) {
+        __atomic_add_fetch(&s_stats.fail_count, 1, __ATOMIC_RELAXED);
         return NULL;
     }
 
     h->size = (uint32_t)size;
     h->pad = 0;
+    lv_psram_account_alloc(heap_caps_get_allocated_size(h));
     return (void *)(h + 1);
 }
 
 void lv_mem_init(void)
 {
     /* Nothing to configure - allocations go straight to the heap allocator. */
+    memset(&s_stats, 0, sizeof(s_stats));
     ESP_LOGI(TAG, "LVGL allocator: PSRAM first (%" PRIu32 " KB free), internal fallback",
              (uint32_t)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 }
@@ -104,6 +155,7 @@ void lv_free_core(void *p)
         return;
     }
     lv_psram_hdr_t *h = ((lv_psram_hdr_t *)p) - 1;
+    lv_psram_account_free(heap_caps_get_allocated_size(h));
     heap_caps_free(h);
 }
 
@@ -130,7 +182,7 @@ void *lv_realloc_core(void *p, size_t new_size)
         return NULL; /* Old block is left untouched on failure. */
     }
     memcpy(np, p, old_size);
-    heap_caps_free(h);
+    lv_free_core(p);
     return np;
 }
 
@@ -152,7 +204,9 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p)
     mon_p->free_cnt = info.free_blocks;
     mon_p->free_size = info.total_free_bytes;
     mon_p->free_biggest_size = info.largest_free_block;
-    mon_p->used_cnt = info.allocated_blocks;
+    /* The heap figures cover every PSRAM user; the counters below are LVGL-only. */
+    mon_p->used_cnt = __atomic_load_n(&s_stats.block_count, __ATOMIC_RELAXED);
+    mon_p->max_used = __atomic_load_n(&s_stats.peak_bytes, __ATOMIC_RELAXED);
     if (mon_p->total_size > 0) {
         size_t used = mon_p->total_size - info.total_free_bytes;
         mon_p->used_pct = (uint8_t)(used * 100u / mon_p->total_size);

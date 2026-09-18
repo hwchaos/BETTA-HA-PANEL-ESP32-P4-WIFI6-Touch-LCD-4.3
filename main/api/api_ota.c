@@ -26,6 +26,11 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
+#include "camera/local_camera.h"
+#include "diag/boot_guard.h"
+#include "diag/storage_guard.h"
+#include "ha/ha_cover_fetcher.h"
+#include "sd/sd_card.h"
 #include "ui/ui_ota_progress.h"
 #include "util/log_tags.h"
 
@@ -217,8 +222,64 @@ static void ota_set_image_info(const char *version, const char *project_name)
     ui_ota_progress_set_status(status_text);
 }
 
+/* ---- OTA quiet mode ----------------------------------------------------
+ * Three background users keep the flash/PSRAM subsystem busy while the panel
+ * runs: the MIPI-CSI camera pipeline, the cover-art fetcher (TLS downloads plus
+ * large decode buffers) and the microSD hot-plug retry loop.  They all read
+ * flash (or keep the MMU busy mapping PSRAM) while the OTA transfer writes it.
+ *
+ * The failure originally attributed to that contention ("bootloader_mmap()
+ * failed" / "New image failed verification" after a full 4.4 MB transfer) was
+ * in fact the 24-bit flash mapping limit: slot ota_1 lives at 0x1220000, above
+ * 16 MB, so esp_image_verify() could not map it at all — see
+ * docs/WAVESHARE-7B-PORT.md §6.3 and CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH
+ * in sdkconfig.defaults.panel7.  Quiet mode is kept as hardening: it removes the
+ * only real competitor for the flash bus during a write, which matters for the
+ * watchdog resets seen once mid-transfer. */
+static bool s_ota_quiet = false;
+static bool s_ota_quiet_camera_was_running = false;
+
+static void ota_quiet_enter(void)
+{
+    if (s_ota_quiet) {
+        return;
+    }
+    s_ota_quiet = true;
+
+    ha_cover_fetcher_set_paused(true);
+    sd_card_set_hotplug_paused(true);
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+    s_ota_quiet_camera_was_running = local_camera_is_running();
+    if (s_ota_quiet_camera_was_running) {
+        (void)local_camera_stop();
+    }
+#else
+    s_ota_quiet_camera_was_running = false;
+#endif
+    ESP_LOGI(TAG_API_OTA, "quiet mode on (camera=%d)", (int)s_ota_quiet_camera_was_running);
+}
+
+static void ota_quiet_leave(void)
+{
+    if (!s_ota_quiet) {
+        return;
+    }
+    s_ota_quiet = false;
+
+    ha_cover_fetcher_set_paused(false);
+    sd_card_set_hotplug_paused(false);
+#if CONFIG_APP_FEATURE_LOCAL_CAMERA
+    if (s_ota_quiet_camera_was_running) {
+        (void)local_camera_start();
+    }
+#endif
+    s_ota_quiet_camera_was_running = false;
+    ESP_LOGI(TAG_API_OTA, "quiet mode off");
+}
+
 static void ota_finish_status_error(const char *message)
 {
+    ota_quiet_leave();
     if (s_ota_mutex == NULL) {
         return;
     }
@@ -371,6 +432,34 @@ static void ota_stream_set_error(api_ota_stream_t *stream, const char *message)
     strlcpy(stream->error, message != NULL ? message : "OTA stream failed", sizeof(stream->error));
 }
 
+static bool ota_flash_32bit_mapping_enabled(void)
+{
+#if defined(CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH) || defined(CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_OCTAL_FLASH)
+    return true;
+#else
+    return false;
+#endif
+}
+
+/* Without 4-byte (32-bit) flash addressing the cache maps only the first 16 MB, so an
+ * OTA slot placed above that limit cannot be verified: esp_ota_end() fails with
+ * "New image failed verification" after the whole transfer was already written.
+ * Catch it before the upload starts and say what to do instead. */
+static void ota_check_slot_map(api_ota_stream_t *stream)
+{
+    if (stream == NULL || stream->partition == NULL || ota_flash_32bit_mapping_enabled()) {
+        return;
+    }
+    const uint32_t slot_end = stream->partition->address + stream->partition->size;
+    if (slot_end > 0x1000000UL) {
+        ESP_LOGE(TAG_API_OTA, "OTA slot %s at 0x%lx needs 32-bit flash mapping", stream->partition->label,
+                 (unsigned long)stream->partition->address);
+        ota_stream_set_error(stream,
+                             "Target OTA slot is above 16 MB, but 32-bit flash addressing is disabled "
+                             "(CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH). Flash this build over USB once.");
+    }
+}
+
 static esp_err_t ota_stream_init(api_ota_stream_t *stream, size_t total)
 {
     if (stream == NULL) {
@@ -388,6 +477,11 @@ static esp_err_t ota_stream_init(api_ota_stream_t *stream, size_t total)
         ota_stream_set_error(stream, "OTA image is larger than the target partition");
         return ESP_ERR_INVALID_SIZE;
     }
+    ota_check_slot_map(stream);
+    if (stream->error[0] != '\0') {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    ota_quiet_enter();
     return ESP_OK;
 }
 
@@ -505,18 +599,43 @@ static esp_err_t ota_stream_finish(api_ota_stream_t *stream)
         return ESP_ERR_INVALID_SIZE;
     }
 
+    /* The two calls below are the only long flash operations that are not a
+     * plain write: esp_ota_end() reads the whole image back through the cache
+     * window and esp_ota_set_boot_partition() verifies it a second time before
+     * rewriting otadata.  Log the start at WARN so the console shows which one
+     * a failing upload died in. */
+    int64_t t0 = esp_timer_get_time();
+    ESP_LOGW(TAG_API_OTA, "finalize: esp_ota_end start (%u bytes written)", (unsigned)stream->written);
+
+    /* Both calls map and unmap every image segment (esp_image_verify()), i.e.
+     * they reprogram MMU pages - and this build runs .text/.rodata from PSRAM
+     * through that same MMU (CONFIG_SPIRAM_XIP_FROM_PSRAM=y).  A LittleFS append
+     * landing in one of those windows used to reset the chip ~2.4 s later with
+     * rst:0x7 (HP_SYS_HP_WDT_RESET) and no panic output, which killed every
+     * network OTA here.  Hold the background writers off until the boot slot is
+     * committed; they keep their lines in RAM and flush right after.  The window
+     * must cover esp_ota_set_boot_partition() as well: the log task drains its
+     * ring every 2 s, and a drain overlapping that second verify reproduced the
+     * same reset with esp_ota_end() already protected. */
+    storage_guard_flash_writers_pause();
+
+    bool boot_slot_failed = false;
     esp_err_t err = esp_ota_end(stream->handle);
     stream->begun = false;
-    if (err != ESP_OK) {
-        ota_stream_set_error(stream, "OTA image validation failed");
-        return err;
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG_API_OTA, "finalize: image verified in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
+        err = esp_ota_set_boot_partition(stream->partition);
+        boot_slot_failed = (err != ESP_OK);
     }
 
-    err = esp_ota_set_boot_partition(stream->partition);
+    storage_guard_flash_writers_resume();
+
     if (err != ESP_OK) {
-        ota_stream_set_error(stream, "Failed to select OTA boot partition");
+        ota_stream_set_error(stream, boot_slot_failed ? "Failed to select OTA boot partition"
+                                                      : "OTA image validation failed");
         return err;
     }
+    ESP_LOGW(TAG_API_OTA, "finalize: slot %s selected, reboot pending", stream->partition->label);
     return ESP_OK;
 }
 
@@ -526,6 +645,7 @@ static void ota_stream_abort(api_ota_stream_t *stream)
         (void)esp_ota_abort(stream->handle);
         stream->begun = false;
     }
+    ota_quiet_leave();
 }
 
 static char *ota_read_request_body(httpd_req_t *req, size_t max_len)
@@ -595,7 +715,25 @@ static esp_err_t ota_send_status_json(httpd_req_t *req)
     cJSON_AddStringToObject(root, "next_partition", next != NULL ? next->label : "");
     cJSON_AddStringToObject(root, "running_partition", running != NULL ? running->label : "");
     cJSON_AddNumberToObject(root, "slot_size", next != NULL ? (double)next->size : 0.0);
+    cJSON_AddNumberToObject(root, "next_slot_addr", next != NULL ? (double)next->address : 0.0);
+    cJSON_AddBoolToObject(root, "flash_32bit_addr", ota_flash_32bit_mapping_enabled());
     cJSON_AddNumberToObject(root, "updated_ms", (double)status.updated_ms);
+
+    boot_guard_info_t boot = {0};
+    boot_guard_get_info(&boot);
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+    cJSON_AddBoolToObject(root, "rollback_supported", true);
+#else
+    cJSON_AddBoolToObject(root, "rollback_supported", false);
+#endif
+    cJSON_AddStringToObject(root,
+                            "app_state",
+                            boot.ota_state_err == ESP_OK ? boot_guard_ota_state_str(boot.ota_state)
+                                                         : esp_err_to_name(boot.ota_state_err));
+    cJSON_AddBoolToObject(root, "rollback_pending", boot.rollback_pending);
+    cJSON_AddBoolToObject(root, "boot_confirmed", boot.confirmed);
+    cJSON_AddNumberToObject(root, "boot_count", (double)boot.boot_count);
+    cJSON_AddStringToObject(root, "reset_reason", boot_guard_reset_reason_str(boot.reset_reason));
 
     char *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -830,6 +968,63 @@ esp_err_t api_ota_url_post_handler(httpd_req_t *req)
     return ota_send_status_json(req);
 }
 
+/* Streams the request body into the OTA partition.  A failure is reported
+ * through the return value, with stream->error carrying the text for the HTTP
+ * response, and always aborts the transfer (which also releases the log
+ * quieting entered by ota_stream_init()). */
+static esp_err_t ota_upload_recv_body(httpd_req_t *req, api_ota_stream_t *stream)
+{
+    uint8_t *buf = (uint8_t *)heap_caps_malloc(APP_OTA_CHUNK_SIZE, MALLOC_CAP_8BIT);
+    if (buf == NULL) {
+        ota_stream_abort(stream);
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t err = ESP_OK;
+    unsigned chunks = 0;
+    int received = 0;
+    int64_t t_start = esp_timer_get_time();
+    while (received < req->content_len) {
+        int remaining = req->content_len - received;
+        int to_read = remaining > APP_OTA_CHUNK_SIZE ? APP_OTA_CHUNK_SIZE : remaining;
+        int r = httpd_req_recv(req, (char *)buf, to_read);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (r <= 0) {
+            ota_stream_set_error(stream, "OTA upload aborted");
+            err = ESP_FAIL;
+            break;
+        }
+
+        err = ota_stream_write_checked(stream, buf, (size_t)r);
+        if (err != ESP_OK) {
+            break;
+        }
+        received += r;
+
+        /* Progress every 1 MB: the upload is the only phase that can last tens
+         * of seconds, so a reset in the middle of it is visible in the log. */
+        if (received / (1024 * 1024) != (received - r) / (1024 * 1024)) {
+            ESP_LOGI(TAG_API_OTA, "upload progress %d/%d bytes (%lld ms)", received, (int)req->content_len,
+                     (long long)((esp_timer_get_time() - t_start) / 1000));
+        }
+
+        /* This task never waits on the socket for long, so without a yield the
+         * flash/IPC path can keep the other core's idle task away for the whole
+         * upload, which is what tripped the IDF task watchdog. */
+        if (++chunks % APP_OTA_WRITE_YIELD_CHUNKS == 0) {
+            vTaskDelay(1);
+        }
+    }
+    heap_caps_free(buf);
+
+    if (err != ESP_OK) {
+        ota_stream_abort(stream);
+    }
+    return err;
+}
+
 esp_err_t api_ota_upload_post_handler(httpd_req_t *req)
 {
     if (req->content_len <= 0) {
@@ -854,41 +1049,26 @@ esp_err_t api_ota_upload_post_handler(httpd_req_t *req)
         return send_json_error(req, "400 Bad Request", stream.error);
     }
 
-    uint8_t *buf = (uint8_t *)heap_caps_malloc(APP_OTA_CHUNK_SIZE, MALLOC_CAP_8BIT);
-    if (buf == NULL) {
+    /* Writing a whole image parks the idle tasks far longer than the task
+     * watchdog allows and silences the UI heartbeat, so hold both watchdogs off
+     * (and keep background exporters out of the way) for the transfer. */
+    storage_guard_begin("ota-upload");
+
+    err = ota_upload_recv_body(req, &stream);
+    if (err == ESP_OK) {
+        err = ota_stream_finish(&stream);
+        if (err != ESP_OK) {
+            ota_stream_abort(&stream);
+        }
+    }
+
+    storage_guard_end();
+
+    if (err == ESP_ERR_NO_MEM) {
         ota_finish_status_error("Failed to allocate OTA upload buffer");
         return httpd_resp_send_500(req);
     }
-
-    int received = 0;
-    while (received < req->content_len) {
-        int remaining = req->content_len - received;
-        int to_read = remaining > APP_OTA_CHUNK_SIZE ? APP_OTA_CHUNK_SIZE : remaining;
-        int r = httpd_req_recv(req, (char *)buf, to_read);
-        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (r <= 0) {
-            ota_stream_abort(&stream);
-            heap_caps_free(buf);
-            ota_finish_status_error("OTA upload aborted");
-            return send_json_error(req, "400 Bad Request", "OTA upload aborted");
-        }
-
-        err = ota_stream_write_checked(&stream, buf, (size_t)r);
-        if (err != ESP_OK) {
-            ota_stream_abort(&stream);
-            heap_caps_free(buf);
-            ota_finish_status_error(stream.error);
-            return send_json_error(req, "400 Bad Request", stream.error);
-        }
-        received += r;
-    }
-    heap_caps_free(buf);
-
-    err = ota_stream_finish(&stream);
     if (err != ESP_OK) {
-        ota_stream_abort(&stream);
         ota_finish_status_error(stream.error);
         return send_json_error(req, "400 Bad Request", stream.error);
     }

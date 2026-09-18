@@ -6,68 +6,111 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_rom_crc.h"
 
 #include "api/api_routes.h"
 #include "app_config.h"
 #include "util/log_tags.h"
 
-extern const uint8_t _binary_index_html_start[] asm("_binary_index_html_start");
-extern const uint8_t _binary_index_html_end[] asm("_binary_index_html_end");
-extern const uint8_t _binary_app_js_start[] asm("_binary_app_js_start");
-extern const uint8_t _binary_app_js_end[] asm("_binary_app_js_end");
-extern const uint8_t _binary_styles_css_start[] asm("_binary_styles_css_start");
-extern const uint8_t _binary_styles_css_end[] asm("_binary_styles_css_end");
+/* The WebUI assets are embedded gzipped (see components/webui/CMakeLists.txt). */
+extern const uint8_t _binary_index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const uint8_t _binary_index_html_gz_end[] asm("_binary_index_html_gz_end");
+extern const uint8_t _binary_app_js_gz_start[] asm("_binary_app_js_gz_start");
+extern const uint8_t _binary_app_js_gz_end[] asm("_binary_app_js_gz_end");
+extern const uint8_t _binary_styles_css_gz_start[] asm("_binary_styles_css_gz_start");
+extern const uint8_t _binary_styles_css_gz_end[] asm("_binary_styles_css_gz_end");
 
-static const char *s_fallback_index_html =
+static const char *s_plain_client_index_html =
     "<!doctype html><html><head><meta charset=\"utf-8\"><title>BETTA Editor</title>"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>"
-    "<body><h1>BETTA Editor</h1><p>WebUI asset missing, check EMBED_TXTFILES.</p></body></html>";
-static const char *s_fallback_app_js = "console.log('BETTA WebUI fallback active');";
-static const char *s_fallback_styles_css = "body{font-family:sans-serif;padding:20px}";
+    "<body><h1>BETTA Editor</h1><p>The editor is served gzip-compressed. Use a browser, "
+    "or a client that sends Accept-Encoding: gzip.</p></body></html>";
+static const char *s_plain_client_app_js = "console.log('BETTA WebUI requires Accept-Encoding: gzip');";
+static const char *s_plain_client_styles_css = "body{font-family:sans-serif;padding:20px}";
 
 static httpd_handle_t s_server = NULL;
 
-static esp_err_t send_embedded(
-    httpd_req_t *req, const uint8_t *start, const uint8_t *end, const char *content_type, bool cache_assets)
+static bool client_accepts_gzip(httpd_req_t *req)
 {
+    char value[128];
+    size_t len = httpd_req_get_hdr_value_len(req, "Accept-Encoding");
+    if (len == 0) {
+        return false;
+    }
+    if (len >= sizeof(value)) {
+        /* Only browsers send a header list long enough to be truncated here, and those
+         * always advertise gzip. */
+        return true;
+    }
+    if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", value, sizeof(value)) != ESP_OK) {
+        return false;
+    }
+    return strstr(value, "gzip") != NULL;
+}
+
+/* index.html loads /app.js and /styles.css without a cache-busting query, so a
+ * plain max-age would keep a stale bundle in the browser after an OTA, while
+ * "no-store" makes every page load re-download the full bundle (~152 KB gzip)
+ * through the single httpd task. Instead the assets carry a content-derived ETag
+ * and "no-cache" (store, but always revalidate): a browser that already has the
+ * bundle gets a bodyless "304 Not Modified", and a new firmware changes the hash
+ * so a stale UI cannot happen. */
+static esp_err_t send_gzip_asset(
+    httpd_req_t *req, const uint8_t *start, const uint8_t *end, const char *content_type)
+{
+    const size_t len = (size_t)(end - start);
+    char etag[40];
+    snprintf(etag, sizeof(etag), "\"%08lx-%lX\"",
+             (unsigned long)esp_rom_crc32_le(0, start, (uint32_t)len), (unsigned long)len);
+
+    char inm[64];
+    if (httpd_req_get_hdr_value_str(req, "If-None-Match", inm, sizeof(inm)) == ESP_OK &&
+        strcmp(inm, etag) == 0) {
+        httpd_resp_set_status(req, "304 Not Modified");
+        httpd_resp_set_hdr(req, "ETag", etag);
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     httpd_resp_set_type(req, content_type);
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_set_hdr(req, "Cache-Control", cache_assets ? "public, max-age=3600" : "no-store");
-    size_t len = (size_t)(end - start);
-    if (len > 0 && start[len - 1] == '\0') {
-        len--;
-    }
-    return httpd_resp_send(req, (const char *)start, len);
+    httpd_resp_set_hdr(req, "ETag", etag);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    return httpd_resp_send(req, (const char *)start, (ssize_t)len);
 }
 
 static esp_err_t index_get_handler_impl(httpd_req_t *req)
 {
-    if (&_binary_index_html_end[0] > &_binary_index_html_start[0]) {
-        return send_embedded(req, _binary_index_html_start, _binary_index_html_end, "text/html", false);
+    if (!client_accepts_gzip(req)) {
+        httpd_resp_set_type(req, "text/html");
+        return httpd_resp_sendstr(req, s_plain_client_index_html);
     }
-    httpd_resp_set_type(req, "text/html");
-    return httpd_resp_sendstr(req, s_fallback_index_html);
+    return send_gzip_asset(req, _binary_index_html_gz_start, _binary_index_html_gz_end, "text/html");
 }
 
 static esp_err_t app_js_get_handler_impl(httpd_req_t *req)
 {
-    if (&_binary_app_js_end[0] > &_binary_app_js_start[0]) {
-        return send_embedded(req, _binary_app_js_start, _binary_app_js_end, "application/javascript", false);
+    if (!client_accepts_gzip(req)) {
+        httpd_resp_set_type(req, "application/javascript");
+        return httpd_resp_sendstr(req, s_plain_client_app_js);
     }
-    httpd_resp_set_type(req, "application/javascript");
-    return httpd_resp_sendstr(req, s_fallback_app_js);
+    return send_gzip_asset(req, _binary_app_js_gz_start, _binary_app_js_gz_end, "application/javascript");
 }
 
 static esp_err_t styles_css_get_handler_impl(httpd_req_t *req)
 {
-    if (&_binary_styles_css_end[0] > &_binary_styles_css_start[0]) {
-        return send_embedded(req, _binary_styles_css_start, _binary_styles_css_end, "text/css", false);
+    if (!client_accepts_gzip(req)) {
+        httpd_resp_set_type(req, "text/css");
+        return httpd_resp_sendstr(req, s_plain_client_styles_css);
     }
-    httpd_resp_set_type(req, "text/css");
-    return httpd_resp_sendstr(req, s_fallback_styles_css);
+    return send_gzip_asset(req, _binary_styles_css_gz_start, _binary_styles_css_gz_end, "text/css");
 }
 
 static esp_err_t favicon_get_handler_impl(httpd_req_t *req)
@@ -109,7 +152,8 @@ esp_err_t http_server_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = APP_HTTP_PORT;
     cfg.stack_size = APP_HTTP_TASK_STACK;
-    int http_task_prio = APP_UI_TASK_PRIO + 1;
+    /* Below the UI task on purpose: see APP_HTTP_TASK_PRIO. */
+    int http_task_prio = APP_HTTP_TASK_PRIO;
     if (http_task_prio >= APP_HA_TASK_PRIO) {
         http_task_prio = APP_HA_TASK_PRIO - 1;
     }
@@ -117,7 +161,10 @@ esp_err_t http_server_start(void)
         http_task_prio = 1;
     }
     cfg.task_priority = http_task_prio;
-    cfg.max_uri_handlers = 40;
+    /* Must cover every route registered in api_routes.c plus the static/index
+     * handlers below. Keep a few spare slots: running out aborts the boot with
+     * ESP_ERR_HTTPD_HANDLERS_FULL. */
+    cfg.max_uri_handlers = 64;
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
     cfg.max_open_sockets = 4;
 #else
@@ -125,7 +172,10 @@ esp_err_t http_server_start(void)
 #endif
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
-    cfg.send_wait_timeout = 10;
+    /* A socket that stops draining blocks the single httpd task for this long per
+     * send() retry, so a stalled browser used to freeze every other request for
+     * ~2x this value before the error surfaced. */
+    cfg.send_wait_timeout = 5;
 #if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
     cfg.backlog_conn = 4;
 #else

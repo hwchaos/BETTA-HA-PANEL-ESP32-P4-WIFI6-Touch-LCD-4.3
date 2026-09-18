@@ -17,6 +17,7 @@
 #include "ui/theme/theme_default.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_memory.h"
+#include "diag/system_log.h"
 
 #if APP_HAVE_MDI_ENERGY_FONT_42
 LV_FONT_DECLARE(mdi_energy_42);
@@ -100,8 +101,8 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_STATS_FONT APP_FONT_TEXT_14
 #define ENERGY_STATS_X 16
 #define ENERGY_STATS_WIDTH 150
-#define ENERGY_STATS_TODAY_Y (APP_CONTENT_BOX_HEIGHT - 52)
-#define ENERGY_STATS_AUTARKY_Y (APP_CONTENT_BOX_HEIGHT - 28)
+#define ENERGY_STATS_TODAY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 52)
+#define ENERGY_STATS_AUTARKY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 28)
 #else
 #define ENERGY_NODE_GRID_X 130
 #define ENERGY_NODE_GRID_Y 300
@@ -128,8 +129,8 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_STATS_FONT APP_FONT_TEXT_18
 #define ENERGY_STATS_X 24
 #define ENERGY_STATS_WIDTH 300
-#define ENERGY_STATS_TODAY_Y (APP_CONTENT_BOX_HEIGHT - 56)
-#define ENERGY_STATS_AUTARKY_Y (APP_CONTENT_BOX_HEIGHT - 32)
+#define ENERGY_STATS_TODAY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 56)
+#define ENERGY_STATS_AUTARKY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 32)
 #endif
 
 #define ENERGY_NODE_GAS_X    ENERGY_NODE_HOME_X
@@ -1417,6 +1418,7 @@ static void energy_update_dot_position(energy_flow_t *flow)
 
 static void energy_anim_timer_cb(lv_timer_t *timer)
 {
+    system_log_note_lvgl_cb("energy_anim_timer_cb");
     if (timer == NULL) {
         return;
     }
@@ -1516,8 +1518,9 @@ esp_err_t ui_energy_page_create(
     lv_obj_set_size(root, APP_CONTENT_BOX_WIDTH, APP_CONTENT_BOX_HEIGHT);
     lv_obj_set_pos(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(root, lv_color_hex(APP_UI_COLOR_CONTENT_BG), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
+    /* Transparent on purpose: the page container painted by ui_page_style owns
+     * the background, so a page colour/gradient/wallpaper shows through. */
+    lv_obj_set_style_bg_opa(root, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(root, 0, LV_PART_MAIN);
     ctx->root = root;
 
