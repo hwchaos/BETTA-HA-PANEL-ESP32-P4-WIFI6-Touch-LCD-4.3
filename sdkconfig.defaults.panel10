@@ -6,6 +6,9 @@
 #   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.panel10" ...
 # or the CMake preset "panel10" (see CMakePresets.json).
 
+# --- SoC target ---
+CONFIG_IDF_TARGET="esp32p4"
+
 # --- Panel variant selector (drives app_config.h + display/touch init) ---
 # CONFIG_APP_PANEL_VARIANT_4INCH_720 is not set
 CONFIG_APP_PANEL_VARIANT_10INCH_1280=y

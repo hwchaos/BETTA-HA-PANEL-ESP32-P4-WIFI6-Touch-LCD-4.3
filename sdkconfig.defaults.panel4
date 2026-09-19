@@ -5,6 +5,10 @@
 # Apply together with the common sdkconfig.defaults via
 #   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.panel4" ...
 # or the CMake preset "panel4" (see CMakePresets.json).
+
+# --- SoC target ---
+CONFIG_IDF_TARGET="esp32p4"
+
 CONFIG_APP_PANEL_VARIANT_4INCH_720=y
 # CONFIG_APP_PANEL_VARIANT_10INCH_1280 is not set
 

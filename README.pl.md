@@ -570,6 +570,9 @@ pwsh tools\make_factory_bin.ps1 -BuildDir build-panel7 `
 
 Ważne przy budowaniu:
 
+- **Cel SoC** (`esp32p4`) jest ustawiany przez nakładkę wariantu
+  (`sdkconfig.defaults.panel7`), więc `idf.py set-target` nie jest potrzebny — wystarczy
+  komenda powyżej na czystym klonie.
 - W konsoli Windows ustaw **stronę kodową 65001 (UTF-8)** — `idf.py` wysypuje się na `cp1250`.
 - **Zamknij monitor szeregowy** przed wgraniem (otwarcie portu liniami DTR/RTS resetuje P4).
 - Flash **nie kasuje** NVS ani LittleFS — ustawienia, układ i motywy zostają.

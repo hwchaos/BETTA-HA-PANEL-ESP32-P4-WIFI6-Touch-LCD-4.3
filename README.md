@@ -575,6 +575,9 @@ pwsh tools\make_factory_bin.ps1 -BuildDir build-panel7 `
 
 Important when building:
 
+- The **SoC target** (`esp32p4`) is set by the variant overlay
+  (`sdkconfig.defaults.panel7`), so no separate `idf.py set-target` step is required — the
+  command above works on a clean clone.
 - Set the Windows console code page to **65001 (UTF-8)** — `idf.py` breaks on `cp1250`.
 - **Close the serial monitor** before flashing (opening the port toggles DTR/RTS and resets the P4).
 - Flashing **does not erase** NVS or LittleFS — your settings, layout and themes are preserved.

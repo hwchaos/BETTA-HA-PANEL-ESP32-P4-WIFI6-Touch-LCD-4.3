@@ -17,6 +17,9 @@ managed_components/
 
 # tools/ IS published: it ships the release packager (tools/make_factory_bin.ps1).
 release/network_adapter_esp32c6*.bin
+# NOTE: release/archive/ and release/ota/archive/ are ALREADY TRACKED: the rule below
+# only keeps *new* superseded images out of git until they are added explicitly.
+# (Re-staging the whole index - "git rm -r --cached . && git add -A" - would drop them.)
 release/archive/
 release/ota/archive/
 firmware/archive/
@@ -25,25 +28,10 @@ main/ui/weather_icons/**
 !main/ui/weather_icons/
 !main/ui/weather_icons/UPSTREAM_LINK.txt
 
-# Local generated font files
-main/ui/fonts/mditop50icons.c
-main/ui/fonts/mditop50icons42.c
-main/ui/fonts/mditop50icons56.c
-main/ui/fonts/mditop50icons72.c
-main/ui/fonts/mdiweatherIcons20.c
-main/ui/fonts/poppins_regular_12.c
-main/ui/fonts/poppins_regular_14.c
-main/ui/fonts/poppins_regular_16.c
-main/ui/fonts/poppins_regular_18.c
-main/ui/fonts/poppins_regular_20.c
-main/ui/fonts/poppins_regular_22.c
-main/ui/fonts/poppins_regular_24.c
-main/ui/fonts/poppins_regular_28.c
-main/ui/fonts/poppins_regular_34.c
-main/ui/fonts/poppins_regular_36.c
-main/ui/fonts/poppins_regular_38.c
-main/ui/fonts/poppins_regular_40.c
-main/ui/fonts/materialdesignicons-webfont.ttf
+# Generated LVGL fonts ARE published on purpose: main/CMakeLists.txt auto-detects
+# them and silently falls back to the built-in LVGL faces when they are missing,
+# so excluding them would make a fresh clone render with different typography.
+# Regeneration is described in main/ui/fonts/README.md.
 
 # Panel variant manifest is generated from main/idf_component.panel{4,7,10}.yml
 # (plus panels3) by the top-level CMakeLists.txt on every configure. Do not edit or commit.
