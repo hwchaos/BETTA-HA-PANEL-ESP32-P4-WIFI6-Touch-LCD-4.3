@@ -455,6 +455,11 @@ Wszystkie zrzuty pobrane bezpośrednio z działającego panelu (`GET /api/screen
 1024 × 600 px) i pokazują aktualny wygląd interfejsu — kolory tła, tapety i kafelki zależą od
 konfiguracji, więc u Ciebie będą inne.
 
+W wariancie 7B szybka LCD jest w obudowie zamontowana do góry nogami, dlatego firmware obraca
+interfejs o 180° w sofcie (`LV_DISPLAY_ROTATION_180`). Endpoint zrzutu zwraca bufor ramki dokładnie
+tak, jak jest podawany na szybkę — surowy BMP wychodzi więc obrócony o 180°; zdjęcia poniżej zostały
+obrócone z powrotem do orientacji, w której widzi je użytkownik.
+
 | Strona „Salon” | Oświetlenie RGB | Gniazdka |
 |---|---|---|
 | ![Strona Salon — kafelki](images/screenshots/panel-01-salon.png) | ![Oświetlenie RGB — kolory](images/screenshots/panel-02-led.png) | ![Sterowanie gniazdkami](images/screenshots/panel-03-sockets.png) |

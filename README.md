@@ -458,6 +458,11 @@ All captures were taken straight from the running panel (`GET /api/screenshot.bm
 1024 × 600 px) and show the current UI — background colours, wallpapers and tiles depend on your
 configuration, so yours will look different.
 
+On the 7B variant the LCD glass is mounted upside down, so the panel firmware rotates the UI by
+180° in software (`LV_DISPLAY_ROTATION_180`). The capture endpoint dumps the framebuffer exactly as
+it is fed to the glass, which is why the raw BMP comes out rotated 180°; the images below have been
+rotated back to the viewing orientation.
+
 | “Living room” page | RGB lighting | Sockets |
 |---|---|---|
 | ![Living room page — tiles](images/screenshots/panel-01-salon.png) | ![RGB lighting — colours](images/screenshots/panel-02-led.png) | ![Socket control](images/screenshots/panel-03-sockets.png) |
