@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: LicenseRef-FNCL-1.1 | Copyright (c) 2026 Cpt_Kirk -->
-# Firmware — Waveshare 7" (`panel7`) / Firmware — Waveshare 7" (`panel7`)
+# Firmware — Waveshare 7" (`panel7`)
 
 🇵🇱 [Polski](#-polski) · 🇬🇧 [English](#-english)
 

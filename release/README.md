@@ -5,9 +5,10 @@ Download the factory image for your hardware variant:
 
 | Variant | Hardware | Factory image |
 |---------|----------|---------------|
-| panel4  | Smart86 Box (4" panel, ESP32-P4) | [betta86-ha-panel-v0.8.2-panel4.factory.bin](https://github.com/cptkirki/BETTA-HA-PANEL/blob/main/release/betta86-ha-panel-v0.8.2-panel4.factory.bin) |
-| panel10 | Smart86 Box (10.1" panel, ESP32-P4) | [betta86-ha-panel-v0.8.2-panel10.factory.bin](https://github.com/cptkirki/BETTA-HA-PANEL/blob/main/release/betta86-ha-panel-v0.8.2-panel10.factory.bin) |
-| panels3 | Guition ESP32-S3-4848S040 (4.8" 480×480, ESP32-S3) | [betta86-ha-panel-v0.8.2-panels3.factory.bin](https://github.com/cptkirki/BETTA-HA-PANEL/blob/main/release/betta86-ha-panel-v0.8.2-panels3.factory.bin) |
+| panel7  | Waveshare 7" panel (this repository) | [betta-ha-panel-7b.factory.bin](../firmware/betta-ha-panel-7b.factory.bin) |
+| panel4  | Smart86 Box (4" panel, ESP32-P4) | [betta86-ha-panel-v0.8.2-panel4.factory.bin](betta86-ha-panel-v0.8.2-panel4.factory.bin) |
+| panel10 | Smart86 Box (10.1" panel, ESP32-P4) | [betta86-ha-panel-v0.8.2-panel10.factory.bin](betta86-ha-panel-v0.8.2-panel10.factory.bin) |
+| panels3 | Guition ESP32-S3-4848S040 (4.8" 480×480, ESP32-S3) | [betta86-ha-panel-v0.8.2-panels3.factory.bin](betta86-ha-panel-v0.8.2-panels3.factory.bin) |
 
 - Flash it with esptool or with a web flasher of your choice, for example: https://espressif.github.io/esptool-js/
 - Use the outer USB-C port on the Smart86 Box for flashing.
@@ -38,7 +39,7 @@ The original C6 adapter firmware used for this release was:
 Important:
 
 - The C6 `network_adapter` firmware is already embedded into the generated factory image `betta86-ha-panel-<version>.factory.bin`.
-- Running `tools/make_factory_bin.ps1` creates factory and OTA images and archives superseded images in `release/archive/` and `release/ota/archive/`.
+- Running `tools/make_factory_bin.ps1` creates factory and OTA images and archives superseded images in `release/archive/` and `release/ota/archive/`. Those local archives are **not** published in this repository — only the current variant images in `release/` and `release/ota/` are kept here. Superseded images remain available in the Git history (`git log --all -- release/archive release/ota/archive`).
 - For flashing/distribution, the factory image is sufficient.
 - For in-app OTA updates, use `release/ota/betta86-ha-panel-<version>.ota.bin`.
 - Keeping `network_adapter_esp32c6*.bin` in the repo is optional and not required for release delivery.
