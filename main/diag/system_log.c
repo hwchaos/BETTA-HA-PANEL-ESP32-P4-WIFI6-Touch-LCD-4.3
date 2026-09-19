@@ -171,6 +171,16 @@ static volatile int32_t s_lvgl_slow_report_ms;
 static int64_t s_wd_check_prev_ms;
 static bool s_freeze_warned;
 
+/* Render watchdog state: the LVGL pipeline is considered stalled when the
+ * render pass counter (display_render_stats_t.passes) stops advancing even
+ * though the trace timer pings a 1x1 invalidation every APP_LVGL_TRACE_PERIOD_MS
+ * (see display_trace_timer_cb in display_init_panel7.c). */
+static uint32_t s_render_last_passes;
+static int64_t s_render_last_passes_ms;
+static bool s_render_baseline_valid;
+static bool s_render_warned;
+static bool s_render_recovered;
+
 /* Maintenance window in which the stale-heartbeat restart is suppressed. */
 static portMUX_TYPE s_wd_pause_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_wd_pause_depth;
@@ -1120,7 +1130,7 @@ static int freeze_build(char *dst, size_t dst_len, const char *kind,
     char lvhand[16];
     char core0[24];
     char core1[24];
-    char render[112];
+    char render[128];
     char apply[80];
     const char *stage = (const char *)s_ui_stage;
     int32_t now_ms = (int32_t)(esp_timer_get_time() / 1000);
@@ -1337,11 +1347,86 @@ static void system_log_stack_audit(void)
 #endif
 }
 
+static void system_log_check_render_watchdog(int64_t now_ms)
+{
+    if (!display_is_ready()) {
+        return;
+    }
+
+    display_render_stats_t rs;
+    display_render_stats_get(&rs);
+
+    if (watchdog_suspended()) {
+        /* A deliberately long maintenance operation is in progress; re-baseline
+         * so the window after it ends starts from a known-good counter. */
+        s_render_last_passes = rs.passes;
+        s_render_last_passes_ms = now_ms;
+        s_render_baseline_valid = false;
+        s_render_warned = false;
+        s_render_recovered = false;
+        return;
+    }
+
+    if (!s_render_baseline_valid) {
+        s_render_baseline_valid = true;
+        s_render_last_passes = rs.passes;
+        s_render_last_passes_ms = now_ms;
+        return;
+    }
+
+    if (rs.passes != s_render_last_passes) {
+        s_render_last_passes = rs.passes;
+        s_render_last_passes_ms = now_ms;
+        s_render_warned = false;
+        s_render_recovered = false;
+        return;
+    }
+
+    int64_t stalled_ms = now_ms - s_render_last_passes_ms;
+
+    /* Early warning: names the stall while it may still recover on its own.
+     * No restart at this point. */
+    if (stalled_ms >= APP_RENDER_STALL_WARN_MS && !s_render_warned) {
+        s_render_warned = true;
+        char line[512];
+        int n = freeze_build(line, sizeof(line), "render stalled", stalled_ms, 0);
+        freeze_append(line, n);
+        system_log_dump_tasks();
+        ESP_LOGW(TAG, "LVGL render stalled for %lld ms (passes=%u)",
+                 (long long)stalled_ms, (unsigned)rs.passes);
+    }
+
+    if (stalled_ms < APP_RENDER_STALL_TIMEOUT_MS) {
+        return;
+    }
+
+    if (!s_render_recovered) {
+        s_render_recovered = true;
+        ESP_LOGW(TAG, "LVGL render stalled for %lld ms; attempting soft recovery",
+                 (long long)stalled_ms);
+        display_force_invalidate();
+        /* Re-arm the window: if the soft recovery revives the pipeline, passes
+         * advances and this state resets; if not, the next timeout restarts. */
+        s_render_last_passes_ms = now_ms;
+        return;
+    }
+
+    char line[512];
+    int n = freeze_build(line, sizeof(line), "restarting (render)", stalled_ms, 0);
+    freeze_append(line, n);
+    system_log_dump_tasks();
+    ESP_LOGE(TAG, "LVGL render watchdog triggered (no render passes for %lld ms after soft recovery); restarting",
+             (long long)stalled_ms);
+    esp_restart();
+}
+
 static void system_log_check_ui_watchdog(void)
 {
     int64_t now_ms = esp_timer_get_time() / 1000;
     int64_t check_gap_ms = (s_wd_check_prev_ms > 0) ? (now_ms - s_wd_check_prev_ms) : 0;
     s_wd_check_prev_ms = now_ms;
+
+    system_log_check_render_watchdog(now_ms);
 
     if (!ui_runtime_is_running()) {
         return;
@@ -1471,7 +1556,7 @@ static void system_log_heartbeat(void)
     static char line[2048];
     static char dsi[640];
     char flash[256];
-    char render[112];
+    char render[128];
     char apply[80];
     (void)system_log_lock_owner("lvgl", lock_lvgl, sizeof(lock_lvgl));
     (void)system_log_lock_owner("model", lock_model, sizeof(lock_model));

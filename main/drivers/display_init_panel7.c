@@ -91,6 +91,14 @@ static void display_trace_timer_cb(lv_timer_t *timer)
      * a stall after the timer list was processed (refresh/render). */
     system_log_note_lvgl_cb("trace");
     system_log_lvgl_handler_beat();
+
+    /* Render ping: force one refresh pass every APP_LVGL_TRACE_PERIOD_MS even
+     * when the UI is completely static.  The render watchdog keys on the render
+     * pass counter advancing, so an idle panel must still make passes; this 1x1
+     * invalidation is that heartbeat.  Never takes the lock here: this callback
+     * already runs inside lv_timer_handler() with the LVGL lock held. */
+    lv_area_t ping = {0, 0, 0, 0};
+    lv_obj_invalidate_area(lv_screen_active(), &ping);
 }
 
 /* ---------------------------------------------------------------------------
@@ -256,8 +264,9 @@ void display_render_stats_format(char *out, size_t out_len)
     if (out == NULL || out_len == 0) {
         return;
     }
-    snprintf(out, out_len, "render passes=%u full=%u slow=%u dirty=%u%%/max%u%% last=%ums max=%ums",
-             (unsigned)s_render_stats.passes, (unsigned)s_render_stats.full_passes,
+    snprintf(out, out_len, "render passes=%u inv=%u full=%u slow=%u dirty=%u%%/max%u%% last=%ums max=%ums",
+             (unsigned)s_render_stats.passes, (unsigned)s_render_stats.invalidations,
+             (unsigned)s_render_stats.full_passes,
              (unsigned)s_render_stats.slow_passes, (unsigned)s_render_stats.last_dirty_pct,
              (unsigned)s_render_stats.max_dirty_pct, (unsigned)s_render_stats.last_pass_ms,
              (unsigned)s_render_stats.max_pass_ms);
@@ -1007,4 +1016,15 @@ void display_unlock(void)
 {
     system_log_lock_release("lvgl");
     lvgl_port_unlock();
+}
+
+void display_force_invalidate(void)
+{
+    if (!s_display_ready) {
+        return;
+    }
+    if (display_lock(500)) {
+        lv_obj_invalidate(lv_screen_active());
+        display_unlock();
+    }
 }

@@ -127,3 +127,10 @@ void display_render_stats_format(char *out, size_t out_len);
 /* Takes the oldest pending note; returns false when nothing notable happened.
  * Safe to call from any task, never from inside an LVGL event callback. */
 bool display_render_note_take(display_render_note_t *out);
+
+/* Force an invalidation of the active screen from outside the LVGL task.  Used
+ * by the render watchdog as a soft recovery: if the pipeline stalled with a
+ * stale frame, one full invalidation re-queues a repaint.  No-op while the
+ * display is not ready.  Takes the LVGL lock internally, so never call it from
+ * an LVGL callback (it would deadlock on the re-entrant port lock). */
+void display_force_invalidate(void);

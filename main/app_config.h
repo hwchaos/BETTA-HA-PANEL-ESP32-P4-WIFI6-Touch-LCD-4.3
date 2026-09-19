@@ -247,6 +247,14 @@
  * pure forensics, so a freeze that recovers on its own still leaves a trace. */
 #define APP_LOG_STALL_WARN_MS 15000
 
+/* Render watchdog: the LVGL render pipeline is considered stalled when the
+ * render pass counter stops advancing even though the trace timer pings a 1x1
+ * invalidation every APP_LVGL_TRACE_PERIOD_MS.  First threshold writes a
+ * freeze warning; the second attempts a soft recovery (one full invalidation)
+ * and only restarts when the pipeline stays dead after that. */
+#define APP_RENDER_STALL_WARN_MS 15000
+#define APP_RENDER_STALL_TIMEOUT_MS 30000
+
 /* Grace window given to the UI watchdog while a deliberately long maintenance
  * operation (microSD format, firmware upload) runs.  The window is bounded: an
  * operation that hangs far beyond it still lets the watchdog reboot the panel. */
