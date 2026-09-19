@@ -20,6 +20,11 @@
 # path that is not under the current repository prefix, so the marker is checked
 # again after applying to make that failure mode loud instead of silent.
 #
+# git apply runs with --ignore-whitespace because the component manager may
+# materialise managed_components/ with either LF or CRLF endings depending on how
+# it fetched the component; without the flag such a checkout looks like a context
+# mismatch and a clean clone fails to configure.
+#
 # A patch is skipped when its target does not exist (component not downloaded
 # for this variant), and when the marker is already found.  Anything else that
 # goes wrong is a hard error on purpose: building unpatched vendor code must not
@@ -66,7 +71,7 @@ foreach(_entry IN LISTS _VENDOR_PATCHES)
     endif()
 
     execute_process(
-        COMMAND "${_VENDOR_PATCH_GIT}" apply -p1 "${_patch_abs}"
+        COMMAND "${_VENDOR_PATCH_GIT}" apply --ignore-whitespace -p1 "${_patch_abs}"
         WORKING_DIRECTORY "${_VENDOR_PATCH_ROOT}"
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out

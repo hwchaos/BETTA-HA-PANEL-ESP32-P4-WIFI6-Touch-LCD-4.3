@@ -1,1 +1,4 @@
 *.bin binary
+# Vendor patches must stay LF: git apply matches their context line by line, and a
+# CRLF copy (e.g. a checkout with core.autocrlf=true) makes that match fail.
+*.patch text eol=lf

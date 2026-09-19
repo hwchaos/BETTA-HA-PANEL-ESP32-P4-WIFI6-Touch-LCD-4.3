@@ -315,6 +315,8 @@ The top bar was rebuilt so that the layout is predictable and icons never "stick
   you want another station, change the entity of the first weather tile.
 - The shortcut icon comes from the weather glyph font (a cloud with a lightning bolt), and the page
   texts and tooltips are fully translated.
+- The animated condition icons (Lottie/Meteocons) are optional and are not shipped with this
+  repository — see *Building from source*; without them the tiles show the static MDI icons.
 
 ### M. Network, time, link resilience
 
@@ -585,6 +587,13 @@ Important when building:
   `main/idf_component.panel7.yml` by `CMakeLists.txt` and is not stored in the repository.
 - The ESP-Hosted patches from `patches/` are applied automatically
   (`cmake/apply_vendor_patches.cmake`).
+- The animated weather assets (Meteocons Lottie JSON) are **not part of this repository**: the
+  third-party icon set (`basmilius/weather-icons`, see `main/ui/weather_icons/UPSTREAM_LINK.txt`) is
+  not redistributed here. A build without it is fully functional — you only get
+  `Missing weather lottie asset` warnings at configure time and the weather tiles use the static MDI
+  icons instead of animations. To get the animations, place `clear-day.json`, `cloudy.json`,
+  `rain.json`, … (the full list is in `main/CMakeLists.txt`, `WEATHER_LOTTIE_EMBEDS`) in
+  `main/ui/weather_icons/fill/lottie/` and rebuild.
 - `tools/make_factory_bin.ps1` is the upstream packager for the `panel4` / `panel10` / `panels3`
   variants; for this project call it with explicit output paths (as above). Without `-OutFile`
   and `-OtaOutFile` it writes the images to `release/` as `betta86-ha-panel-<version>.factory.bin`.

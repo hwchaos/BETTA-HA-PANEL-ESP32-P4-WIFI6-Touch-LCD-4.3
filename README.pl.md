@@ -315,6 +315,8 @@ Górny pasek został przebudowany tak, aby układ był przewidywalny i nie „sk
   inną stację, zmień encję pierwszego kafelka pogody.
 - Ikona skrótu pochodzi z fontu glifów pogodowych (chmurka z błyskawicą), a podpowiedzi i teksty
   strony są w pełni przetłumaczone.
+- Animowane ikony warunków (Lottie/Meteocons) są opcjonalne i nie są dołączane do tego
+  repozytorium — patrz *Budowanie ze źródeł*; bez nich kafelki pokazują statyczne ikony MDI.
 
 ### M. Sieć, czas, odporność łącza
 
@@ -580,6 +582,13 @@ Ważne przy budowaniu:
   `main/idf_component.panel7.yml` przez `CMakeLists.txt` i nie jest przechowywana w repozytorium.
 - Patche dla ESP-Hosted z katalogu `patches/` są nakładane automatycznie
   (`cmake/apply_vendor_patches.cmake`).
+- Animowane ikony pogody (Lottie „Meteocons") **nie są częścią tego repozytorium**: zewnętrzny
+  zestaw ikon (`basmilius/weather-icons`, patrz `main/ui/weather_icons/UPSTREAM_LINK.txt`) nie jest
+  tu redystrybuowany. Build bez niego jest w pełni działający — przy konfiguracji pojawiają się
+  tylko ostrzeżenia `Missing weather lottie asset`, a kafelki pogody używają statycznych ikon MDI
+  zamiast animacji. Aby je włączyć, wrzuć pliki `clear-day.json`, `cloudy.json`, `rain.json`, …
+  (pełna lista w `main/CMakeLists.txt`, `WEATHER_LOTTIE_EMBEDS`) do `main/ui/weather_icons/fill/lottie/`
+  i przebuduj projekt.
 - `tools/make_factory_bin.ps1` to skrypt upstreamu dla wariantów `panel4` / `panel10` / `panels3`;
   dla tego projektu wywołuj go z jawnymi ścieżkami wyjściowymi (jak wyżej). Bez `-OutFile`
   i `-OtaOutFile` zapisuje obrazy w `release/` pod nazwą `betta86-ha-panel-<wersja>.factory.bin`.
