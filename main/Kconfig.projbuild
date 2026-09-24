@@ -35,6 +35,9 @@ config APP_PANEL_VARIANT_7INCH_1024
         Waveshare ESP32-P4-WIFI6-Touch-LCD-7B 7-inch 1024x600
         MIPI-DSI panel (EK79007) with GT911 capacitive touch.
 
+config APP_PANEL_VARIANT_4INCH3_480
+    bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-4.3 (800x480)"
+    depends on IDF_TARGET_ESP32P4
 endchoice
 
 endmenu
