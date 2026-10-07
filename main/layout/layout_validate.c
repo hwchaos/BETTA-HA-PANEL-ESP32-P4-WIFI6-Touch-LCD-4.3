@@ -114,7 +114,7 @@ static bool is_supported_page_type(const char *type)
     }
     return strcmp(type, "dashboard") == 0 || strcmp(type, "energy_dashboard") == 0 ||
            strcmp(type, "music_assistant") == 0 || strcmp(type, "radio") == 0 ||
-           strcmp(type, "xiaozhi") == 0;
+           strcmp(type, "xiaozhi") == 0 || strcmp(type, "cameras") == 0;
 }
 
 typedef struct {
@@ -138,7 +138,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
     }
 
     if (strcmp(type, "sensor") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 90;
         limits.min_h = 60;
 #else
@@ -146,7 +146,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "binary_sensor") == 0 || strcmp(type, "presence") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 90;
         limits.min_h = 60;
 #else
@@ -154,7 +154,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "binary_sensor") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 90;
         limits.min_h = 60;
 #else
@@ -163,7 +163,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #endif
     } else if (strcmp(type, "alarm_tile") == 0) {
         /* Needs room for the status text plus the arm/disarm button row. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 110;
 #else
@@ -171,7 +171,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_h = 140;
 #endif
     } else if (strcmp(type, "button") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 82;
         limits.min_h = 82;
         limits.max_w = 320;
@@ -184,13 +184,13 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #endif
     } else if (strcmp(type, "slider") == 0) {
         limits.min_w = 100;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_h = 80;
 #else
         limits.min_h = 100;
 #endif
     } else if (strcmp(type, "graph") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 100;
 #else
@@ -199,7 +199,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #endif
     } else if (strcmp(type, "clock_alarm") == 0) {
         /* Needs room for the clock digits plus the optional date row. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 110;
         limits.min_h = 80;
 #else
@@ -207,7 +207,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_h = 110;
 #endif
     } else if (strcmp(type, "empty_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 100;
         limits.min_h = 70;
 #else
@@ -215,7 +215,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "light_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 140;
         limits.min_h = 140;
 #else
@@ -225,7 +225,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "heating_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 150;
 #else
@@ -235,7 +235,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "weather_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 160;
         limits.min_h = 150;
 #else
@@ -245,7 +245,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "weather_3day") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 280;
         limits.min_h = 180;
 #else
@@ -255,7 +255,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 640;
         limits.max_h = 480;
     } else if (strcmp(type, "todo_list") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 180;
         limits.min_h = 160;
 #else
@@ -265,7 +265,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 640;
         limits.max_h = 640;
     } else if (strcmp(type, "media_player") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 200;
         limits.min_h = 170;
 #else
@@ -275,7 +275,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = APP_CONTENT_BOX_WIDTH;
         limits.max_h = APP_CONTENT_BOX_HEIGHT;
     } else if (strcmp(type, "roborock_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 220;
         limits.min_h = 190;
 #else
@@ -285,7 +285,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = APP_CONTENT_BOX_WIDTH;
         limits.max_h = APP_CONTENT_BOX_HEIGHT;
     } else if (strcmp(type, "lock") == 0 || strcmp(type, "fan") == 0 || strcmp(type, "cover") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 100;
         limits.min_h = 90;
 #else
@@ -295,7 +295,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "select") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 140;
         limits.min_h = 80;
 #else
@@ -305,7 +305,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_w = 480;
         limits.max_h = 300;
     } else if (strcmp(type, "number") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 100;
         limits.min_h = 90;
 #else
@@ -316,7 +316,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_h = 480;
     } else if (strcmp(type, "cover_tile") == 0) {
         /* Icon, position value and progress bar, plus the optional button row. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 140;
         limits.min_h = 110;
 #else
@@ -327,7 +327,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_h = APP_CONTENT_BOX_HEIGHT;
     } else if (strcmp(type, "scene_tile") == 0) {
         /* Icon plus the scene name - the whole tile is the button. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 96;
         limits.min_h = 90;
 #else
@@ -338,7 +338,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_h = 480;
     } else if (strcmp(type, "person_tile") == 0) {
         /* Letter avatar plus the name and zone rows. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 110;
         limits.min_h = 80;
 #else
@@ -349,7 +349,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_h = 480;
     } else if (strcmp(type, "timer_tile") == 0) {
         /* Countdown value plus the preset / start / pause button row. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 110;
         limits.min_h = 90;
 #else
@@ -1539,7 +1539,8 @@ bool layout_validate_json(const char *json, layout_validation_result_t *result)
         cJSON *widgets = cJSON_GetObjectItemCaseSensitive(page, "widgets");
         char msg[96];
         bool is_energy_dashboard_page = false;
-        bool is_xiaozhi_page = false;
+        /* xiaozhi / cameras: the firmware builds the page itself, no widgets. */
+        bool is_fixed_ui_page = false;
         bool is_music_assistant_page = false;
         bool is_radio_page = false;
 
@@ -1565,8 +1566,9 @@ bool layout_validate_json(const char *json, layout_validation_result_t *result)
                 layout_validation_add(result, msg);
             } else if (strcmp(page_type->valuestring, "energy_dashboard") == 0) {
                 is_energy_dashboard_page = true;
-            } else if (strcmp(page_type->valuestring, "xiaozhi") == 0) {
-                is_xiaozhi_page = true;
+            } else if (strcmp(page_type->valuestring, "xiaozhi") == 0 ||
+                       strcmp(page_type->valuestring, "cameras") == 0) {
+                is_fixed_ui_page = true;
             } else if (strcmp(page_type->valuestring, "music_assistant") == 0) {
                 is_music_assistant_page = true;
             } else if (strcmp(page_type->valuestring, "radio") == 0) {
@@ -1615,13 +1617,13 @@ bool layout_validate_json(const char *json, layout_validation_result_t *result)
             continue;
         }
 
-        if (is_xiaozhi_page) {
+        if (is_fixed_ui_page) {
             if (widgets != NULL && !cJSON_IsArray(widgets)) {
                 snprintf(msg, sizeof(msg), "page %s: widgets must be array", cJSON_IsString(page_id) ? page_id->valuestring : "?");
                 layout_validation_add(result, msg);
             } else if (cJSON_IsArray(widgets) && cJSON_GetArraySize(widgets) > 0) {
-                snprintf(msg, sizeof(msg), "page %s: xiaozhi pages cannot contain widgets",
-                    cJSON_IsString(page_id) ? page_id->valuestring : "?");
+                snprintf(msg, sizeof(msg), "page %s: %s pages cannot contain widgets",
+                    cJSON_IsString(page_id) ? page_id->valuestring : "?", page_type->valuestring);
                 layout_validation_add(result, msg);
             }
             continue;

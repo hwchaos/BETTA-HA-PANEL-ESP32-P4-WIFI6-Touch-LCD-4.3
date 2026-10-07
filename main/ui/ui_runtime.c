@@ -250,7 +250,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
     }
 
     if (strcmp(type, "sensor") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 90;
         limits.min_h = 60;
 #else
@@ -258,7 +258,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "binary_sensor") == 0 || strcmp(type, "presence") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 90;
         limits.min_h = 60;
 #else
@@ -266,7 +266,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "binary_sensor") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 90;
         limits.min_h = 60;
 #else
@@ -274,7 +274,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "alarm_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 110;
 #else
@@ -284,7 +284,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
     } else if (strcmp(type, "clock_alarm") == 0) {
         /* Must fit the clock plus the optional date row; the date row is
          * dropped automatically on small tiles. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 110;
         limits.min_h = 80;
 #else
@@ -292,7 +292,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.min_h = 110;
 #endif
     } else if (strcmp(type, "button") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 82;
         limits.min_h = 82;
         limits.max_w = 320;
@@ -305,13 +305,13 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
 #endif
     } else if (strcmp(type, "slider") == 0) {
         limits.min_w = 100;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_h = 80;
 #else
         limits.min_h = 100;
 #endif
     } else if (strcmp(type, "graph") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 100;
 #else
@@ -319,7 +319,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.min_h = 140;
 #endif
     } else if (strcmp(type, "empty_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 100;
         limits.min_h = 70;
 #else
@@ -327,7 +327,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.min_h = 80;
 #endif
     } else if (strcmp(type, "light_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 140;
         limits.min_h = 140;
 #else
@@ -337,7 +337,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "heating_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 150;
 #else
@@ -347,7 +347,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "weather_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 160;
         limits.min_h = 150;
 #else
@@ -357,7 +357,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "weather_3day") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 300;
         limits.min_h = 190;
 #else
@@ -367,7 +367,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 640;
         limits.max_h = 480;
     } else if (strcmp(type, "todo_list") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 180;
         limits.min_h = 160;
 #else
@@ -377,7 +377,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 640;
         limits.max_h = 640;
     } else if (strcmp(type, "media_player") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 200;
         limits.min_h = 170;
 #else
@@ -387,7 +387,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = APP_CONTENT_BOX_WIDTH;
         limits.max_h = APP_CONTENT_BOX_HEIGHT;
     } else if (strcmp(type, "roborock_tile") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 220;
         limits.min_h = 190;
 #else
@@ -397,7 +397,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = APP_CONTENT_BOX_WIDTH;
         limits.max_h = APP_CONTENT_BOX_HEIGHT;
     } else if (strcmp(type, "lock") == 0 || strcmp(type, "fan") == 0 || strcmp(type, "cover") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 100;
         limits.min_h = 90;
 #else
@@ -407,7 +407,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 480;
         limits.max_h = 480;
     } else if (strcmp(type, "select") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 140;
         limits.min_h = 80;
 #else
@@ -417,7 +417,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
         limits.max_w = 480;
         limits.max_h = 300;
     } else if (strcmp(type, "number") == 0) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if APP_LAYOUT_COMPACT
         limits.min_w = 100;
         limits.min_h = 90;
 #else
@@ -1560,8 +1560,6 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
     s_radio_page_count = 0;
 
     int page_count = cJSON_GetArraySize(pages);
-    bool has_xiaozhi_page = false;
-    bool has_cameras_page = false;
     bool has_radio_page = false;
     bool has_weather_page = false;
     for (int p = 0; p < page_count; p++) {
@@ -1579,9 +1577,13 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
             has_weather_page = true;
         }
 
+        /* Cameras pages are opened from the top-bar cameras chip instead. */
+        bool is_cameras_type = cJSON_IsString(page_type) && page_type->valuestring != NULL &&
+                               strcmp(page_type->valuestring, "cameras") == 0;
+
         /* The weather page is reached from the top-bar weather chip, so a stored
          * one gets no bottom-bar tab either (same rule as the built-in default). */
-        lv_obj_t *page_container = is_weather_page
+        lv_obj_t *page_container = (is_weather_page || is_cameras_type)
             ? ui_pages_add_hidden(page_id->valuestring, cJSON_IsString(page_title) ? page_title->valuestring : page_id->valuestring)
             : ui_pages_add(page_id->valuestring, cJSON_IsString(page_title) ? page_title->valuestring : page_id->valuestring);
         if (page_container == NULL) {
@@ -1621,7 +1623,6 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
         bool is_xiaozhi_page = cJSON_IsString(page_type) && page_type->valuestring != NULL &&
                                strcmp(page_type->valuestring, "xiaozhi") == 0;
         if (is_xiaozhi_page) {
-            has_xiaozhi_page = true;
             xz_ui_build(page_container);
             continue;
         }
@@ -1629,8 +1630,8 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
         bool is_cameras_page = cJSON_IsString(page_type) && page_type->valuestring != NULL &&
                                strcmp(page_type->valuestring, "cameras") == 0;
         if (is_cameras_page) {
-            has_cameras_page = true;
             ui_cameras_page_build(page_container, page_id->valuestring);
+            ui_pages_set_camera_shortcut(page_id->valuestring);
             continue;
         }
 
@@ -1711,27 +1712,8 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
         }
     }
 
-    /* Guarantee a Xiaozhi entry point even when the stored layout predates
-     * the Xiaozhi integration (or the user removed the page). */
-    if (!has_xiaozhi_page) {
-        lv_obj_t *xz_container = ui_pages_add("xiaozhi", "Xiaozhi");
-        if (xz_container != NULL) {
-            xz_ui_build(xz_container);
-        } else {
-            ui_runtime_warn_page_table_full("xiaozhi");
-        }
-    }
-
-    /* Same guarantee for the cameras page: always provide the tab so cameras
-     * configured in the web editor have a home even in older layouts. */
-    if (!has_cameras_page) {
-        lv_obj_t *cam_container = ui_pages_add("cameras", ui_i18n_get("page.cameras", "Kamery"));
-        if (cam_container != NULL) {
-            ui_cameras_page_build(cam_container, "cameras");
-        } else {
-            ui_runtime_warn_page_table_full("cameras");
-        }
-    }
+    /* Xiaozhi and cameras pages only exist when the user created them in the
+     * web editor; the bottom bar shows exactly the stored layout's pages. */
 
     /* The radio page is reached from the top-bar radio chip, so it gets no
      * bottom-bar tab: create it hidden whenever the stored layout has none. */

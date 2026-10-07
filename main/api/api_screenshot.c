@@ -136,8 +136,10 @@ static void write_bmp_header(uint8_t *header, uint32_t width, uint32_t height, u
  * screenshot can no longer disturb the display. */
 static esp_err_t send_framebuffer_bmp(httpd_req_t *req, const uint8_t *fb, size_t fb_bytes, bool swap_channels)
 {
-    const uint32_t width = APP_SCREEN_WIDTH;
-    const uint32_t height = APP_SCREEN_HEIGHT;
+    /* The framebuffer is in scan-out orientation, which is not the UI
+     * orientation on panels rotated by 90 deg in software. */
+    const uint32_t width = APP_PANEL_NATIVE_WIDTH;
+    const uint32_t height = APP_PANEL_NATIVE_HEIGHT;
     const uint32_t src_stride = width * 2U;
 
     if (fb == NULL || fb_bytes < (size_t)src_stride * height) {

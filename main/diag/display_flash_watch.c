@@ -356,7 +356,7 @@ static int64_t fw_now_ms(void)
 static bool sample_stats(const uint8_t *fb, size_t bytes, fb_stats_t *out, uint8_t *cells,
                          uint16_t *px_out)
 {
-    const size_t stride = (size_t)APP_SCREEN_WIDTH * 2U;
+    const size_t stride = (size_t)APP_PANEL_NATIVE_WIDTH * 2U;
     const size_t last_x = (size_t)(FW_FIRST_X + (FW_COLS - 1) * FW_STEP_X);
     const size_t last_y = (size_t)(FW_FIRST_Y + (FW_ROWS - 1) * FW_STEP_Y);
 
@@ -454,7 +454,7 @@ static int fw_px_luma(int r, int g, int b)
  * per-channel means are kept so the next pass can compare against them. */
 static bool sample_fast(const uint8_t *fb, size_t bytes, fw_fast_t *out, uint16_t *px_out)
 {
-    const size_t stride = (size_t)APP_SCREEN_WIDTH * 2U;
+    const size_t stride = (size_t)APP_PANEL_NATIVE_WIDTH * 2U;
     const size_t last_x = (size_t)(FW_FAST_FIRST_X + (FW_FAST_COLS - 1) * FW_FAST_STEP_X);
     const size_t last_y = (size_t)(FW_FAST_FIRST_Y + (FW_FAST_ROWS - 1) * FW_FAST_STEP_Y);
 

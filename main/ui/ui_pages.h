@@ -28,6 +28,9 @@ lv_obj_t *ui_pages_add(const char *page_id, const char *title);
  * through its own top bar entry point (used by the radio and weather apps). */
 lv_obj_t *ui_pages_add_hidden(const char *page_id, const char *title);
 lv_obj_t *ui_pages_add_ex(const char *page_id, const char *title, bool in_nav);
+/* Registers the page the top bar cameras shortcut opens (first call wins until
+ * the next ui_pages_reset()). */
+void ui_pages_set_camera_shortcut(const char *page_id);
 bool ui_pages_show(const char *page_id);
 bool ui_pages_show_index(uint16_t index);
 bool ui_pages_next(void);

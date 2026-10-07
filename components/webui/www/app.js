@@ -25,6 +25,7 @@ const GRAPH_BAR_BUCKET_MIN_OPTIONS = [5, 10, 15, 30];
 const DEFAULT_GRAPH_BAR_BUCKET_MIN = 15;
 const ENERGY_PAGE_TYPE = "energy_dashboard";
 const XIAOZHI_PAGE_TYPE = "xiaozhi";
+const CAMERAS_PAGE_TYPE = "cameras";
 const MUSIC_PAGE_TYPE = "music_assistant";
 const RADIO_PAGE_TYPE = "radio";
 /* Fixed id of the weather page: the firmware hides this page from the bottom
@@ -395,6 +396,8 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.menu_normal": "Normal Page",
     "layout.pages.menu_energy": "Energy Page",
     "layout.pages.menu_xiaozhi": "Xiaozhi Page",
+    "layout.pages.menu_cameras": "Cameras Page",
+    "layout.pages.cameras_title": "Cameras",
     "layout.pages.menu_music": "Music Page",
     "layout.pages.menu_radio": "Radio Page",
     "layout.pages.menu_weather": "Weather Page",
@@ -482,6 +485,8 @@ const WEB_I18N_BUILTIN = {
     "layout.status.energy_page_only": "Energy pages do not accept widgets.",
     "layout.status.xiaozhi_page_only": "Xiaozhi pages are dedicated to the voice assistant and do not accept widgets.",
     "layout.status.xiaozhi_page_locked": "This page is managed by the Xiaozhi AI voice assistant built into the firmware. Configure it in Settings → Xiaozhi AI.",
+    "layout.status.cameras_page_only": "Camera pages show the cameras configured in Settings and do not accept widgets.",
+    "layout.status.cameras_page_locked": "This page shows the cameras configured in Settings → Cameras.",
     "layout.status.music_page_only": "Music pages do not accept widgets.",
     "layout.status.radio_page_only": "Radio pages do not accept widgets.",
     "layout.widgets.heading": "Widgets",
@@ -1287,6 +1292,8 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.menu_normal": "Normale Seite",
     "layout.pages.menu_energy": "Energie-Seite",
     "layout.pages.menu_xiaozhi": "Xiaozhi-Seite",
+    "layout.pages.menu_cameras": "Kamera-Seite",
+    "layout.pages.cameras_title": "Kameras",
     "layout.pages.menu_music": "Musik-Seite",
     "layout.pages.menu_radio": "Radio-Seite",
     "layout.pages.menu_weather": "Wetter-Seite",
@@ -1375,6 +1382,8 @@ const WEB_I18N_BUILTIN = {
     "layout.status.energy_page_only": "Energie-Seiten akzeptieren keine Widgets.",
     "layout.status.xiaozhi_page_only": "Xiaozhi-Seiten sind dem Sprachassistenten vorbehalten und akzeptieren keine Widgets.",
     "layout.status.xiaozhi_page_locked": "Diese Seite wird vom integrierten Xiaozhi-KI-Sprachassistenten verwaltet. Konfiguration unter Einstellungen → Xiaozhi-KI.",
+    "layout.status.cameras_page_only": "Kamera-Seiten zeigen die in den Einstellungen konfigurierten Kameras und akzeptieren keine Widgets.",
+    "layout.status.cameras_page_locked": "Diese Seite zeigt die unter Einstellungen → Kameras konfigurierten Kameras.",
     "layout.status.music_page_only": "Musik-Seiten akzeptieren keine Widgets.",
     "layout.widgets.heading": "Widgets",
     "layout.widgets.add_sensor": "+ Sensor",
@@ -3055,6 +3064,8 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.menu_normal": "Zwykła strona",
     "layout.pages.menu_energy": "Strona energii",
     "layout.pages.menu_xiaozhi": "Strona Xiaozhi",
+    "layout.pages.menu_cameras": "Strona kamer",
+    "layout.pages.cameras_title": "Kamery",
     "layout.pages.menu_music": "Strona muzyki",
     "layout.pages.menu_radio": "Strona radia",
     "layout.pages.radio_title": "Radio",
@@ -3940,6 +3951,8 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.menu_normal": "Zwykła strona",
     "layout.pages.menu_energy": "Strona energii",
     "layout.pages.menu_xiaozhi": "Strona Xiaozhi",
+    "layout.pages.menu_cameras": "Strona kamer",
+    "layout.pages.cameras_title": "Kamery",
     "layout.pages.menu_music": "Strona muzyki",
     "layout.pages.menu_radio": "Strona radia",
     "layout.pages.radio_title": "Radio",
@@ -4212,6 +4225,7 @@ const el = {
   addPageBtn: document.getElementById("addPageBtn"),
   addEnergyPageBtn: document.getElementById("addEnergyPageBtn"),
   addXiaozhiPageBtn: document.getElementById("addXiaozhiPageBtn"),
+  addCamerasPageBtn: document.getElementById("addCamerasPageBtn"),
   addMusicPageBtn: document.getElementById("addMusicPageBtn"),
   addRadioPageBtn: document.getElementById("addRadioPageBtn"),
   addWeatherPageBtn: document.getElementById("addWeatherPageBtn"),
@@ -6228,6 +6242,7 @@ function applyWebTranslations() {
   setTextById("addPageMenuNormal", "layout.pages.menu_normal");
   setTextById("addPageMenuEnergy", "layout.pages.menu_energy");
   setTextById("addPageMenuXiaozhi", "layout.pages.menu_xiaozhi");
+  setTextById("addPageMenuCameras", "layout.pages.menu_cameras");
   setTextById("addPageMenuMusic", "layout.pages.menu_music");
   setTextById("addPageMenuRadio", "layout.pages.menu_radio");
   setTextById("addPageMenuWeather", "layout.pages.menu_weather");
@@ -10300,8 +10315,12 @@ function isXiaozhiPage(page) {
   return page?.type === XIAOZHI_PAGE_TYPE;
 }
 
+function isCamerasPage(page) {
+  return page?.type === CAMERAS_PAGE_TYPE;
+}
+
 function pageAcceptsWidgets(page) {
-  return !isEnergyPage(page) && !isXiaozhiPage(page);
+  return !isEnergyPage(page) && !isXiaozhiPage(page) && !isCamerasPage(page);
 }
 
 function energyPageUsesHaSource(page) {
@@ -11533,6 +11552,8 @@ function renderPages() {
       ? " ⚡"
       : isXiaozhiPage(page)
         ? " 🎤"
+        : isCamerasPage(page)
+          ? " 📷"
         : isRadioPage(page)
           ? " 📻"
           : isMusicPage(page)
@@ -11543,6 +11564,8 @@ function renderPages() {
       ? "energy"
       : isXiaozhiPage(page)
         ? "xiaozhi"
+        : isCamerasPage(page)
+          ? "cameras"
         : isRadioPage(page)
           ? "radio"
           : isMusicPage(page)
@@ -11778,6 +11801,8 @@ function renderWidgets() {
     li.textContent = t(
       isXiaozhiPage(page)
         ? "layout.status.xiaozhi_page_only"
+        : isCamerasPage(page)
+          ? "layout.status.cameras_page_only"
         : radioPage
           ? "layout.radio.no_widgets"
           : musicPage
@@ -12360,6 +12385,14 @@ function renderCanvas() {
     return;
   }
 
+  if (isCamerasPage(page)) {
+    const note = document.createElement("div");
+    note.className = "canvas-empty-note";
+    note.textContent = t("layout.status.cameras_page_locked");
+    el.canvas.appendChild(note);
+    return;
+  }
+
   if (isMusicPage(page)) {
     renderMusicCanvasPreview(page);
     return;
@@ -12934,6 +12967,19 @@ function addXiaozhiPage() {
   renderAll();
 }
 
+function addCamerasPage() {
+  const pageId = uniqueId("cameras", editor.layout.pages);
+  editor.layout.pages.push({
+    id: pageId,
+    type: CAMERAS_PAGE_TYPE,
+    title: t("layout.pages.cameras_title"),
+    widgets: [],
+  });
+  editor.selectedPageId = pageId;
+  editor.selectedWidgetId = null;
+  renderAll();
+}
+
 function addMusicPage() {
   const pageId = uniqueId("music", editor.layout.pages);
   editor.layout.pages.push({
@@ -13066,7 +13112,11 @@ function addWidget(type, options = {}) {
   const page = selectedPage();
   if (!page) return;
   if (!pageAcceptsWidgets(page)) {
-    setStatus(t(isXiaozhiPage(page) ? "layout.status.xiaozhi_page_only" : "layout.status.energy_page_only"), true);
+    setStatus(t(isXiaozhiPage(page)
+      ? "layout.status.xiaozhi_page_only"
+      : isCamerasPage(page)
+        ? "layout.status.cameras_page_only"
+        : "layout.status.energy_page_only"), true);
     return null;
   }
   if (isMusicPage(page)) {
@@ -13624,6 +13674,9 @@ function bindUi() {
   }
   if (el.addXiaozhiPageBtn) {
     el.addXiaozhiPageBtn.onclick = addXiaozhiPage;
+  }
+  if (el.addCamerasPageBtn) {
+    el.addCamerasPageBtn.onclick = addCamerasPage;
   }
   if (el.addMusicPageBtn) {
     el.addMusicPageBtn.onclick = addMusicPage;
@@ -15102,6 +15155,13 @@ function initSimpleUiMenus() {
     pageXiaozhi.onclick = () => {
       closeAllDropdowns();
       if (el.addXiaozhiPageBtn) el.addXiaozhiPageBtn.click();
+    };
+  }
+  const pageCameras = document.getElementById("addPageMenuCameras");
+  if (pageCameras) {
+    pageCameras.onclick = () => {
+      closeAllDropdowns();
+      if (el.addCamerasPageBtn) el.addCamerasPageBtn.click();
     };
   }
   const pageMusic = document.getElementById("addPageMenuMusic");

@@ -102,6 +102,11 @@ static uint8_t s_night_brightness = APP_DISPLAY_NIGHT_BRIGHTNESS_PERCENT;
 static uint16_t s_night_wake_sec = APP_DISPLAY_NIGHT_WAKE_SEC;
 
 static bool s_screen_off = false;
+/* ui_screen_saver_sleep_now(): set from any task, handled by the timer. */
+static volatile bool s_sleep_request = false;
+/* When the panel was switched off on request (0 = not forced). Only activity
+ * after this moment wakes it, so the last touch before the command cannot. */
+static int64_t s_forced_off_ms = 0;
 static bool s_overlay_shown = false;
 /* Last strings written into the clock/date labels.  lv_label_set_text() with an
  * identical string still frees and rebuilds the text and repaints the label, and
@@ -1449,6 +1454,26 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
     int64_t idle_ms = display_ms_since_activity();
     bool activity_recent = idle_ms < SCREEN_SAVER_TICK_MS;
 
+    if (s_sleep_request) {
+        s_sleep_request = false;
+        s_screen_off = true;
+        s_wake_to_screensaver = false;
+        s_forced_off_ms = esp_timer_get_time() / 1000;
+        ui_screen_saver_drop_light_content();
+        ui_screen_saver_hide_overlay();
+        (void)display_set_brightness_percent(0);
+        ESP_LOGI(TAG_SCREEN_SAVER, "screen off (requested)");
+        return;
+    }
+    if (s_forced_off_ms != 0) {
+        const int64_t off_for_ms = esp_timer_get_time() / 1000 - s_forced_off_ms;
+        if (s_screen_off && !(activity_recent && idle_ms < off_for_ms)) {
+            return; /* stay off: neither the night schedule nor timeouts apply */
+        }
+        /* Woken by a touch or ui_screen_saver_wake(): back to normal rules. */
+        s_forced_off_ms = 0;
+    }
+
     bool night_now = ui_screen_saver_night_window_active(ui_screen_saver_minutes_of_day());
     if (night_now != s_night_active) {
         s_night_active = night_now;
@@ -1599,6 +1624,11 @@ void ui_screen_saver_apply_settings(const runtime_settings_t *settings)
         /* Clock disabled: stop forcing it and let the timer hide the overlay. */
         s_wake_to_screensaver = false;
     }
+}
+
+void ui_screen_saver_sleep_now(void)
+{
+    s_sleep_request = true;
 }
 
 void ui_screen_saver_wake(void)

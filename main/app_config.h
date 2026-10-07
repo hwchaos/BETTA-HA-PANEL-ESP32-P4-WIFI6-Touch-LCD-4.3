@@ -16,6 +16,17 @@
 #  define APP_CONTENT_BOX_WIDTH  1280
 #  define APP_CONTENT_BOX_HEIGHT 680
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 14
+#elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+#  define APP_NAME               "betta-ha-panel-43"
+/* The 480x800 portrait panel is driven in landscape: LVGL rotates by 90 deg
+ * in software, so the UI sees 800x480 while scan-out stays 480x800. */
+#  define APP_SCREEN_WIDTH       800
+#  define APP_SCREEN_HEIGHT      480
+#  define APP_PANEL_NATIVE_WIDTH  480
+#  define APP_PANEL_NATIVE_HEIGHT 800
+#  define APP_CONTENT_BOX_WIDTH  800
+#  define APP_CONTENT_BOX_HEIGHT 360
+#  define APP_CONTENT_BOX_BOTTOM_GUTTER 8
 #elif defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
 #  define APP_NAME               "betta-ha-panel-7b"
 #  define APP_SCREEN_WIDTH       1024
@@ -38,6 +49,16 @@
 #  define APP_CONTENT_BOX_HEIGHT 600
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 12
 #endif
+/* Scan-out framebuffer geometry; differs from APP_SCREEN_* only when the UI is
+ * rotated by 90/270 deg in software. */
+#ifndef APP_PANEL_NATIVE_WIDTH
+#  define APP_PANEL_NATIVE_WIDTH  APP_SCREEN_WIDTH
+#  define APP_PANEL_NATIVE_HEIGHT APP_SCREEN_HEIGHT
+#endif
+/* Small content box: use the compact widget size limits.  Must match
+ * isCompactCanvas() in components/webui/www/app.js, or the editor and the
+ * panel clamp tiles differently. */
+#define APP_LAYOUT_COMPACT (APP_CONTENT_BOX_WIDTH <= 480 || APP_CONTENT_BOX_HEIGHT <= 380)
 /* Breathing room between the lowest widgets and the navigation bar. The two
  * areas are directly adjacent, so a widget saved with y+h == the full content
  * box height put its own outline on the navigation bar's first row and looked

@@ -23,6 +23,7 @@
 #include "net/wifi_mgr.h"
 #include "settings/runtime_settings.h"
 #include "ui/fonts/app_text_fonts.h"
+#include "ui/ui_i18n.h"
 #include "ui/ui_pages.h"
 #include "ui/ui_screen_saver.h"
 #include "ui/theme/theme_default.h"
@@ -41,6 +42,227 @@ typedef enum {
 static const char *const s_cat_names[SET_CAT_COUNT] = {
     "Ekran", "Audio", "Siec", "System", "SD", "Kamera",
 };
+
+/* The settings overlay was written with Polish labels only. st_tr() maps each
+ * of them to German or English depending on the UI language and falls back to
+ * the Polish text for every other language. */
+static const struct {
+    const char *pl;
+    const char *de;
+    const char *en;
+} s_st_translations[] = {
+    {"Ekran",
+     "Bildschirm",
+     "Screen"},
+    {"Siec",
+     "Netzwerk",
+     "Network"},
+    {"Kamera",
+     "Kamera",
+     "Camera"},
+    {"Skroty:",
+     "Schnellwahl:",
+     "Presets:"},
+    {"Nigdy\n15 s\n30 s\n1 min\n2 min\n5 min",
+     "Nie\n15 s\n30 s\n1 min\n2 min\n5 min",
+     "Never\n15 s\n30 s\n1 min\n2 min\n5 min"},
+    {"Nigdy\n1 min\n5 min\n10 min\n30 min\n1 godz",
+     "Nie\n1 min\n5 min\n10 min\n30 min\n1 Std",
+     "Never\n1 min\n5 min\n10 min\n30 min\n1 h"},
+    {"Wylacz ekran po",
+     "Bildschirm aus nach",
+     "Screen off after"},
+    {"Wygaszacz po",
+     "Bildschirmschoner nach",
+     "Screensaver after"},
+    {"Klasyczny\nAnimowany",
+     "Klassisch\nAnimiert",
+     "Classic\nAnimated"},
+    {"Jasnosc",
+     "Helligkeit",
+     "Brightness"},
+    {"Jasnosc aktywna",
+     "Helligkeit aktiv",
+     "Active brightness"},
+    {"Wygaszacz",
+     "Bildschirmschoner",
+     "Screensaver"},
+    {"Wlaczony",
+     "Aktiviert",
+     "Enabled"},
+    {"Jasnosc wygaszacza",
+     "Helligkeit Bildschirmschoner",
+     "Screensaver brightness"},
+    {"Przyciemnienie tapety",
+     "Hintergrund abdunkeln",
+     "Wallpaper dimming"},
+    {"Wylaczanie ekranu",
+     "Bildschirm ausschalten",
+     "Screen off"},
+    {"Wylaczaj ekran",
+     "Bildschirm ausschalten",
+     "Turn screen off"},
+    {"Zegar na wygaszaczu",
+     "Uhr im Bildschirmschoner",
+     "Screensaver clock"},
+    {"Format 24 h",
+     "24-Stunden-Format",
+     "24 h format"},
+    {"Pokaz sekundy",
+     "Sekunden anzeigen",
+     "Show seconds"},
+    {"Pokaz date",
+     "Datum anzeigen",
+     "Show date"},
+    {"Styl zegara",
+     "Uhrenstil",
+     "Clock style"},
+    {"Tryb nocny",
+     "Nachtmodus",
+     "Night mode"},
+    {"Poczatek (godz)",
+     "Beginn (Std)",
+     "Start (hour)"},
+    {"Koniec (godz)",
+     "Ende (Std)",
+     "End (hour)"},
+    {"Jasnosc w nocy (0 = off)",
+     "Helligkeit nachts (0 = aus)",
+     "Night brightness (0 = off)"},
+    {"Uwaga",
+     "Hinweis",
+     "Note"},
+    {"Ekran wygasza sie po okresie bez dotyku, a po dluzszym czasie calkowicie sie wylacza. W nocy ekran wylacza sie od razu po wygaszeniu. Dotkniecie ekranu przywraca jasnosc.",
+     "Der Bildschirm wird nach einer Zeit ohne Berührung abgedunkelt und später ganz ausgeschaltet. Nachts schaltet er sich direkt nach dem Abdunkeln aus. Eine Berührung stellt die Helligkeit wieder her.",
+     "The screen dims after a period without touch and turns off completely after a longer time. At night it turns off right after dimming. Touching the screen restores the brightness."},
+    {"Glosnosc",
+     "Lautstärke",
+     "Volume"},
+    {"Poziom glosnosci",
+     "Lautstärke",
+     "Volume level"},
+    {"Odtworz test",
+     "Test abspielen",
+     "Play test"},
+    {"Status polaczenia",
+     "Verbindungsstatus",
+     "Connection status"},
+    {"Brak polaczenia",
+     "Keine Verbindung",
+     "Not connected"},
+    {"Tryb AP (konfiguracja)",
+     "AP-Modus (Einrichtung)",
+     "AP mode (setup)"},
+    {"Polaczono",
+     "Verbunden",
+     "Connected"},
+    {"Stan",
+     "Status",
+     "State"},
+    {"Sygnal",
+     "Signal",
+     "Signal"},
+    {"Odswiez",
+     "Aktualisieren",
+     "Refresh"},
+    {"wolne",
+     "frei",
+     "free"},
+    {"Informacje",
+     "Informationen",
+     "Information"},
+    {"Dzialanie",
+     "Laufzeit",
+     "Uptime"},
+    {"Akcje",
+     "Aktionen",
+     "Actions"},
+    {"Przywroc ekran",
+     "Bildschirm wiederherstellen",
+     "Restore screen"},
+    {"Restart urzadzenia",
+     "Gerät neu starten",
+     "Restart device"},
+    {"Karta SD",
+     "SD-Karte",
+     "SD card"},
+    {"Ten firmware nie posiada sterownika karty SD.",
+     "Diese Firmware hat keinen SD-Kartentreiber.",
+     "This firmware has no SD card driver."},
+    {"Obslugi karty mozna dodac w kolejnej wersji firmware. Wszystkie dane sa obecnie przechowywane w pamieci wewnetrznej (littlefs).",
+     "SD-Unterstützung kann in einer späteren Firmware folgen. Alle Daten liegen derzeit im internen Speicher (littlefs).",
+     "SD card support may come in a later firmware. All data is currently stored in internal flash (littlefs)."},
+    {"Pelna\nPolowa 2x",
+     "Voll\nHalb 2x",
+     "Full\nHalf 2x"},
+    {"Pelna",
+     "Voll",
+     "Full"},
+    {"Polowa 2x",
+     "Halb 2x",
+     "Half 2x"},
+    {"Wylaczona",
+     "Aus",
+     "Off"},
+    {"Wlaczona",
+     "An",
+     "On"},
+    {"Brak modulu",
+     "Kein Modul",
+     "No module"},
+    {"Podglad niedostepny",
+     "Vorschau nicht verfügbar",
+     "Preview unavailable"},
+    {"Stan kamery",
+     "Kamerastatus",
+     "Camera status"},
+    {"Rozdzielczosc",
+     "Auflösung",
+     "Resolution"},
+    {"Jakosc JPEG",
+     "JPEG-Qualität",
+     "JPEG quality"},
+    {"Podglad",
+     "Vorschau",
+     "Preview"},
+    {"Ustawienia",
+     "Einstellungen",
+     "Settings"},
+    {"Kamera wlaczona",
+     "Kamera aktiv",
+     "Camera enabled"},
+    {"Odbicie poziome",
+     "Horizontal spiegeln",
+     "Mirror horizontally"},
+    {"Odbicie pionowe",
+     "Vertikal spiegeln",
+     "Flip vertically"},
+    {"Wybudzanie ruchem",
+     "Aufwecken bei Bewegung",
+     "Wake on motion"},
+    {"Czulosc ruchu",
+     "Bewegungsempfindlichkeit",
+     "Motion sensitivity"},
+    {"Zmiany dzialaja od razu i sa zapisywane w pamieci panelu. Zmiana rozdzielczosci restartuje strumien kamery.",
+     "Änderungen wirken sofort und werden im Panel gespeichert. Eine neue Auflösung startet den Kamerastream neu.",
+     "Changes apply immediately and are saved on the panel. Changing the resolution restarts the camera stream."},
+};
+
+static const char *st_tr(const char *pl)
+{
+    const char *lang = ui_i18n_get_language();
+    const bool de = (lang != NULL && strcmp(lang, "de") == 0);
+    const bool en = (lang != NULL && strcmp(lang, "en") == 0);
+    if (pl == NULL || (!de && !en)) {
+        return pl;
+    }
+    for (size_t i = 0; i < sizeof(s_st_translations) / sizeof(s_st_translations[0]); i++) {
+        if (strcmp(s_st_translations[i].pl, pl) == 0) {
+            return de ? s_st_translations[i].de : s_st_translations[i].en;
+        }
+    }
+    return pl;
+}
 
 static lv_obj_t *s_overlay = NULL;
 static lv_obj_t *s_rail = NULL;
@@ -203,7 +425,9 @@ static lv_obj_t *st_info_row(lv_obj_t *card, const char *label_text, const char 
 
     lv_obj_t *value = lv_label_create(row);
     st_label(value, value_text, st_f_value(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
-    lv_obj_set_width(value, LV_PCT(54));
+    /* Take what is left after the label and the column gap; a fixed 54 % made
+     * the row 12 px wider than the card and clipped the value on the right. */
+    lv_obj_set_flex_grow(value, 1);
     lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     return value;
@@ -371,7 +595,7 @@ static void st_add_preset_row(lv_obj_t *card)
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *hint = lv_label_create(row);
-    st_label(hint, "Skroty:", st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
+    st_label(hint, st_tr("Skroty:"), st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
 
     const int presets[] = {10, 25, 50, 100};
     for (size_t i = 0; i < (sizeof(presets) / sizeof(presets[0])); i++) {
@@ -391,10 +615,10 @@ static void st_add_preset_row(lv_obj_t *card)
 /* ------------------------------------------------------------------ */
 /* Timeout dropdowns (wygaszacz + wylaczenie ekranu)                    */
 /* ------------------------------------------------------------------ */
-#define SET_SAVER_TIMEOUT_OPTIONS "Nigdy\n15 s\n30 s\n1 min\n2 min\n5 min"
+#define SET_SAVER_TIMEOUT_OPTIONS st_tr("Nigdy\n15 s\n30 s\n1 min\n2 min\n5 min")
 static const uint32_t s_saver_timeout_sec[] = {0U, 15U, 30U, 60U, 120U, 300U};
 
-#define SET_OFF_TIMEOUT_OPTIONS "Nigdy\n1 min\n5 min\n10 min\n30 min\n1 godz"
+#define SET_OFF_TIMEOUT_OPTIONS st_tr("Nigdy\n1 min\n5 min\n10 min\n30 min\n1 godz")
 static const uint32_t s_off_timeout_sec[] = {0U, 60U, 300U, 600U, 1800U, 3600U};
 
 static int st_nearest_index(const uint32_t *values, size_t count, uint32_t current)
@@ -471,7 +695,7 @@ static lv_obj_t *st_add_dropdown_row(lv_obj_t *card, const char *caption, const 
 static void st_add_off_timeout_dropdown(lv_obj_t *card)
 {
     uint32_t current = s_cfg.display_screen_off_enabled ? s_cfg.display_screen_off_timeout_sec : 0U;
-    (void)st_add_dropdown_row(card, "Wylacz ekran po", SET_OFF_TIMEOUT_OPTIONS,
+    (void)st_add_dropdown_row(card, st_tr("Wylacz ekran po"), SET_OFF_TIMEOUT_OPTIONS,
         st_nearest_index(s_off_timeout_sec, sizeof(s_off_timeout_sec) / sizeof(s_off_timeout_sec[0]), current),
         st_off_timeout_change_cb, NULL);
 }
@@ -479,7 +703,7 @@ static void st_add_off_timeout_dropdown(lv_obj_t *card)
 static void st_add_saver_timeout_dropdown(lv_obj_t *card)
 {
     uint32_t current = s_cfg.display_screensaver_enabled ? s_cfg.display_screensaver_timeout_sec : 0U;
-    (void)st_add_dropdown_row(card, "Wygaszacz po", SET_SAVER_TIMEOUT_OPTIONS,
+    (void)st_add_dropdown_row(card, st_tr("Wygaszacz po"), SET_SAVER_TIMEOUT_OPTIONS,
         st_nearest_index(s_saver_timeout_sec, sizeof(s_saver_timeout_sec) / sizeof(s_saver_timeout_sec[0]), current),
         st_saver_timeout_change_cb, NULL);
 }
@@ -583,7 +807,7 @@ static void st_add_switch_row(lv_obj_t *card, const char *caption, bool checked,
     lv_obj_add_event_cb(sw, st_switch_row_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)field);
 }
 
-#define SET_CLOCK_STYLE_OPTIONS "Klasyczny\nAnimowany"
+#define SET_CLOCK_STYLE_OPTIONS st_tr("Klasyczny\nAnimowany")
 
 static void st_clock_style_change_cb(lv_event_t *event)
 {
@@ -605,47 +829,47 @@ static void st_build_screen(lv_obj_t *parent)
     st_cfg_load();
 
     lv_obj_t *card = st_make_card(parent);
-    st_card_title(card, "Jasnosc");
-    st_add_slider_block(card, "Jasnosc aktywna", s_cfg.display_brightness, 100, SET_SL_ACTIVE);
+    st_card_title(card, st_tr("Jasnosc"));
+    st_add_slider_block(card, st_tr("Jasnosc aktywna"), s_cfg.display_brightness, 100, SET_SL_ACTIVE);
     st_add_preset_row(card);
 
     lv_obj_t *card2 = st_make_card(parent);
-    st_card_title(card2, "Wygaszacz");
-    st_add_switch_row(card2, "Wlaczony", s_cfg.display_screensaver_enabled, SET_SW_SAVER);
-    st_add_slider_block(card2, "Jasnosc wygaszacza", s_cfg.display_saver_brightness,
+    st_card_title(card2, st_tr("Wygaszacz"));
+    st_add_switch_row(card2, st_tr("Wlaczony"), s_cfg.display_screensaver_enabled, SET_SW_SAVER);
+    st_add_slider_block(card2, st_tr("Jasnosc wygaszacza"), s_cfg.display_saver_brightness,
                         APP_DISPLAY_SAVER_BRIGHTNESS_MAX_PERCENT, SET_SL_DIM);
-    st_add_slider_block(card2, "Przyciemnienie tapety", s_cfg.display_saver_wallpaper_dim,
+    st_add_slider_block(card2, st_tr("Przyciemnienie tapety"), s_cfg.display_saver_wallpaper_dim,
                         APP_DISPLAY_SAVER_WALLPAPER_DIM_MAX, SET_SL_WP_DIM);
     st_add_saver_timeout_dropdown(card2);
 
     lv_obj_t *card3 = st_make_card(parent);
-    st_card_title(card3, "Wylaczanie ekranu");
-    st_add_switch_row(card3, "Wylaczaj ekran", s_cfg.display_screen_off_enabled, SET_SW_OFF);
+    st_card_title(card3, st_tr("Wylaczanie ekranu"));
+    st_add_switch_row(card3, st_tr("Wylaczaj ekran"), s_cfg.display_screen_off_enabled, SET_SW_OFF);
     st_add_off_timeout_dropdown(card3);
 
     lv_obj_t *card4 = st_make_card(parent);
-    st_card_title(card4, "Zegar na wygaszaczu");
-    st_add_switch_row(card4, "Format 24 h", s_cfg.display_clock_24h, SET_SW_CLOCK24);
-    st_add_switch_row(card4, "Pokaz sekundy", s_cfg.display_saver_show_seconds, SET_SW_SECONDS);
-    st_add_switch_row(card4, "Pokaz date", s_cfg.display_saver_show_date, SET_SW_DATE);
-    (void)st_add_dropdown_row(card4, "Styl zegara", SET_CLOCK_STYLE_OPTIONS,
+    st_card_title(card4, st_tr("Zegar na wygaszaczu"));
+    st_add_switch_row(card4, st_tr("Format 24 h"), s_cfg.display_clock_24h, SET_SW_CLOCK24);
+    st_add_switch_row(card4, st_tr("Pokaz sekundy"), s_cfg.display_saver_show_seconds, SET_SW_SECONDS);
+    st_add_switch_row(card4, st_tr("Pokaz date"), s_cfg.display_saver_show_date, SET_SW_DATE);
+    (void)st_add_dropdown_row(card4, st_tr("Styl zegara"), SET_CLOCK_STYLE_OPTIONS,
         (s_cfg.display_saver_clock_style == APP_DISPLAY_SAVER_CLOCK_STYLE_FLIP) ? 1 : 0,
         st_clock_style_change_cb, NULL);
 
     lv_obj_t *card5 = st_make_card(parent);
-    st_card_title(card5, "Tryb nocny");
-    st_add_switch_row(card5, "Tryb nocny", s_cfg.display_night_mode_enabled, SET_SW_NIGHT);
-    (void)st_add_dropdown_row(card5, "Poczatek (godz)", st_hour_options(),
+    st_card_title(card5, st_tr("Tryb nocny"));
+    st_add_switch_row(card5, st_tr("Tryb nocny"), s_cfg.display_night_mode_enabled, SET_SW_NIGHT);
+    (void)st_add_dropdown_row(card5, st_tr("Poczatek (godz)"), st_hour_options(),
         s_cfg.display_night_start_min / 60, st_night_hour_change_cb, NULL);
-    (void)st_add_dropdown_row(card5, "Koniec (godz)", st_hour_options(),
+    (void)st_add_dropdown_row(card5, st_tr("Koniec (godz)"), st_hour_options(),
         s_cfg.display_night_end_min / 60, st_night_hour_change_cb, (void *)(uintptr_t)1);
-    st_add_slider_block(card5, "Jasnosc w nocy (0 = off)", s_cfg.display_night_brightness, 100, SET_SL_NIGHT);
+    st_add_slider_block(card5, st_tr("Jasnosc w nocy (0 = off)"), s_cfg.display_night_brightness, 100, SET_SL_NIGHT);
 
     lv_obj_t *card6 = st_make_card(parent);
-    st_card_title(card6, "Uwaga");
+    st_card_title(card6, st_tr("Uwaga"));
     lv_obj_t *note = lv_label_create(card6);
-    st_label(note, "Ekran wygasza sie po okresie bez dotyku, a po dluzszym czasie calkowicie sie wylacza. "
-        "W nocy ekran wylacza sie od razu po wygaszeniu. Dotkniecie ekranu przywraca jasnosc.",
+    st_label(note, st_tr("Ekran wygasza sie po okresie bez dotyku, a po dluzszym czasie calkowicie sie wylacza. "
+        "W nocy ekran wylacza sie od razu po wygaszeniu. Dotkniecie ekranu przywraca jasnosc."),
         st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, LV_PCT(100));
@@ -660,8 +884,8 @@ static void st_beep_cb(lv_event_t *event)
 static void st_build_audio(lv_obj_t *parent)
 {
     lv_obj_t *card = st_make_card(parent);
-    st_card_title(card, "Glosnosc");
-    st_add_slider_block(card, "Poziom glosnosci", xz_audio_get_volume(), 100, SET_SL_VOLUME);
+    st_card_title(card, st_tr("Glosnosc"));
+    st_add_slider_block(card, st_tr("Poziom glosnosci"), xz_audio_get_volume(), 100, SET_SL_VOLUME);
 
     lv_obj_t *card2 = st_make_card(parent);
     st_card_title(card2, "Test");
@@ -672,7 +896,7 @@ static void st_build_audio(lv_obj_t *parent)
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *beep = st_action_button(row, "Odtworz test", lv_color_hex(APP_UI_COLOR_OK));
+    lv_obj_t *beep = st_action_button(row, st_tr("Odtworz test"), lv_color_hex(APP_UI_COLOR_OK));
     lv_obj_add_event_cb(beep, st_beep_cb, LV_EVENT_CLICKED, NULL);
 }
 
@@ -701,31 +925,31 @@ static void st_build_net(lv_obj_t *parent)
     (void)wifi_mgr_get_sta_ip(ip, sizeof(ip));
 
     lv_obj_t *card = st_make_card(parent);
-    st_card_title(card, "Status polaczenia");
+    st_card_title(card, st_tr("Status polaczenia"));
 
-    const char *status_text = "Brak polaczenia";
+    const char *status_text = st_tr("Brak polaczenia");
     lv_color_t status_color = lv_color_hex(APP_UI_COLOR_ERROR);
     if (setup_ap) {
-        status_text = "Tryb AP (konfiguracja)";
+        status_text = st_tr("Tryb AP (konfiguracja)");
         status_color = lv_color_hex(APP_UI_COLOR_STATE_ON);
     } else if (connected) {
-        status_text = "Polaczono";
+        status_text = st_tr("Polaczono");
         status_color = lv_color_hex(APP_UI_COLOR_OK);
     }
 
-    lv_obj_t *status_value = st_info_row(card, "Stan", status_text);
+    lv_obj_t *status_value = st_info_row(card, st_tr("Stan"), status_text);
     st_label(status_value, status_text, st_f_value(), status_color);
 
     st_info_row(card, "SSID", ssid);
     {
         char buf[32];
         snprintf(buf, sizeof(buf), "%d dBm", (int)rssi);
-        st_info_row(card, "Sygnal", buf);
+        st_info_row(card, st_tr("Sygnal"), buf);
     }
     st_info_row(card, "IP", ip);
 
     lv_obj_t *card2 = st_make_card(parent);
-    lv_obj_t *refresh = st_action_button(card2, "Odswiez", lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
+    lv_obj_t *refresh = st_action_button(card2, st_tr("Odswiez"), lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
     lv_obj_add_event_cb(refresh, st_net_refresh_cb, LV_EVENT_CLICKED, NULL);
 }
 
@@ -779,10 +1003,10 @@ static void st_build_system(lv_obj_t *parent)
     snprintf(psram, sizeof(psram), "%.1f / %.1f MB", (double)psram_free / (1024.0 * 1024.0),
         (double)psram_total / (1024.0 * 1024.0));
     char ram[40];
-    snprintf(ram, sizeof(ram), "%.1f MB wolne", (double)ram_free / (1024.0 * 1024.0));
+    snprintf(ram, sizeof(ram), "%.1f MB %s", (double)ram_free / (1024.0 * 1024.0), st_tr("wolne"));
 
     lv_obj_t *card = st_make_card(parent);
-    st_card_title(card, "Informacje");
+    st_card_title(card, st_tr("Informacje"));
 
     char buf[96];
     snprintf(buf, sizeof(buf), "%s (%s)", desc->version, desc->project_name);
@@ -790,12 +1014,12 @@ static void st_build_system(lv_obj_t *parent)
     st_info_row(card, "IDF", esp_get_idf_version());
     st_info_row(card, "LVGL", lvgl_ver);
     st_info_row(card, "MAC", mac);
-    st_info_row(card, "Dzialanie", uptime);
+    st_info_row(card, st_tr("Dzialanie"), uptime);
     st_info_row(card, "PSRAM", psram);
     st_info_row(card, "RAM", ram);
 
     lv_obj_t *card2 = st_make_card(parent);
-    st_card_title(card2, "Akcje");
+    st_card_title(card2, st_tr("Akcje"));
     lv_obj_t *btn_row = lv_obj_create(card2);
     lv_obj_remove_style_all(btn_row);
     lv_obj_set_width(btn_row, LV_PCT(100));
@@ -805,27 +1029,27 @@ static void st_build_system(lv_obj_t *parent)
     lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *reset = st_action_button(btn_row, "Przywroc ekran", lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
+    lv_obj_t *reset = st_action_button(btn_row, st_tr("Przywroc ekran"), lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
     lv_obj_add_event_cb(reset, st_reset_display_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *restart = st_action_button(btn_row, "Restart urzadzenia", lv_color_hex(APP_UI_COLOR_ERROR));
+    lv_obj_t *restart = st_action_button(btn_row, st_tr("Restart urzadzenia"), lv_color_hex(APP_UI_COLOR_ERROR));
     lv_obj_add_event_cb(restart, st_restart_cb, LV_EVENT_CLICKED, NULL);
 }
 
 static void st_build_sd(lv_obj_t *parent)
 {
     lv_obj_t *card = st_make_card(parent);
-    st_card_title(card, "Karta SD");
+    st_card_title(card, st_tr("Karta SD"));
 
     lv_obj_t *note = lv_label_create(card);
-    st_label(note, "Ten firmware nie posiada sterownika karty SD.", st_f_row(),
+    st_label(note, st_tr("Ten firmware nie posiada sterownika karty SD."), st_f_row(),
         lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY));
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, LV_PCT(100));
 
     lv_obj_t *note2 = lv_label_create(card);
-    st_label(note2, "Obslugi karty mozna dodac w kolejnej wersji firmware. Wszystkie dane sa obecnie "
-                    "przechowywane w pamieci wewnetrznej (littlefs).",
+    st_label(note2, st_tr("Obslugi karty mozna dodac w kolejnej wersji firmware. Wszystkie dane sa obecnie "
+                    "przechowywane w pamieci wewnetrznej (littlefs)."),
         st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
     lv_label_set_long_mode(note2, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note2, LV_PCT(100));
@@ -839,7 +1063,7 @@ static void st_build_sd(lv_obj_t *parent)
 /* 4:3, matching the default 1280x960 MIPI binning sensor mode, so the preview
  * is not stretched.  The sensor mode can be changed in Kconfig. */
 #define SET_CAM_PREVIEW_H 240
-#define SET_CAM_RESOLUTION_OPTIONS "Pelna\nPolowa 2x"
+#define SET_CAM_RESOLUTION_OPTIONS st_tr("Pelna\nPolowa 2x")
 
 /* Value labels of the camera rows (refreshed after every change). */
 static lv_obj_t *s_cam_status_value = NULL;
@@ -878,14 +1102,14 @@ static void st_cam_apply(void)
 static void st_cam_rows_refresh(void)
 {
     if (s_cam_status_value != NULL) {
-        const char *text = "Wylaczona";
+        const char *text = st_tr("Wylaczona");
         lv_color_t color = lv_color_hex(APP_UI_COLOR_TEXT_MUTED);
         if (local_camera_is_running()) {
-            text = "Wlaczona";
+            text = st_tr("Wlaczona");
             color = lv_color_hex(APP_UI_COLOR_STATE_ON);
         } else if (local_camera_width() <= 0) {
             /* The pipeline was never brought up: no sensor/CSI module. */
-            text = "Brak modulu";
+            text = st_tr("Brak modulu");
             color = lv_color_hex(APP_UI_COLOR_ERROR);
         }
         st_label(s_cam_status_value, text, st_f_value(), color);
@@ -898,7 +1122,7 @@ static void st_cam_rows_refresh(void)
         } else {
             /* The frame size follows the sensor mode selected in Kconfig, so
              * report the mode instead of a hard-coded resolution. */
-            snprintf(buf, sizeof(buf), "%s", (s_cfg.camera_resolution == 0) ? "Pelna" : "Polowa 2x");
+            snprintf(buf, sizeof(buf), "%s", (s_cfg.camera_resolution == 0) ? st_tr("Pelna") : st_tr("Polowa 2x"));
         }
         lv_label_set_text(s_cam_res_value, buf);
     }
@@ -1145,7 +1369,7 @@ static void st_cam_preview_start(lv_obj_t *parent)
     }
 
     s_cam_preview_note = lv_label_create(parent);
-    st_label(s_cam_preview_note, "Podglad niedostepny", st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
+    st_label(s_cam_preview_note, st_tr("Podglad niedostepny"), st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
     lv_label_set_long_mode(s_cam_preview_note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_cam_preview_note, LV_PCT(100));
     lv_obj_add_flag(s_cam_preview_note, LV_OBJ_FLAG_HIDDEN);
@@ -1188,10 +1412,10 @@ static void st_build_camera(lv_obj_t *parent)
     s_cam_slider_count = 0;
 
     lv_obj_t *card = st_make_card(parent);
-    st_card_title(card, "Stan kamery");
-    s_cam_status_value = st_info_row(card, "Stan", "-");
-    s_cam_res_value = st_info_row(card, "Rozdzielczosc", "-");
-    s_cam_jpeg_value = st_info_row(card, "Jakosc JPEG", "-");
+    st_card_title(card, st_tr("Stan kamery"));
+    s_cam_status_value = st_info_row(card, st_tr("Stan"), "-");
+    s_cam_res_value = st_info_row(card, st_tr("Rozdzielczosc"), "-");
+    s_cam_jpeg_value = st_info_row(card, st_tr("Jakosc JPEG"), "-");
 
     lv_obj_t *btn_row = lv_obj_create(card);
     lv_obj_remove_style_all(btn_row);
@@ -1201,31 +1425,31 @@ static void st_build_camera(lv_obj_t *parent)
     lv_obj_set_style_pad_column(btn_row, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *refresh = st_action_button(btn_row, "Odswiez", lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
+    lv_obj_t *refresh = st_action_button(btn_row, st_tr("Odswiez"), lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
     lv_obj_add_event_cb(refresh, st_cam_refresh_cb, LV_EVENT_CLICKED, NULL);
 
     st_cam_rows_refresh();
 
     lv_obj_t *card2 = st_make_card(parent);
-    st_card_title(card2, "Podglad");
+    st_card_title(card2, st_tr("Podglad"));
     st_cam_preview_start(card2);
 
     lv_obj_t *card3 = st_make_card(parent);
-    st_card_title(card3, "Ustawienia");
-    (void)st_cam_switch_row(card3, "Kamera wlaczona", s_cfg.camera_enabled, st_cam_enabled_cb, NULL);
-    (void)st_add_dropdown_row(card3, "Rozdzielczosc", SET_CAM_RESOLUTION_OPTIONS,
+    st_card_title(card3, st_tr("Ustawienia"));
+    (void)st_cam_switch_row(card3, st_tr("Kamera wlaczona"), s_cfg.camera_enabled, st_cam_enabled_cb, NULL);
+    (void)st_add_dropdown_row(card3, st_tr("Rozdzielczosc"), SET_CAM_RESOLUTION_OPTIONS,
         (s_cfg.camera_resolution == 0) ? 0 : 1, st_cam_resolution_cb, NULL);
-    st_cam_slider_row(card3, "Jakosc JPEG", (int)s_cfg.camera_jpeg_quality, 10, 95,
+    st_cam_slider_row(card3, st_tr("Jakosc JPEG"), (int)s_cfg.camera_jpeg_quality, 10, 95,
         st_cam_jpeg_quality_cb, NULL);
-    (void)st_cam_switch_row(card3, "Odbicie poziome", s_cfg.camera_hflip, st_cam_hflip_cb, NULL);
-    (void)st_cam_switch_row(card3, "Odbicie pionowe", s_cfg.camera_vflip, st_cam_vflip_cb, NULL);
-    (void)st_cam_switch_row(card3, "Wybudzanie ruchem", s_cfg.camera_motion_wake, st_cam_motion_wake_cb, NULL);
-    st_cam_slider_row(card3, "Czulosc ruchu", (int)s_cfg.camera_motion_threshold, 1, 64,
+    (void)st_cam_switch_row(card3, st_tr("Odbicie poziome"), s_cfg.camera_hflip, st_cam_hflip_cb, NULL);
+    (void)st_cam_switch_row(card3, st_tr("Odbicie pionowe"), s_cfg.camera_vflip, st_cam_vflip_cb, NULL);
+    (void)st_cam_switch_row(card3, st_tr("Wybudzanie ruchem"), s_cfg.camera_motion_wake, st_cam_motion_wake_cb, NULL);
+    st_cam_slider_row(card3, st_tr("Czulosc ruchu"), (int)s_cfg.camera_motion_threshold, 1, 64,
         st_cam_motion_threshold_cb, NULL);
 
     lv_obj_t *note = lv_label_create(card3);
-    st_label(note, "Zmiany dzialaja od razu i sa zapisywane w pamieci panelu. Zmiana rozdzielczosci "
-                   "restartuje strumien kamery.",
+    st_label(note, st_tr("Zmiany dzialaja od razu i sa zapisywane w pamieci panelu. Zmiana rozdzielczosci "
+                   "restartuje strumien kamery."),
         st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, LV_PCT(100));
@@ -1339,7 +1563,9 @@ static void st_open(void)
         return;
     }
     s_open = true;
-    s_small = (APP_SCREEN_WIDTH < 700);
+    /* 800x480 is too tight for the 1024x600 metrics (250 px rail, 20 px
+     * values) as well. */
+    s_small = (APP_SCREEN_WIDTH < 700) || (APP_SCREEN_HEIGHT <= 480);
     s_cat = SET_CAT_SCREEN;
     s_slider_count = 0;
     s_active_slider = NULL;
@@ -1371,7 +1597,7 @@ static void st_open(void)
     lv_obj_set_style_border_opa(header, LV_OPA_80, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(header);
-    st_label(title, "Ustawienia", st_f_title(), lv_color_hex(APP_UI_COLOR_TOPBAR_TEXT));
+    st_label(title, st_tr("Ustawienia"), st_f_title(), lv_color_hex(APP_UI_COLOR_TOPBAR_TEXT));
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 24, 0);
 
     lv_obj_t *close = lv_obj_create(header);
@@ -1417,7 +1643,7 @@ static void st_open(void)
         lv_obj_add_event_cb(chip, st_chip_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
 
         lv_obj_t *label = lv_label_create(chip);
-        st_label(label, s_cat_names[i], st_f_cat(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
+        st_label(label, st_tr(s_cat_names[i]), st_f_cat(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
         lv_obj_align(label, LV_ALIGN_LEFT_MID, 14, 0);
 
         s_chips[i] = chip;

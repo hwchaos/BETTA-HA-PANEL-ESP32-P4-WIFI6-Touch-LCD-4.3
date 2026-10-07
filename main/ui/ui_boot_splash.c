@@ -48,7 +48,15 @@ extern const lv_image_dsc_t SMART86OS_Betta;
 #define SPLASH_PROGRESS_STEP 5
 #define SPLASH_STATUS_LINE_LEN 64
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+/* Compact metrics for short screens: the full-size stack (emblem, progress,
+ * title, five status lines) needs ~550 px and is cut off at 480 px. */
+#if defined(CONFIG_APP_PANEL_VARIANT_S3_480) || (APP_SCREEN_HEIGHT <= 480)
+#define SPLASH_COMPACT 1
+#else
+#define SPLASH_COMPACT 0
+#endif
+
+#if SPLASH_COMPACT
 #define SPLASH_STATUS_MAX_LINES 3
 #define SPLASH_STATUS_X_OFFSET_DEFAULT 0
 #define SPLASH_STATUS_WIDTH_DEFAULT 360
@@ -115,7 +123,7 @@ static lv_text_align_t s_status_text_align = SPLASH_STATUS_TEXT_ALIGN_DEFAULT;
 
 static const lv_font_t *splash_title_font(void)
 {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if SPLASH_COMPACT
     return APP_FONT_DISPLAY_28;
 #elif LV_FONT_MONTSERRAT_48
     return &lv_font_montserrat_48;
@@ -130,7 +138,7 @@ static const lv_font_t *splash_title_font(void)
 
 static const lv_font_t *splash_status_font(void)
 {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if SPLASH_COMPACT
     return APP_FONT_TEXT_20;
 #elif LV_FONT_MONTSERRAT_24
     return &lv_font_montserrat_24;
@@ -143,7 +151,7 @@ static const lv_font_t *splash_status_font(void)
 
 static const lv_font_t *splash_fallback_font(void)
 {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+#if SPLASH_COMPACT
     return APP_FONT_DISPLAY_34;
 #elif LV_FONT_MONTSERRAT_48
     return &lv_font_montserrat_48;

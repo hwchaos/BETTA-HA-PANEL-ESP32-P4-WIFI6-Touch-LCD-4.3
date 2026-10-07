@@ -26,6 +26,11 @@ void ui_screen_saver_get_reveal_stats(uint32_t *reveals, uint32_t *blips, int64_
  * motion sensors). A real touch dismisses the clock and opens the full UI. */
 void ui_screen_saver_wake(void);
 
+/* Turn the backlight off right now (MQTT/HA "Display" switch). Safe to call
+ * from any task: the request is carried out by the screensaver timer. The
+ * panel stays off until the next touch or wake. */
+void ui_screen_saver_sleep_now(void);
+
 /* Reads the wallpaper frame from its storage before the UI takes the display
  * lock, so the 1.2 MB read cannot stall the LVGL task during startup.  The
  * frame is handed to the UI by ui_screen_saver_init(). */

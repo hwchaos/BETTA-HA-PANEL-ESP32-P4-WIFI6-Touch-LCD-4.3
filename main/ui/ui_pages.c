@@ -61,8 +61,10 @@ static lv_obj_t *s_time_label = NULL;
 static lv_obj_t *s_wifi_icon = NULL;
 static lv_obj_t *s_api_icon = NULL;
 static lv_obj_t *s_gear_icon = NULL;
-/* Internet radio shortcut; only shown while a "radio" page is registered. */
-static lv_obj_t *s_radio_icon = NULL;
+/* Cameras shortcut; only shown while a cameras page is registered (see
+ * ui_pages_set_camera_shortcut()). */
+static char s_camera_page_id[APP_MAX_PAGE_ID_LEN] = {0};
+static lv_obj_t *s_camera_icon = NULL;
 /* Weather shortcut; only shown while a "pogoda" page is registered. */
 static lv_obj_t *s_weather_icon = NULL;
 static lv_obj_t *s_nav_bar = NULL;
@@ -214,7 +216,7 @@ static bool s_status_ha_sync;
 static bool s_topbar_have_time;
 static struct tm s_topbar_time;
 static char s_topbar_time_text[32];
-static char s_topbar_date_text[32];
+static char s_topbar_date_text[40];
 
 /* ---- MDI topbar icon font (nice wifi / home-assistant / cog glyphs). ---- */
 #ifndef APP_HAVE_MDI_TOPBAR_FONT
@@ -233,7 +235,6 @@ LV_FONT_DECLARE(mdi_topbar_24);
 #define MDI_CP_HOME_ASSISTANT 0x0F07D0UL
 #define MDI_CP_COG            0x0F0493UL
 #define MDI_CP_HOME           0x0F02DCUL
-#define MDI_CP_RADIO          0x0F0439UL
 /* weather-lightning: cloud with a bolt - the "Pogoda" page shortcut. */
 #define MDI_CP_WEATHER        0x0F0593UL
 
@@ -278,6 +279,24 @@ static void ui_pages_set_topbar_icon(lv_obj_t *label, uint32_t mdi_cp, const cha
 #endif
     (void)mdi_cp;
     lv_label_set_text(label, fallback);
+    lv_obj_set_style_text_font(label, TOPBAR_ICON_FONT, LV_PART_MAIN);
+}
+
+/* The MDI topbar subset has no camera glyph, so the cameras chip uses the
+ * video symbol of LVGL's built-in Montserrat font instead. */
+static void ui_pages_set_topbar_camera_icon(lv_obj_t *label)
+{
+    if (label == NULL) {
+        return;
+    }
+#if APP_HAVE_MDI_TOPBAR_FONT
+    if (!s_topbar_cfg.icon_text) {
+        lv_label_set_text(label, LV_SYMBOL_VIDEO);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
+        return;
+    }
+#endif
+    lv_label_set_text(label, ui_i18n_get("topbar.cameras", "CAM"));
     lv_obj_set_style_text_font(label, TOPBAR_ICON_FONT, LV_PART_MAIN);
 }
 
@@ -330,11 +349,11 @@ static int16_t ui_pages_find(const char *page_id)
     return -1;
 }
 
-static void ui_topbar_update_radio_tint(uint16_t selected_index);
+static void ui_topbar_update_camera_tint(uint16_t selected_index);
 
 static void ui_pages_apply_tab_style(uint16_t selected_index)
 {
-    ui_topbar_update_radio_tint(selected_index);
+    ui_topbar_update_camera_tint(selected_index);
 
     if (s_nav_bar == NULL || s_nav_home_button == NULL || s_nav_home_label == NULL) {
         return;
@@ -347,7 +366,9 @@ static void ui_pages_apply_tab_style(uint16_t selected_index)
     const lv_coord_t nav_home_gap = 12;
     const lv_coord_t nav_side_gap = 8;
     const lv_coord_t nav_min_side_btn_w = 64;
-    const lv_coord_t nav_home_x = (APP_SCREEN_WIDTH - nav_home_w) / 2;
+    /* Home sits at the far left; the other tabs follow left to right in
+     * layout order. */
+    const lv_coord_t nav_home_x = nav_outer_margin;
 
     lv_obj_set_size(s_nav_home_button, nav_home_w, nav_btn_h);
     lv_obj_set_pos(s_nav_home_button, nav_home_x, nav_btn_y);
@@ -364,35 +385,18 @@ static void ui_pages_apply_tab_style(uint16_t selected_index)
         }
     }
 
-    uint16_t extra_count = nav_count;
-    uint16_t left_count = (uint16_t)((extra_count + 1U) / 2U);
-    uint16_t right_count = (uint16_t)(extra_count / 2U);
+    lv_coord_t tabs_start = nav_home_x + nav_home_w + nav_home_gap;
+    lv_coord_t tabs_end = APP_SCREEN_WIDTH - nav_outer_margin;
+    lv_coord_t tabs_region_w = (tabs_end > tabs_start) ? (tabs_end - tabs_start) : 0;
 
-    lv_coord_t left_start = nav_outer_margin;
-    lv_coord_t left_end = nav_home_x - nav_home_gap;
-    lv_coord_t right_start = nav_home_x + nav_home_w + nav_home_gap;
-    lv_coord_t right_end = APP_SCREEN_WIDTH - nav_outer_margin;
-
-    lv_coord_t left_region_w = (left_end > left_start) ? (left_end - left_start) : 0;
-    lv_coord_t right_region_w = (right_end > right_start) ? (right_end - right_start) : 0;
-
-    lv_coord_t left_btn_w = 0;
-    lv_coord_t right_btn_w = 0;
-    if (left_count > 0) {
-        left_btn_w = (left_region_w - ((lv_coord_t)left_count - 1) * nav_side_gap) / (lv_coord_t)left_count;
-        if (left_btn_w < nav_min_side_btn_w) {
-            left_btn_w = nav_min_side_btn_w;
-        }
-    }
-    if (right_count > 0) {
-        right_btn_w = (right_region_w - ((lv_coord_t)right_count - 1) * nav_side_gap) / (lv_coord_t)right_count;
-        if (right_btn_w < nav_min_side_btn_w) {
-            right_btn_w = nav_min_side_btn_w;
+    lv_coord_t tab_btn_w = 0;
+    if (nav_count > 0) {
+        tab_btn_w = (tabs_region_w - ((lv_coord_t)nav_count - 1) * nav_side_gap) / (lv_coord_t)nav_count;
+        if (tab_btn_w < nav_min_side_btn_w) {
+            tab_btn_w = nav_min_side_btn_w;
         }
     }
 
-    uint16_t left_slot = 0;
-    uint16_t right_slot = 0;
     uint16_t slot = 0;
     for (uint16_t n = 0; n < nav_count && slot < (APP_MAX_PAGES - 1); n++, slot++) {
         uint16_t page_index = nav_page[n];
@@ -402,18 +406,8 @@ static void ui_pages_apply_tab_style(uint16_t selected_index)
             continue;
         }
 
-        bool place_left = ((n & 0x1U) == 0U);
-        lv_coord_t w = place_left ? left_btn_w : right_btn_w;
-        lv_coord_t x = 0;
-        if (place_left) {
-            uint16_t pos = (uint16_t)((left_count - 1U) - left_slot);
-            x = left_start + (lv_coord_t)pos * (w + nav_side_gap);
-            left_slot++;
-        } else {
-            uint16_t pos = right_slot;
-            x = right_start + (lv_coord_t)pos * (w + nav_side_gap);
-            right_slot++;
-        }
+        lv_coord_t w = tab_btn_w;
+        lv_coord_t x = tabs_start + (lv_coord_t)n * (w + nav_side_gap);
 
         s_nav_extra_page_index[slot] = page_index;
         lv_label_set_text(label, s_pages[page_index].title);
@@ -494,27 +488,27 @@ static lv_color_t ui_topbar_status_color(bool on, uint32_t custom_on)
     return lv_color_hex(on ? (uint32_t)APP_UI_COLOR_TOPBAR_STATUS_ON : (uint32_t)APP_UI_COLOR_TOPBAR_STATUS_OFF);
 }
 
-static bool ui_topbar_radio_available(void)
+static bool ui_topbar_camera_available(void)
 {
-    return s_radio_icon != NULL && ui_pages_find(UI_RADIO_PAGE_ID) >= 0;
+    return s_camera_icon != NULL && s_camera_page_id[0] != '\0' && ui_pages_find(s_camera_page_id) >= 0;
 }
 
-/* The radio shortcut mirrors the bottom bar tabs: muted while another page is
- * active, highlighted while the radio page is on screen. */
-static void ui_topbar_update_radio_tint(uint16_t selected_index)
+/* The cameras shortcut mirrors the bottom bar tabs: muted while another page
+ * is active, highlighted while the cameras page is on screen. */
+static void ui_topbar_update_camera_tint(uint16_t selected_index)
 {
-    if (s_radio_icon == NULL) {
+    if (s_camera_icon == NULL) {
         return;
     }
-    const int16_t radio_index = ui_pages_find(UI_RADIO_PAGE_ID);
-    const bool active = (radio_index >= 0) && ((uint16_t)radio_index == selected_index);
+    const int16_t camera_index = (s_camera_page_id[0] != '\0') ? ui_pages_find(s_camera_page_id) : -1;
+    const bool active = (camera_index >= 0) && ((uint16_t)camera_index == selected_index);
     lv_obj_set_style_text_color(
-        s_radio_icon,
+        s_camera_icon,
         active ? lv_color_hex(APP_UI_COLOR_TOPBAR_TEXT)
                : ui_topbar_text_color(s_topbar_cfg.gear_color, (uint32_t)APP_UI_COLOR_TOPBAR_MUTED),
         LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_radio_icon, active ? LV_OPA_COVER : LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(s_radio_icon, active ? LV_OPA_COVER : LV_OPA_80, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_camera_icon, active ? LV_OPA_COVER : LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(s_camera_icon, active ? LV_OPA_COVER : LV_OPA_80, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 static bool ui_topbar_weather_available(void)
@@ -601,8 +595,8 @@ static void ui_topbar_render_status(void)
         ui_pages_set_topbar_icon(s_gear_icon, MDI_CP_COG, ui_i18n_get("topbar.settings", "SET"));
     }
 
-    if (s_radio_icon != NULL) {
-        ui_pages_set_topbar_icon(s_radio_icon, MDI_CP_RADIO, ui_i18n_get("topbar.radio", "RADIO"));
+    if (s_camera_icon != NULL) {
+        ui_pages_set_topbar_camera_icon(s_camera_icon);
     }
 
     if (s_weather_icon != NULL) {
@@ -625,7 +619,7 @@ static void ui_topbar_apply_style(void)
         lv_obj_set_style_text_color(
             s_gear_icon, ui_topbar_text_color(s_topbar_cfg.gear_color, (uint32_t)APP_UI_COLOR_TOPBAR_MUTED), LV_PART_MAIN);
     }
-    ui_topbar_update_radio_tint((uint16_t)(s_current_index > 0 ? s_current_index : 0));
+    ui_topbar_update_camera_tint((uint16_t)(s_current_index > 0 ? s_current_index : 0));
     ui_topbar_update_weather_tint((uint16_t)(s_current_index > 0 ? s_current_index : 0));
     if (s_time_label != NULL) {
         lv_obj_set_style_text_color(
@@ -633,7 +627,7 @@ static void ui_topbar_apply_style(void)
     }
 }
 
-/* Chain the elements from the left (date, radio, weather) and from the right
+/* Chain the elements from the left (date, cameras, weather) and from the right
  * (status chips, settings), then fit the clock into the gap that is left
  * over. */
 static void ui_topbar_apply_layout(void)
@@ -644,16 +638,16 @@ static void ui_topbar_apply_layout(void)
 
     const bool show_date = s_topbar_cfg.show_date && s_date_label != NULL;
     const bool show_gear = s_topbar_cfg.show_gear && s_gear_icon != NULL;
-    /* The radio and weather shortcuts are app entry points, not part of the
+    /* The cameras and weather shortcuts are app entry points, not part of the
      * configurable status group: each appears as soon as its page exists. */
-    const bool show_radio = ui_topbar_radio_available();
+    const bool show_camera = ui_topbar_camera_available();
     const bool show_weather = ui_topbar_weather_available();
     const bool show_clock = s_topbar_cfg.show_clock && s_time_label != NULL;
     const bool show_status = s_topbar_cfg.show_status;
 
     ui_topbar_set_visible(s_date_label, show_date);
     ui_topbar_set_visible(s_gear_icon, show_gear);
-    ui_topbar_set_visible(s_radio_icon, show_radio);
+    ui_topbar_set_visible(s_camera_icon, show_camera);
     ui_topbar_set_visible(s_weather_icon, show_weather);
     ui_topbar_set_visible(s_time_label, show_clock);
     ui_topbar_set_visible(s_api_icon, show_status && s_api_icon != NULL);
@@ -676,15 +670,15 @@ static void ui_topbar_apply_layout(void)
             lv_obj_set_size(s_gear_icon, 28, 28);
         }
     }
-    if (s_radio_icon != NULL) {
+    if (s_camera_icon != NULL) {
         /* Same two modes as the gear: a bare glyph box, or a word chip. */
         if (s_topbar_cfg.icon_text) {
-            ui_pages_style_topbar_chip(s_radio_icon);
-            lv_obj_set_size(s_radio_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            ui_pages_style_topbar_chip(s_camera_icon);
+            lv_obj_set_size(s_camera_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         } else {
-            lv_obj_set_style_pad_all(s_radio_icon, 0, LV_PART_MAIN);
-            lv_obj_set_style_radius(s_radio_icon, 8, LV_PART_MAIN);
-            lv_obj_set_size(s_radio_icon, 28, 28);
+            lv_obj_set_style_pad_all(s_camera_icon, 0, LV_PART_MAIN);
+            lv_obj_set_style_radius(s_camera_icon, 8, LV_PART_MAIN);
+            lv_obj_set_size(s_camera_icon, 28, 28);
         }
     }
     if (s_weather_icon != NULL) {
@@ -717,7 +711,7 @@ static void ui_topbar_apply_layout(void)
         right -= w + TOPBAR_GAP;
     }
     /* Settings closes the right cluster, so it never touches the app shortcuts
-     * (radio / weather) that live on the left. */
+     * (cameras / weather) that live on the left. */
     if (show_gear) {
         const lv_coord_t w = lv_obj_get_width(s_gear_icon);
         lv_obj_align(s_gear_icon, LV_ALIGN_LEFT_MID, right - w, 0);
@@ -730,9 +724,9 @@ static void ui_topbar_apply_layout(void)
         lv_obj_align(s_date_label, LV_ALIGN_LEFT_MID, left, 0);
         left += w + TOPBAR_GAP;
     }
-    if (show_radio) {
-        lv_obj_align(s_radio_icon, LV_ALIGN_LEFT_MID, left, 0);
-        left += lv_obj_get_width(s_radio_icon) + TOPBAR_GAP;
+    if (show_camera) {
+        lv_obj_align(s_camera_icon, LV_ALIGN_LEFT_MID, left, 0);
+        left += lv_obj_get_width(s_camera_icon) + TOPBAR_GAP;
     }
     if (show_weather) {
         lv_obj_align(s_weather_icon, LV_ALIGN_LEFT_MID, left, 0);
@@ -1021,14 +1015,14 @@ static void ui_topbar_gear_event_cb(lv_event_t *event)
     ui_settings_toggle();
 }
 
-static void ui_topbar_radio_event_cb(lv_event_t *event)
+static void ui_topbar_camera_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
         return;
     }
-    system_log_event("ui", "topbar radio tapped");
-    if (!ui_pages_show(UI_RADIO_PAGE_ID)) {
-        system_log_write_info(TAG_TOPBAR, "radio page not registered");
+    system_log_event("ui", "topbar cameras tapped");
+    if (s_camera_page_id[0] == '\0' || !ui_pages_show(s_camera_page_id)) {
+        system_log_write_info(TAG_TOPBAR, "cameras page not registered");
     }
 }
 
@@ -1091,28 +1085,28 @@ static void ui_pages_create_topbar(lv_obj_t *screen)
     ui_pages_set_topbar_icon(s_gear_icon, MDI_CP_COG, ui_i18n_get("topbar.settings", "SET"));
 
     /* Radio app shortcut, right next to the gear. It is only made visible once
-     * a "radio" page has been registered (see ui_topbar_apply_layout). */
-    s_radio_icon = lv_label_create(s_topbar);
-    lv_obj_remove_style_all(s_radio_icon);
-    lv_obj_set_size(s_radio_icon, 28, 28);
-    lv_obj_add_flag(s_radio_icon, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(s_radio_icon, 10);
-    lv_obj_set_style_bg_color(s_radio_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BG), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_radio_icon, LV_OPA_70, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_radio_icon, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_radio_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BORDER), LV_PART_MAIN);
-    lv_obj_set_style_border_opa(s_radio_icon, LV_OPA_80, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_radio_icon, 8, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_radio_icon, 0, LV_PART_MAIN);
-    lv_obj_set_style_text_align(s_radio_icon, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_radio_icon, TOPBAR_ICON_FONT, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_radio_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_MUTED), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_radio_icon, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_add_event_cb(s_radio_icon, ui_topbar_radio_event_cb, LV_EVENT_CLICKED, NULL);
-    ui_pages_set_topbar_icon(s_radio_icon, MDI_CP_RADIO, ui_i18n_get("topbar.radio", "RADIO"));
-    lv_obj_add_flag(s_radio_icon, LV_OBJ_FLAG_HIDDEN);
+     * a cameras page has been registered (see ui_topbar_apply_layout). */
+    s_camera_icon = lv_label_create(s_topbar);
+    lv_obj_remove_style_all(s_camera_icon);
+    lv_obj_set_size(s_camera_icon, 28, 28);
+    lv_obj_add_flag(s_camera_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(s_camera_icon, 10);
+    lv_obj_set_style_bg_color(s_camera_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_camera_icon, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_camera_icon, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_camera_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_camera_icon, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_camera_icon, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_camera_icon, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_align(s_camera_icon, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_camera_icon, TOPBAR_ICON_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_camera_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_MUTED), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_camera_icon, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_add_event_cb(s_camera_icon, ui_topbar_camera_event_cb, LV_EVENT_CLICKED, NULL);
+    ui_pages_set_topbar_camera_icon(s_camera_icon);
+    lv_obj_add_flag(s_camera_icon, LV_OBJ_FLAG_HIDDEN);
 
-    /* Weather (Pogoda) shortcut, right after the radio. Like the radio chip it
+    /* Weather (Pogoda) shortcut, right after the cameras. Like the cameras chip it
      * only becomes visible once a "pogoda" page has been registered. */
     s_weather_icon = lv_label_create(s_topbar);
     lv_obj_remove_style_all(s_weather_icon);
@@ -1228,7 +1222,7 @@ void ui_pages_init(void)
     s_wifi_icon = NULL;
     s_api_icon = NULL;
     s_gear_icon = NULL;
-    s_radio_icon = NULL;
+    s_camera_icon = NULL;
     s_weather_icon = NULL;
     s_nav_bar = NULL;
     s_nav_home_button = NULL;
@@ -1315,7 +1309,17 @@ void ui_pages_init(void)
 
 void ui_pages_reset(void)
 {
+    s_camera_page_id[0] = '\0';
     ui_pages_init();
+}
+
+void ui_pages_set_camera_shortcut(const char *page_id)
+{
+    /* The first cameras page of the layout owns the top bar shortcut. */
+    if (page_id == NULL || page_id[0] == '\0' || s_camera_page_id[0] != '\0') {
+        return;
+    }
+    snprintf(s_camera_page_id, sizeof(s_camera_page_id), "%s", page_id);
 }
 
 lv_obj_t *ui_pages_add_ex(const char *page_id, const char *title, bool in_nav)
@@ -1463,10 +1467,20 @@ void ui_pages_set_topbar_datetime(const struct tm *timeinfo)
         return;
     }
 
-    char date_buf[32] = {0};
+    static const struct {
+        const char *key;
+        const char *fallback;
+    } WEEKDAYS[7] = {
+        {"weekday.su", "Su"}, {"weekday.mo", "Mo"}, {"weekday.tu", "Tu"}, {"weekday.we", "We"},
+        {"weekday.th", "Th"}, {"weekday.fr", "Fr"}, {"weekday.sa", "Sa"},
+    };
+    const int wday = (timeinfo->tm_wday >= 0 && timeinfo->tm_wday <= 6) ? timeinfo->tm_wday : 0;
+
+    char date_buf[40] = {0};
     char time_buf[32] = {0};
-    snprintf(
-        date_buf, sizeof(date_buf), "%02d.%02d.%04d", timeinfo->tm_mday, timeinfo->tm_mon + 1, timeinfo->tm_year + 1900);
+    snprintf(date_buf, sizeof(date_buf), "%s %02d.%02d.%04d",
+        ui_i18n_get(WEEKDAYS[wday].key, WEEKDAYS[wday].fallback), timeinfo->tm_mday, timeinfo->tm_mon + 1,
+        timeinfo->tm_year + 1900);
     s_topbar_time = *timeinfo;
     s_topbar_have_time = true;
     ui_topbar_clock_text(time_buf, sizeof(time_buf));

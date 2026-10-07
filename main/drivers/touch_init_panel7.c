@@ -14,9 +14,25 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "sdkconfig.h"
 
 #include "drivers/display_init.h"
 #include "util/log_tags.h"
+
+/* The Waveshare 4.3" BSP drives neither GT911 RST nor INT. */
+#ifndef BSP_LCD_TOUCH_RST
+#define BSP_LCD_TOUCH_RST GPIO_NUM_NC
+#endif
+
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+#define TOUCH_SWAP_XY 0
+#define TOUCH_MIRROR_X 0
+#define TOUCH_MIRROR_Y 0
+#else
+#define TOUCH_SWAP_XY 0
+#define TOUCH_MIRROR_X 1
+#define TOUCH_MIRROR_Y 1
+#endif
 
 static bool s_touch_ready = false;
 static lv_indev_t *s_touch_indev = NULL;
@@ -84,7 +100,7 @@ static esp_err_t touch_gt911_prepare_reset(void)
     return ESP_OK;
 }
 
-static esp_err_t touch_create_gt911(esp_lcd_touch_handle_t *out_touch)
+static esp_err_t touch_create_gt911(esp_lcd_touch_handle_t *out_touch, int attempt)
 {
     if (out_touch == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -108,6 +124,13 @@ static esp_err_t touch_create_gt911(esp_lcd_touch_handle_t *out_touch)
 
     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
     tp_io_config.scl_speed_hz = CONFIG_BSP_I2C_CLK_SPEED_HZ;
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+    /* No INT/RST wired: the GT911 answers on 0x5D or 0x14, so alternate. */
+    tp_io_config.dev_addr = (attempt % 2 == 1) ? 0x5D : 0x14;
+    ESP_LOGI(TAG_TOUCH, "GT911 probing address 0x%02x", (unsigned)tp_io_config.dev_addr);
+#else
+    (void)attempt;
+#endif
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
     err = esp_lcd_new_panel_io_i2c(i2c_handle, &tp_io_config, &io_handle);
@@ -125,9 +148,9 @@ static esp_err_t touch_create_gt911(esp_lcd_touch_handle_t *out_touch)
             .interrupt = 0,
         },
         .flags = {
-            .swap_xy = 0,
-            .mirror_x = 1,
-            .mirror_y = 1,
+            .swap_xy = TOUCH_SWAP_XY,
+            .mirror_x = TOUCH_MIRROR_X,
+            .mirror_y = TOUCH_MIRROR_Y,
         },
     };
 
@@ -158,7 +181,7 @@ esp_err_t touch_init(void)
 
     esp_err_t err = ESP_FAIL;
     for (int attempt = 1; attempt <= TOUCH_INIT_RETRIES; attempt++) {
-        err = touch_create_gt911(&s_touch_handle);
+        err = touch_create_gt911(&s_touch_handle, attempt);
         if (err == ESP_OK && s_touch_handle != NULL) {
             break;
         }

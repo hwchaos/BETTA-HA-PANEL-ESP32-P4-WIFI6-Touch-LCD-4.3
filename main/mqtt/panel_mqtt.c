@@ -59,6 +59,9 @@ static char s_state_topic[MQTT_TOPIC_MAX_LEN];
 static char s_availability_topic[MQTT_TOPIC_MAX_LEN];
 static char s_command_prefix[MQTT_TOPIC_MAX_LEN];
 static char s_subscribe_topic[MQTT_TOPIC_MAX_LEN];
+static char s_display_topic[MQTT_TOPIC_MAX_LEN];
+static int s_display_state_sent = -1;
+static esp_timer_handle_t s_display_poll_timer = NULL;
 static size_t s_command_prefix_len;
 
 static esp_mqtt_client_config_t s_cfg;
@@ -93,12 +96,18 @@ static char s_applied_prefix[APP_MQTT_DISCOVERY_PREFIX_MAX_LEN];
 
 static void panel_mqtt_publish_discovery(esp_mqtt_client_handle_t client);
 static void panel_mqtt_publish_state(esp_mqtt_client_handle_t client);
+static void panel_mqtt_publish_display_state(esp_mqtt_client_handle_t client, bool force);
+static void panel_mqtt_display_poll_cb(void *arg);
 static void panel_mqtt_publish_state_from(const runtime_settings_t *settings, esp_mqtt_client_handle_t client);
 
 static void panel_mqtt_compute_node_id(void)
 {
     uint8_t mac[6] = {0};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+    /* The ESP32-P4 has no Wi-Fi MAC of its own (Wi-Fi lives on the C6), so
+     * ESP_MAC_WIFI_STA fails there; fall back to the factory base MAC from
+     * eFuse before resorting to a random id - a random id registers a new
+     * device in Home Assistant on every boot. */
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK && esp_efuse_mac_get_default(mac) != ESP_OK) {
         uint32_t rnd = esp_random();
         snprintf(s_node_suffix, sizeof(s_node_suffix), "%06lX", (unsigned long)(rnd & 0xFFFFFFUL));
     } else {
@@ -111,6 +120,7 @@ static void panel_mqtt_compute_node_id(void)
     snprintf(s_availability_topic, sizeof(s_availability_topic), "%s/status", s_base_topic);
     snprintf(s_command_prefix, sizeof(s_command_prefix), "%s/set/", s_base_topic);
     snprintf(s_subscribe_topic, sizeof(s_subscribe_topic), "%s/set/+", s_base_topic);
+    snprintf(s_display_topic, sizeof(s_display_topic), "%s/display", s_base_topic);
     s_command_prefix_len = strlen(s_command_prefix);
 }
 
@@ -120,6 +130,19 @@ void panel_mqtt_init(void)
         return;
     }
     panel_mqtt_compute_node_id();
+
+    const esp_timer_create_args_t poll_args = {
+        .callback = panel_mqtt_display_poll_cb,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "mqtt_display",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&poll_args, &s_display_poll_timer) == ESP_OK) {
+        esp_timer_start_periodic(s_display_poll_timer, 2 * 1000 * 1000);
+    } else {
+        ESP_LOGW(TAG_MQTT, "display state poll timer not created");
+    }
     s_initialized = true;
 }
 
@@ -307,6 +330,21 @@ static void panel_mqtt_apply_command(esp_mqtt_client_handle_t client, const char
         /* Wake to the screensaver clock (motion-sensor style); a touch
          * dismisses the clock and opens the full UI. */
         ui_screen_saver_wake();
+        return;
+    }
+
+    if (strcmp(key, "display") == 0) {
+        bool on = false;
+        if (!panel_mqtt_parse_bool(payload, &on)) {
+            ESP_LOGW(TAG_MQTT, "display command needs ON/OFF");
+            return;
+        }
+        if (on) {
+            /* Like a touch: full UI at the active brightness. */
+            display_note_activity_from("mqtt");
+        } else {
+            ui_screen_saver_sleep_now();
+        }
         return;
     }
 
@@ -581,6 +619,7 @@ static void panel_mqtt_event_handler(void *handler_args, esp_event_base_t base, 
         esp_mqtt_client_enqueue(event->client, s_availability_topic, "online", strlen("online"), 1, 1, true);
         panel_mqtt_publish_discovery(event->client);
         panel_mqtt_publish_state(event->client);
+        panel_mqtt_publish_display_state(event->client, true);
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false;
@@ -591,6 +630,83 @@ static void panel_mqtt_event_handler(void *handler_args, esp_event_base_t base, 
         break;
     default:
         break;
+    }
+}
+
+static void panel_mqtt_fill_device(cJSON *device)
+{
+    cJSON_AddStringToObject(device, "name", "BETTA Panel");
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+    cJSON_AddStringToObject(device, "manufacturer", "Waveshare");
+    cJSON_AddStringToObject(device, "model", "ESP32-P4-WIFI6-Touch-LCD-4.3");
+#elif defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
+    cJSON_AddStringToObject(device, "manufacturer", "Waveshare");
+    cJSON_AddStringToObject(device, "model", "ESP32-P4-WIFI6-Touch-LCD-7B");
+#elif defined(CONFIG_APP_PANEL_VARIANT_S3_480)
+    cJSON_AddStringToObject(device, "manufacturer", "Guition");
+    cJSON_AddStringToObject(device, "model", "ESP32-S3 4848S040");
+#else
+    cJSON_AddStringToObject(device, "manufacturer", "BETTA");
+    cJSON_AddStringToObject(device, "model", APP_NAME);
+#endif
+}
+
+/* "Display" switch: turns the backlight off / on right now (unlike "Screen
+ * Off", which only enables the idle timeout). Its state has its own plain
+ * ON/OFF topic because it changes without a settings change. */
+static void panel_mqtt_add_display_entity(esp_mqtt_client_handle_t client)
+{
+    char object_id[MQTT_TOPIC_MAX_LEN];
+    char topic[MQTT_DISCOVERY_TOPIC_MAX_LEN];
+    char command_topic[MQTT_TOPIC_MAX_LEN + 8];
+    snprintf(object_id, sizeof(object_id), "%s_display", s_client_id);
+    snprintf(topic, sizeof(topic), "%s/switch/%s/config", s_discovery_prefix, object_id);
+    snprintf(command_topic, sizeof(command_topic), "%sdisplay", s_command_prefix);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "name", "Display");
+    cJSON_AddStringToObject(root, "unique_id", object_id);
+    cJSON_AddStringToObject(root, "icon", "mdi:monitor");
+    cJSON_AddStringToObject(root, "state_topic", s_display_topic);
+    cJSON_AddStringToObject(root, "command_topic", command_topic);
+    cJSON_AddStringToObject(root, "availability_topic", s_availability_topic);
+    cJSON_AddStringToObject(root, "payload_on", "ON");
+    cJSON_AddStringToObject(root, "payload_off", "OFF");
+    cJSON *device = cJSON_CreateObject();
+    cJSON *identifiers = cJSON_AddArrayToObject(device, "identifiers");
+    cJSON_AddItemToArray(identifiers, cJSON_CreateString(s_client_id));
+    panel_mqtt_fill_device(device);
+    cJSON_AddItemToObject(root, "device", device);
+
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload != NULL) {
+        esp_mqtt_client_enqueue(client, topic, payload, 0, 1, 1, true);
+        cJSON_free(payload);
+    }
+}
+
+static void panel_mqtt_publish_display_state(esp_mqtt_client_handle_t client, bool force)
+{
+    if (client == NULL) {
+        return;
+    }
+    const int on = (display_get_brightness_percent() > 0) ? 1 : 0;
+    if (!force && on == s_display_state_sent) {
+        return;
+    }
+    s_display_state_sent = on;
+    const char *payload = on ? "ON" : "OFF";
+    esp_mqtt_client_enqueue(client, s_display_topic, payload, (int)strlen(payload), 1, 1, true);
+}
+
+/* The backlight also goes off on its own (idle timeout, night mode), so the
+ * state is polled rather than only reported after an MQTT command. */
+static void panel_mqtt_display_poll_cb(void *arg)
+{
+    (void)arg;
+    if (s_connected && s_client != NULL) {
+        panel_mqtt_publish_display_state(s_client, false);
     }
 }
 
@@ -616,9 +732,7 @@ static void panel_mqtt_add_discovery_entity(esp_mqtt_client_handle_t client,
     cJSON *device = cJSON_CreateObject();
     cJSON *identifiers = cJSON_AddArrayToObject(device, "identifiers");
     cJSON_AddItemToArray(identifiers, cJSON_CreateString(s_client_id));
-    cJSON_AddStringToObject(device, "name", "BETTA Panel");
-    cJSON_AddStringToObject(device, "manufacturer", "Guition");
-    cJSON_AddStringToObject(device, "model", "ESP32-S3 4848S040");
+    panel_mqtt_fill_device(device);
     cJSON_AddItemToObject(root, "device", device);
 
     if (command_key != NULL) {
@@ -677,6 +791,8 @@ static void panel_mqtt_add_discovery_entity(esp_mqtt_client_handle_t client,
 static void panel_mqtt_publish_discovery(esp_mqtt_client_handle_t client)
 {
     char object_id[MQTT_TOPIC_MAX_LEN];
+
+    panel_mqtt_add_display_entity(client);
 
     snprintf(object_id, sizeof(object_id), "%s_screensaver", s_client_id);
     panel_mqtt_add_discovery_entity(client, object_id, "Screensaver",

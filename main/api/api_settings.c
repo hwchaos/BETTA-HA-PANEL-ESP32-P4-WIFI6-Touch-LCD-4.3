@@ -17,6 +17,8 @@
 
 #include "app_config.h"
 #include "bsp/display.h"
+#include "diag/storage_guard.h"
+#include "diag/system_log.h"
 #include "drivers/display_init.h"
 #include "ha/ha_client.h"
 #include "mqtt/panel_mqtt.h"
@@ -25,8 +27,6 @@
 #include "settings/runtime_settings.h"
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
 #include "camera/local_camera.h"
-#include "diag/storage_guard.h"
-#include "diag/system_log.h"
 #endif
 #include "ui/ui_page_transition.h"
 #include "ui/ui_pages.h"

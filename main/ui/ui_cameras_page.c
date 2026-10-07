@@ -50,9 +50,17 @@ typedef struct {
     bool using_substream;        /* current fetch settled on the HA substream entity */
     char active_entity[APP_CAMERA_ENTITY_MAX_LEN]; /* entity actually used for /api/camera_proxy */
     uint32_t fail_count;
+    bool on_screen;              /* false while swiped away in the carousel */
+    uint16_t src_w;              /* source resolution of the last frame (0 = unknown) */
+    uint16_t src_h;
 } ui_camera_instance_t;
 
 static ui_camera_instance_t s_instances[APP_MAX_CAMERAS];
+/* Carousel mode (short screens, two or more cameras): one camera per swipe
+ * position, and only the camera in view fetches snapshots. */
+static lv_obj_t *s_carousel = NULL;
+static lv_obj_t *s_carousel_pos_label = NULL;
+static size_t s_carousel_count = 0;
 /* Snapshot fetching is only allowed for the page the user is actually looking
  * at: the refresh timers used to keep downloading and decoding JPEGs on every
  * page and behind the screen saver as well. */
@@ -175,11 +183,13 @@ static void cam_cover_cb(void *user, const ha_cover_result_t *result)
     inst->image_dsc = result->image;
     inst->owned_buf = result->image.data;
     inst->fail_count = 0;
+    inst->src_w = (uint16_t)result->source_w;
+    inst->src_h = (uint16_t)result->source_h;
     cam_update_timer_period(inst);
 
     if (inst->image != NULL) {
         lv_image_set_src(inst->image, &inst->image_dsc);
-        lv_image_set_inner_align(inst->image, LV_IMAGE_ALIGN_STRETCH);
+        lv_image_set_inner_align(inst->image, LV_IMAGE_ALIGN_CONTAIN);
     }
 
     char status[48];
@@ -191,7 +201,7 @@ static void cam_cover_cb(void *user, const ha_cover_result_t *result)
  * is not covering the UI. */
 static bool cam_instance_is_live(const ui_camera_instance_t *inst)
 {
-    return !s_suspended && s_visible_page_id[0] != '\0' &&
+    return !s_suspended && inst->on_screen && s_visible_page_id[0] != '\0' &&
            strncmp(inst->page_id, s_visible_page_id, sizeof(s_visible_page_id)) == 0;
 }
 
@@ -211,6 +221,17 @@ static void cam_timer_cb(lv_timer_t *timer)
 
     lv_coord_t w = inst->image != NULL ? lv_obj_get_width(inst->image) : 320;
     lv_coord_t h = inst->image != NULL ? lv_obj_get_height(inst->image) : 240;
+    /* The fetcher clamps width and height independently, so ask for the largest
+     * box with the camera's own aspect ratio (known after the first frame);
+     * the image widget then letterboxes it instead of stretching. */
+    if (inst->src_w > 0 && inst->src_h > 0) {
+        const int32_t fit_h = (int32_t)w * inst->src_h / inst->src_w;
+        if (fit_h <= h) {
+            h = (lv_coord_t)fit_h;
+        } else {
+            w = (lv_coord_t)((int32_t)h * inst->src_w / inst->src_h);
+        }
+    }
     if (w < 32) w = 32;
     if (h < 32) h = 32;
 
@@ -268,7 +289,7 @@ static void cam_build_tile(ui_camera_instance_t *inst,
     lv_obj_t *image = lv_image_create(card);
     lv_obj_set_pos(image, 0, 0);
     lv_obj_set_size(image, w, h);
-    lv_image_set_inner_align(image, LV_IMAGE_ALIGN_STRETCH);
+    lv_image_set_inner_align(image, LV_IMAGE_ALIGN_CONTAIN);
     lv_obj_set_style_bg_color(image, lv_color_hex(APP_UI_COLOR_CARD_BG_OFF), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(image, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -331,6 +352,74 @@ static void cam_sync_activity(void)
     }
 }
 
+static void cam_carousel_update_pos_label(size_t index)
+{
+    if (s_carousel_pos_label == NULL) {
+        return;
+    }
+    char text[16];
+    snprintf(text, sizeof(text), "%u / %u", (unsigned)(index + 1), (unsigned)s_carousel_count);
+    lv_label_set_text(s_carousel_pos_label, text);
+}
+
+/* After a swipe settles, only the camera in view keeps fetching. */
+static void cam_carousel_scroll_end_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_carousel == NULL || s_carousel_count == 0) {
+        return;
+    }
+    const lv_coord_t page_w = APP_CONTENT_BOX_WIDTH;
+    size_t index = (size_t)((lv_obj_get_scroll_x(s_carousel) + page_w / 2) / page_w);
+    if (index >= s_carousel_count) {
+        index = s_carousel_count - 1;
+    }
+
+    ui_camera_instance_t *shown = NULL;
+    for (size_t i = 0; i < s_carousel_count; i++) {
+        ui_camera_instance_t *inst = &s_instances[i];
+        const bool was_on_screen = inst->on_screen;
+        inst->on_screen = (i == index);
+        if (inst->on_screen && !was_on_screen) {
+            shown = inst;
+        }
+    }
+    cam_carousel_update_pos_label(index);
+    cam_sync_activity();
+
+    /* Fetch the newly shown camera right away instead of after one period. */
+    if (shown != NULL && shown->timer != NULL && cam_instance_is_live(shown) && !shown->fetching) {
+        cam_timer_cb(shown->timer);
+    }
+}
+
+static lv_obj_t *cam_carousel_create(lv_obj_t *parent, size_t count)
+{
+    lv_obj_t *cont = lv_obj_create(parent);
+    lv_obj_remove_style_all(cont);
+    lv_obj_set_pos(cont, 0, 0);
+    lv_obj_set_size(cont, APP_CONTENT_BOX_WIDTH, APP_CONTENT_BOX_HEIGHT);
+    lv_obj_set_scroll_dir(cont, LV_DIR_HOR);
+    lv_obj_set_scroll_snap_x(cont, LV_SCROLL_SNAP_CENTER);
+    lv_obj_add_flag(cont, LV_OBJ_FLAG_SCROLL_ONE);
+    lv_obj_set_scrollbar_mode(cont, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_event_cb(cont, cam_carousel_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
+
+    s_carousel = cont;
+    s_carousel_count = count;
+    return cont;
+}
+
+static void cam_carousel_create_pos_label(lv_obj_t *parent)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_font(label, CAM_STATUS_FONT, LV_PART_MAIN);
+    cam_style_chip(label);
+    lv_obj_align(label, LV_ALIGN_TOP_RIGHT, -(CAM_GRID_MARGIN + CAM_GRID_GAP), CAM_GRID_MARGIN + CAM_GRID_GAP);
+    s_carousel_pos_label = label;
+    cam_carousel_update_pos_label(0);
+}
+
 esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
 {
     if (parent == NULL || page_id == NULL) {
@@ -381,6 +470,15 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
         rows = 1;
     }
 
+    /* Short screens have no room for a grid: swipe through full-size tiles. */
+    const bool carousel = APP_LAYOUT_COMPACT && count >= 2;
+    lv_obj_t *tile_parent = parent;
+    if (carousel) {
+        cols = 1;
+        rows = 1;
+        tile_parent = cam_carousel_create(parent, count);
+    }
+
     lv_coord_t tile_w = (APP_CONTENT_BOX_WIDTH - 2 * CAM_GRID_MARGIN - (cols - 1) * CAM_GRID_GAP) / cols;
     lv_coord_t tile_h = (APP_CONTENT_BOX_HEIGHT - 2 * CAM_GRID_MARGIN - (rows - 1) * CAM_GRID_GAP) / rows;
     if (tile_w < 32) tile_w = 32;
@@ -402,13 +500,28 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
         inst->cfg = entries[i];
         snprintf(inst->active_entity, sizeof(inst->active_entity), "%s", entries[i].entity_id);
 
-        lv_coord_t col = (lv_coord_t)(built % (size_t)cols);
-        lv_coord_t row = (lv_coord_t)(built / (size_t)cols);
-        lv_coord_t x = CAM_GRID_MARGIN + col * (tile_w + CAM_GRID_GAP);
-        lv_coord_t y = CAM_GRID_MARGIN + row * (tile_h + CAM_GRID_GAP);
+        lv_coord_t x;
+        lv_coord_t y;
+        if (carousel) {
+            /* One full content-box width per camera; snap centres each tile. */
+            inst->on_screen = (built == 0);
+            x = (lv_coord_t)built * APP_CONTENT_BOX_WIDTH + CAM_GRID_MARGIN;
+            y = CAM_GRID_MARGIN;
+        } else {
+            inst->on_screen = true;
+            lv_coord_t col = (lv_coord_t)(built % (size_t)cols);
+            lv_coord_t row = (lv_coord_t)(built / (size_t)cols);
+            x = CAM_GRID_MARGIN + col * (tile_w + CAM_GRID_GAP);
+            y = CAM_GRID_MARGIN + row * (tile_h + CAM_GRID_GAP);
+        }
 
-        cam_build_tile(inst, parent, x, y, tile_w, tile_h);
+        cam_build_tile(inst, tile_parent, x, y, tile_w, tile_h);
         built++;
+    }
+
+    if (carousel) {
+        s_carousel_count = built;
+        cam_carousel_create_pos_label(parent);
     }
 
     free(entries);
@@ -419,6 +532,10 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
 
 void ui_cameras_page_deinit(void)
 {
+    /* The carousel objects belong to the page container and go with it. */
+    s_carousel = NULL;
+    s_carousel_pos_label = NULL;
+    s_carousel_count = 0;
     for (size_t i = 0; i < APP_MAX_CAMERAS; i++) {
         ui_camera_instance_t *inst = &s_instances[i];
         if (!inst->active) {

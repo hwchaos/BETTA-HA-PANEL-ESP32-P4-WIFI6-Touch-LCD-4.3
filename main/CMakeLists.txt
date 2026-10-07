@@ -219,6 +219,14 @@ if(CONFIG_APP_PANEL_VARIANT_S3_480)
     )
 endif()
 
+# The 4.3" board builds the 7B variant; this shim redirects the 7B BSP header
+# to the 4.3" BSP.
+if(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+    target_include_directories(${COMPONENT_LIB} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/drivers/panel43_bsp_shim"
+    )
+endif()
+
 set(APP_HAVE_HOSTED_C6_FW_IMAGE 0)
 if(NOT CONFIG_APP_PANEL_VARIANT_S3_480)
 set(HOSTED_C6_FW_BIN "")

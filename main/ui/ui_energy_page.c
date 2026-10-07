@@ -75,14 +75,17 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_ARC_BATTERY 1
 #define ENERGY_ARC_GRID 2
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define ENERGY_NODE_GRID_X 76
+#if APP_LAYOUT_COMPACT
+/* Laid out for a 480 px wide content box; wider short boxes (800x360 on the
+ * Waveshare 4.3" in landscape) centre the same diagram. */
+#define ENERGY_COMPACT_X_SHIFT ((APP_CONTENT_BOX_WIDTH - 480) / 2)
+#define ENERGY_NODE_GRID_X (76 + ENERGY_COMPACT_X_SHIFT)
 #define ENERGY_NODE_GRID_Y 205
-#define ENERGY_NODE_SOLAR_X 240
+#define ENERGY_NODE_SOLAR_X (240 + ENERGY_COMPACT_X_SHIFT)
 #define ENERGY_NODE_SOLAR_Y 82
-#define ENERGY_NODE_HOME_X 404
+#define ENERGY_NODE_HOME_X (404 + ENERGY_COMPACT_X_SHIFT)
 #define ENERGY_NODE_HOME_Y 205
-#define ENERGY_NODE_BATTERY_X 240
+#define ENERGY_NODE_BATTERY_X (240 + ENERGY_COMPACT_X_SHIFT)
 #define ENERGY_NODE_BATTERY_Y 290
 #define ENERGY_NODE_SIZE 86
 #define ENERGY_HOME_SIZE 96

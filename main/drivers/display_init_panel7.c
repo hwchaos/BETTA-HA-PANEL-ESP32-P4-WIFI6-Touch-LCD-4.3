@@ -19,6 +19,7 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "nvs.h"
+#include "sdkconfig.h"
 
 #include "app_config.h"
 #include "diag/display_flash_watch.h"
@@ -534,7 +535,7 @@ static void display_frame_buffer_cache(void)
         return;
     }
 
-    s_frame_buffer_bytes = (size_t)APP_SCREEN_WIDTH * (size_t)APP_SCREEN_HEIGHT * 2U;
+    s_frame_buffer_bytes = (size_t)APP_PANEL_NATIVE_WIDTH * (size_t)APP_PANEL_NATIVE_HEIGHT * 2U;
     for (int i = 0; i < DISPLAY_FRAME_BUFFER_MAX; i++) {
         if (fb[i] == NULL) {
             break;
@@ -914,13 +915,18 @@ esp_err_t display_init(void)
         .control_handle = lcd.control,
         .buffer_size = DISPLAY_FULL_BUFFER_PIXELS / 5U,
         .double_buffer = true,
-        .hres = APP_SCREEN_WIDTH,
-        .vres = APP_SCREEN_HEIGHT,
+        .hres = APP_PANEL_NATIVE_WIDTH,
+        .vres = APP_PANEL_NATIVE_HEIGHT,
         .monochrome = false,
         .rotation = {
             .swap_xy = false,
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+            .mirror_x = false,
+            .mirror_y = false,
+#else
             .mirror_x = true,
             .mirror_y = true,
+#endif
         },
 #if LV_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
@@ -971,7 +977,11 @@ esp_err_t display_init(void)
         lv_display_set_antialiasing(s_lv_display, APP_LVGL_ANTIALIASING != 0);
         /* Panel 7B is mounted upside-down; EK79007 MADCTL mirror has no effect
          * in DSI video mode, so rotate 180 in software (matches GT911 mirror). */
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+        lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_90);
+#else
         lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_180);
+#endif
         if (s_trace_timer == NULL) {
             s_trace_timer = lv_timer_create(display_trace_timer_cb, APP_LVGL_TRACE_PERIOD_MS, NULL);
             if (s_trace_timer == NULL) {
