@@ -48,6 +48,8 @@ typedef struct {
     bool suppress_event;
     bool is_on;
     bool unavailable;
+    /* button.* / script.* / scene.*: fire-and-forget, no on/off state. */
+    bool stateless;
 } w_button_ctx_t;
 
 static const uint32_t W_BUTTON_SWITCH_TRACK_OFF_HEX = 0x3A3E43;
@@ -58,6 +60,11 @@ static const uint32_t W_BUTTON_SWITCH_TRACK_OFF_HEX = 0x3A3E43;
 #define W_BUTTON_SWITCH_ACCENT_DEFAULT_HEX (APP_UI_COLOR_NAV_TAB_ACTIVE)
 static const uint32_t W_BUTTON_SWITCH_KNOB_HEX = 0xEAF2FA;
 static const lv_coord_t W_BUTTON_SWITCH_HEIGHT_PX = 40;
+/* Below this height the tile switches to a two-row layout (status + switch on
+ * top, title below) with smaller padding and fonts; the stacked layout needs
+ * ~140 px and overlapped the title at 120 px. */
+static const lv_coord_t W_BUTTON_SHORT_CARD_H = 140;
+static const lv_coord_t W_BUTTON_SHORT_SWITCH_H = 28;
 
 static bool button_is_hex_digit(char c)
 {
@@ -141,6 +148,16 @@ static bool button_entity_is_media_player(const char *entity_id)
     return strncmp(entity_id, "media_player.", strlen("media_player.")) == 0;
 }
 
+static bool button_entity_is_stateless(const char *entity_id)
+{
+    if (entity_id == NULL) {
+        return false;
+    }
+    return strncmp(entity_id, "button.", strlen("button.")) == 0 ||
+           strncmp(entity_id, "script.", strlen("script.")) == 0 ||
+           strncmp(entity_id, "scene.", strlen("scene.")) == 0;
+}
+
 static w_button_mode_t button_mode_from_text(const char *mode_text)
 {
     if (mode_text == NULL || mode_text[0] == '\0' || strcmp(mode_text, "auto") == 0) {
@@ -199,7 +216,8 @@ static bool button_style_uses_switch(w_button_style_t style)
 
 static bool button_uses_switch_ui(const w_button_ctx_t *ctx)
 {
-    return ctx != NULL && button_mode_uses_switch(ctx->mode) && button_style_uses_switch(ctx->style);
+    return ctx != NULL && !ctx->stateless && button_mode_uses_switch(ctx->mode) &&
+           button_style_uses_switch(ctx->style);
 }
 
 static const char *button_icon_symbol(w_button_mode_t mode, bool is_on)
@@ -491,6 +509,25 @@ static void button_layout_switch(lv_obj_t *card, w_button_ctx_t *ctx)
 
     lv_obj_update_layout(card);
 
+    if (lv_obj_get_height(card) < W_BUTTON_SHORT_CARD_H) {
+        /* Short tile: switch at the top right, status text beside it. */
+        const lv_coord_t content_w = lv_obj_get_width(card) - lv_obj_get_style_pad_left(card, LV_PART_MAIN) -
+                                     lv_obj_get_style_pad_right(card, LV_PART_MAIN);
+        const lv_coord_t switch_h = W_BUTTON_SHORT_SWITCH_H;
+        lv_coord_t switch_w = (switch_h * 23) / 10;
+        if (switch_w > content_w) {
+            switch_w = content_w;
+        }
+        lv_obj_set_size(ctx->action_switch, switch_w, switch_h);
+        lv_obj_set_pos(ctx->action_switch, content_w - switch_w, 0);
+        if (ctx->state_label != NULL) {
+            lv_obj_update_layout(ctx->state_label);
+            const lv_coord_t label_h = lv_obj_get_height(ctx->state_label);
+            lv_obj_set_pos(ctx->state_label, 0, (switch_h - label_h) / 2);
+        }
+        return;
+    }
+
         const bool compact = button_card_is_compact(card);
     const lv_coord_t side_inset =
 #if APP_UI_TILE_LAYOUT_TUNED
@@ -561,6 +598,19 @@ static void button_layout_icon(lv_obj_t *card, w_button_ctx_t *ctx)
     }
 
     lv_obj_update_layout(card);
+
+    if (ctx->stateless && lv_obj_get_height(card) < W_BUTTON_SHORT_CARD_H) {
+        /* Short action tile: fixed-size glyph in the top-left corner so a title
+         * that wraps onto two lines cannot squeeze it to nothing. */
+#if LV_FONT_MONTSERRAT_28
+        lv_obj_set_style_text_font(ctx->action_icon, &lv_font_montserrat_28, LV_PART_MAIN);
+#else
+        lv_obj_set_style_text_font(ctx->action_icon, LV_FONT_DEFAULT, LV_PART_MAIN);
+#endif
+        lv_obj_set_width(ctx->action_icon, LV_SIZE_CONTENT);
+        lv_obj_set_pos(ctx->action_icon, 0, 0);
+        return;
+    }
 
         const bool compact = button_card_is_compact(card);
     const lv_coord_t top_gap_base =
@@ -729,6 +779,8 @@ static void button_apply_visual(lv_obj_t *card, w_button_ctx_t *ctx, bool is_on,
                         icon_text = button_mdi_lamp_utf8();
                     } else if (state_icon) {
                         icon_text = LV_SYMBOL_POWER;
+                    } else if (ctx->stateless) {
+                        icon_text = LV_SYMBOL_PLAY;
                     } else {
                         icon_text = button_icon_symbol(ctx->mode, is_on && !unavailable);
                     }
@@ -774,6 +826,12 @@ static const char *button_status_text_for_state(const w_button_ctx_t *ctx, const
 static void button_run_primary_action(w_button_ctx_t *ctx)
 {
     if (ctx == NULL || ctx->unavailable) {
+        return;
+    }
+
+    if (ctx->stateless) {
+        /* Press / run: there is no state to flip optimistically. */
+        (void)ui_bindings_toggle_entity(ctx->entity_id);
         return;
     }
 
@@ -855,9 +913,13 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
 #else
     lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
 #endif
-    lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
+    const bool short_card = def->h < W_BUTTON_SHORT_CARD_H;
+    const lv_coord_t card_pad = short_card ? 10 : 16;
+    const lv_font_t *label_font = short_card ? APP_FONT_TEXT_16 : APP_FONT_TEXT_20;
+    lv_obj_set_style_pad_all(card, card_pad, LV_PART_MAIN);
 
     const bool is_media_player = button_entity_is_media_player(def->entity_id);
+    const bool stateless = button_entity_is_stateless(def->entity_id);
     const char *title_text = def->title;
     if (!is_media_player && (title_text == NULL || title_text[0] == '\0')) {
         title_text = def->id;
@@ -869,19 +931,20 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_obj_t *title = lv_label_create(card);
     lv_obj_add_flag(title, LV_OBJ_FLAG_USER_1);
     lv_label_set_text(title, title_text);
-    lv_obj_set_width(title, def->w - 32);
-    lv_obj_set_style_text_font(title, APP_FONT_TEXT_20, LV_PART_MAIN);
+    lv_obj_set_width(title, def->w - 2 * card_pad);
+    lv_obj_set_style_text_font(title, label_font, LV_PART_MAIN);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 #if APP_UI_TILE_LAYOUT_TUNED
-    lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, short_card ? 0 : -12);
 #else
-    lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, short_card ? 0 : -10);
 #endif
 
     lv_obj_t *state_label = lv_label_create(card);
     lv_obj_add_flag(state_label, LV_OBJ_FLAG_USER_3);
     lv_label_set_text(state_label, ui_i18n_get("common.off", "OFF"));
-    lv_obj_set_style_text_font(state_label, APP_FONT_TEXT_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state_label, label_font, LV_PART_MAIN);
 #if APP_UI_TILE_LAYOUT_TUNED
     lv_obj_align(state_label, LV_ALIGN_TOP_LEFT, 0, 2);
 #else
@@ -914,7 +977,8 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     ctx->mode = button_mode_from_text(def->button_mode);
     ctx->style = button_style_from_text(def->style_variant);
     ctx->show_title = title_text[0] != '\0';
-    ctx->show_status = !is_media_player &&
+    ctx->stateless = stateless;
+    ctx->show_status = !is_media_player && !stateless &&
                        (ctx->style == W_BUTTON_STYLE_SWITCH || ctx->style == W_BUTTON_STYLE_POWER_STATUS);
     if (ctx->mode != W_BUTTON_MODE_AUTO && !is_media_player) {
         ctx->mode = W_BUTTON_MODE_AUTO;
@@ -956,6 +1020,14 @@ void w_button_apply_state(ui_widget_instance_t *instance, const ha_state_t *stat
 
     w_button_ctx_t *ctx = (w_button_ctx_t *)instance->ctx;
     if (ctx == NULL) {
+        return;
+    }
+
+    if (ctx->stateless) {
+        /* A button's state is the time of its last press ("unknown" until the
+         * first one); only a real "unavailable" greys the tile out. */
+        const bool gone = strcmp(state->state, "unavailable") == 0;
+        button_apply_visual(instance->obj, ctx, false, gone, gone ? "unavailable" : "");
         return;
     }
 

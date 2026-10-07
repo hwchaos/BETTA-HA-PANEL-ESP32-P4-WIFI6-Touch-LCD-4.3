@@ -101,6 +101,9 @@ const ENTITY_PICKER_CONFIGS = {
   },
   button: {
     domain: "switch",
+    /* Every domain the button tile can drive (see allowedEntityDomainsForWidgetType);
+     * the picker shows a selector to browse each of them. */
+    domains: ["switch", "button", "script", "scene", "input_boolean", "automation"],
     titleKey: "entity_picker.title_switch",
     blankKey: "entity_picker.blank_button",
     widgetKey: "entity_picker.widget_button",
@@ -4278,6 +4281,7 @@ const el = {
   lightEntityPickerCloseBtn: document.getElementById("lightEntityPickerCloseBtn"),
   lightEntityPickerBlankBtn: document.getElementById("lightEntityPickerBlankBtn"),
   lightEntityPickerSearch: document.getElementById("lightEntityPickerSearch"),
+  lightEntityPickerDomain: document.getElementById("lightEntityPickerDomain"),
   lightEntityPickerStatus: document.getElementById("lightEntityPickerStatus"),
   lightEntityPickerProgress: document.getElementById("lightEntityPickerProgress"),
   lightEntityPickerProgressBar: document.getElementById("lightEntityPickerProgressBar"),
@@ -11078,10 +11082,34 @@ function cancelLightEntityPickerRequest() {
 
 function entityPickerConfig(widgetType = editor.lightPicker.widgetType) {
   const normalizedWidgetType = ENTITY_PICKER_CONFIGS[widgetType] ? widgetType : "light_tile";
-  return {
+  const config = {
     widgetType: normalizedWidgetType,
     ...ENTITY_PICKER_CONFIGS[normalizedWidgetType],
   };
+  /* Multi-domain pickers browse the domain chosen in the selector. */
+  if (Array.isArray(config.domains) && normalizedWidgetType === editor.lightPicker.widgetType &&
+      config.domains.includes(editor.lightPicker.domain)) {
+    config.domain = editor.lightPicker.domain;
+  }
+  return config;
+}
+
+function renderEntityPickerDomainSelect(config) {
+  const select = el.lightEntityPickerDomain;
+  if (!select) return;
+  if (!Array.isArray(config.domains) || config.domains.length < 2) {
+    select.classList.add("hidden");
+    return;
+  }
+  select.innerHTML = "";
+  for (const domain of config.domains) {
+    const option = document.createElement("option");
+    option.value = domain;
+    option.textContent = domain;
+    select.appendChild(option);
+  }
+  select.value = config.domain;
+  select.classList.remove("hidden");
 }
 
 function entityPickerItemsLabel(config = entityPickerConfig()) {
@@ -11330,13 +11358,16 @@ async function fetchLightEntityPicker(options = {}) {
 }
 
 function openLightEntityPicker(widgetType = "light_tile") {
-  const config = entityPickerConfig(widgetType);
   if (!el.lightEntityPickerOverlay) {
-    addWidget(config.widgetType || widgetType);
+    addWidget(entityPickerConfig(widgetType).widgetType || widgetType);
     return;
   }
+  /* Set the type first so a multi-domain picker keeps the domain last chosen
+   * in its selector (entityPickerConfig() honours it for the current type). */
   editor.lightPicker.widgetType = widgetType;
+  const config = entityPickerConfig(widgetType);
   editor.lightPicker.domain = config.domain;
+  renderEntityPickerDomainSelect(config);
   editor.lightPicker.search = editor.lightPicker.searchByDomain[config.domain] || "";
   if (el.lightEntityPickerSearch) {
     el.lightEntityPickerSearch.value = editor.lightPicker.search;
@@ -13793,6 +13824,16 @@ function bindUi() {
       clearLightEntityPickerPoll();
       clearLightEntityPickerSearchDebounce();
       void fetchLightEntityPicker({ refresh: true });
+    };
+  }
+  if (el.lightEntityPickerDomain) {
+    el.lightEntityPickerDomain.onchange = () => {
+      clearLightEntityPickerPoll();
+      clearLightEntityPickerSearchDebounce();
+      editor.lightPicker.requestSeq += 1;
+      cancelLightEntityPickerRequest();
+      editor.lightPicker.domain = el.lightEntityPickerDomain.value;
+      openLightEntityPicker(editor.lightPicker.widgetType);
     };
   }
   if (el.lightEntityPickerSearch) {

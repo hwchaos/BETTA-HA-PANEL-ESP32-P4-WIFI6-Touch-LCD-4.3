@@ -345,8 +345,9 @@ static void cover_layout(w_cover_tile_t *ctx)
 
     lv_coord_t header_h = 0;
     if (ctx->title_label != NULL) {
-        header_h = (card_h >= 150) ? 20 : 18;
-        lv_obj_set_style_text_font(ctx->title_label, cover_font_px(header_h >= 20 ? 16 : 14), LV_PART_MAIN);
+        const lv_font_t *title_font = cover_font_px((card_h >= 150) ? 16 : 14);
+        header_h = (lv_coord_t)lv_font_get_line_height(title_font);
+        lv_obj_set_style_text_font(ctx->title_label, title_font, LV_PART_MAIN);
         lv_obj_set_width(ctx->title_label, card_w - (2 * pad));
         lv_label_set_long_mode(ctx->title_label, LV_LABEL_LONG_DOT);
         lv_obj_align(ctx->title_label, LV_ALIGN_TOP_MID, 0, 0);
@@ -365,7 +366,14 @@ static void cover_layout(w_cover_tile_t *ctx)
         track_h = (card_h >= 180) ? 10 : 8;
     }
 
-    const lv_coord_t text_area_h = show_track ? (area_h - track_h - 6) : area_h;
+    /* The caption line needs its own room under the value, or it runs into the
+     * rail. */
+    const lv_coord_t caption_h =
+        (ctx->caption_label != NULL) ? (lv_coord_t)lv_font_get_line_height(cover_font_px(14)) + 2 : 0;
+    lv_coord_t text_area_h = area_h - caption_h - (show_track ? (track_h + 6) : 0);
+    if (text_area_h < 18) {
+        text_area_h = 18;
+    }
     const lv_coord_t text_area_w = card_w - (2 * pad);
     ctx->value_height = text_area_h;
 
@@ -380,18 +388,20 @@ static void cover_layout(w_cover_tile_t *ctx)
     const lv_coord_t icon_size = show_icon ? LV_MIN(text_area_h, (lv_coord_t)(text_area_w / 3)) : 0;
     if (show_icon) {
         lv_obj_set_style_text_font(ctx->icon, mdi_font_icon_56(), LV_PART_MAIN);
-        lv_obj_align(ctx->icon, LV_ALIGN_TOP_LEFT, 0, (text_area_h - icon_size) / 2);
+        lv_obj_align(ctx->icon, LV_ALIGN_TOP_LEFT, 0, header_h + (text_area_h - icon_size) / 2);
     }
 
+    /* Everything below the title starts at header_h; aligning at 0 put the
+     * big value straight onto the title. */
     if (ctx->value_label != NULL) {
         const lv_coord_t value_w = show_icon ? (text_area_w - icon_size - 8) : text_area_w;
         lv_obj_set_width(ctx->value_label, value_w);
         lv_obj_set_style_text_font(ctx->value_label,
             cover_fit_font(ctx->value_text, value_w, text_area_h), LV_PART_MAIN);
         if (show_icon) {
-            lv_obj_align(ctx->value_label, LV_ALIGN_TOP_RIGHT, 0, 0);
+            lv_obj_align(ctx->value_label, LV_ALIGN_TOP_RIGHT, 0, header_h);
         } else {
-            lv_obj_align(ctx->value_label, LV_ALIGN_TOP_MID, 0, 0);
+            lv_obj_align(ctx->value_label, LV_ALIGN_TOP_MID, 0, header_h);
         }
     }
 
@@ -399,7 +409,7 @@ static void cover_layout(w_cover_tile_t *ctx)
         lv_obj_set_width(ctx->caption_label, text_area_w);
         lv_obj_set_style_text_font(ctx->caption_label, cover_font_px(14), LV_PART_MAIN);
         lv_label_set_long_mode(ctx->caption_label, LV_LABEL_LONG_DOT);
-        lv_obj_align(ctx->caption_label, LV_ALIGN_TOP_MID, 0, text_area_h + 2);
+        lv_obj_align(ctx->caption_label, LV_ALIGN_TOP_MID, 0, header_h + text_area_h + 2);
     }
 
     if (ctx->track != NULL) {

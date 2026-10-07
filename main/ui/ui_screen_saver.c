@@ -107,6 +107,10 @@ static volatile bool s_sleep_request = false;
 /* When the panel was switched off on request (0 = not forced). Only activity
  * after this moment wakes it, so the last touch before the command cannot. */
 static int64_t s_forced_off_ms = 0;
+/* Black cover on the top layer while forced off: at 0 % the backlight of some
+ * panels (Waveshare 4.3") still leaks enough light to read the UI. It also
+ * swallows the waking touch so it cannot press a tile underneath. */
+static lv_obj_t *s_blackout = NULL;
 static bool s_overlay_shown = false;
 /* Last strings written into the clock/date labels.  lv_label_set_text() with an
  * identical string still frees and rebuilds the text and repaints the label, and
@@ -1461,6 +1465,15 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
         s_forced_off_ms = esp_timer_get_time() / 1000;
         ui_screen_saver_drop_light_content();
         ui_screen_saver_hide_overlay();
+        if (s_blackout == NULL) {
+            s_blackout = lv_obj_create(lv_layer_top());
+            lv_obj_remove_style_all(s_blackout);
+            lv_obj_set_size(s_blackout, LV_PCT(100), LV_PCT(100));
+            lv_obj_set_style_bg_color(s_blackout, lv_color_black(), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(s_blackout, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_add_flag(s_blackout, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_clear_flag(s_blackout, LV_OBJ_FLAG_SCROLLABLE);
+        }
         (void)display_set_brightness_percent(0);
         ESP_LOGI(TAG_SCREEN_SAVER, "screen off (requested)");
         return;
@@ -1472,6 +1485,10 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
         }
         /* Woken by a touch or ui_screen_saver_wake(): back to normal rules. */
         s_forced_off_ms = 0;
+        if (s_blackout != NULL) {
+            lv_obj_delete(s_blackout);
+            s_blackout = NULL;
+        }
     }
 
     bool night_now = ui_screen_saver_night_window_active(ui_screen_saver_minutes_of_day());
