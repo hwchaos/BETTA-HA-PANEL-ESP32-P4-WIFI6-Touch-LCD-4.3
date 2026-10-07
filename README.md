@@ -1,6 +1,14 @@
 <!-- SPDX-License-Identifier: LicenseRef-FNCL-1.1 | Copyright (c) 2026 Cpt_Kirk -->
 <img src="images/BETTAOS.jpg" alt="BETTA OS Logo" width="10%" />
 
+> **Hinweis zu diesem Branch (`panel43`):** Die Anpassungen für das Waveshare
+> ESP32-P4-WIFI6-Touch-LCD-4.3 wurden mit **Claude (KI, Anthropic) generiert** und
+> nur an einem einzelnen Gerät getestet. Oberfläche und Dokumentation dieser
+> Variante sind auf **Deutsch** ausgerichtet. Details: [README.panel43.md](README.panel43.md).
+>
+> *Note: the `panel43` changes on this branch were AI-generated with Claude, tested on a
+> single device only, and target a German UI.*
+
 # Waveshare 7" Wall Panel (BETTA HA Panel fork, `panel7`)
 
 **A fully on-device configurable Home Assistant wall panel for the Waveshare
