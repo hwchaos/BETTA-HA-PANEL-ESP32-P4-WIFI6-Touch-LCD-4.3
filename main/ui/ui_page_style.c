@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "ui/theme/theme_default.h"
 #include "ui/ui_screen_saver.h"
@@ -118,6 +119,109 @@ static void ui_page_style_apply_wallpaper(lv_obj_t *page_container, int dim)
     lv_obj_invalidate(page_container);
 }
 
+/* ---- Dithered page gradients --------------------------------------------
+ * LVGL 9 draws bg gradients straight into RGB565 without dithering, so a
+ * subtle gradient across the whole content box collapses into a handful of
+ * wide bands (red/blue only have 32 levels). The page gradient is therefore
+ * rendered once into an RGB565 image with a 4x4 ordered dither and used as the
+ * page background image. Pages with the same colours share one buffer. */
+#define PAGE_GRAD_CACHE_SIZE 4
+
+typedef struct {
+    bool used;
+    uint32_t from_rgb;
+    uint32_t to_rgb;
+    bool horizontal;
+    lv_image_dsc_t dsc;
+} page_grad_entry_t;
+
+static page_grad_entry_t s_grad_cache[PAGE_GRAD_CACHE_SIZE];
+
+static const uint8_t s_bayer4[4][4] = {
+    {0, 8, 2, 10},
+    {12, 4, 14, 6},
+    {3, 11, 1, 9},
+    {15, 7, 13, 5},
+};
+
+/* value: channel in 1/256 steps (0 .. 255*256); bits: 5 or 6. */
+static uint32_t ui_page_style_dither_channel(uint32_t value, uint32_t bits, uint8_t threshold)
+{
+    const uint32_t levels = (1U << bits) - 1U;
+    /* Fixed point: scaled = value * levels / 255, in 1/256 steps. */
+    const uint32_t scaled = (value * levels) / 255U;
+    uint32_t base = scaled >> 8;
+    const uint32_t frac = scaled & 0xFFU;
+    /* threshold 0..15 -> compare against (t + 0.5) / 16 of a level. */
+    if (frac * 16U > ((uint32_t)threshold * 256U + 128U)) {
+        base++;
+    }
+    return base > levels ? levels : base;
+}
+
+static const lv_image_dsc_t *ui_page_style_gradient_image(uint32_t from_rgb, uint32_t to_rgb, bool horizontal)
+{
+    for (size_t i = 0; i < PAGE_GRAD_CACHE_SIZE; i++) {
+        page_grad_entry_t *e = &s_grad_cache[i];
+        if (e->used && e->from_rgb == from_rgb && e->to_rgb == to_rgb && e->horizontal == horizontal) {
+            return &e->dsc;
+        }
+    }
+
+    page_grad_entry_t *slot = NULL;
+    for (size_t i = 0; i < PAGE_GRAD_CACHE_SIZE; i++) {
+        if (!s_grad_cache[i].used) {
+            slot = &s_grad_cache[i];
+            break;
+        }
+    }
+    if (slot == NULL) {
+        /* Never evict: a page may still point at any cached image. Callers
+         * fall back to LVGL's (banded) gradient instead. */
+        return NULL;
+    }
+
+    const uint32_t w = (uint32_t)APP_CONTENT_BOX_WIDTH;
+    const uint32_t h = (uint32_t)APP_CONTENT_BOX_HEIGHT;
+    uint16_t *buf = heap_caps_malloc((size_t)w * h * 2U, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf == NULL) {
+        ESP_LOGW(TAG_PAGE_STYLE, "gradient image alloc failed (%ux%u)", (unsigned)w, (unsigned)h);
+        return NULL;
+    }
+
+    const int32_t r0 = (int32_t)((from_rgb >> 16) & 0xFFU), r1 = (int32_t)((to_rgb >> 16) & 0xFFU);
+    const int32_t g0 = (int32_t)((from_rgb >> 8) & 0xFFU), g1 = (int32_t)((to_rgb >> 8) & 0xFFU);
+    const int32_t b0 = (int32_t)(from_rgb & 0xFFU), b1 = (int32_t)(to_rgb & 0xFFU);
+    const uint32_t span = horizontal ? (w > 1U ? w - 1U : 1U) : (h > 1U ? h - 1U : 1U);
+
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            const int32_t pos = (int32_t)(horizontal ? x : y);
+            /* Channel values in 1/256 steps for sub-level precision. */
+            const uint32_t r = (uint32_t)((r0 * 256) + ((r1 - r0) * 256 * pos) / (int32_t)span);
+            const uint32_t g = (uint32_t)((g0 * 256) + ((g1 - g0) * 256 * pos) / (int32_t)span);
+            const uint32_t b = (uint32_t)((b0 * 256) + ((b1 - b0) * 256 * pos) / (int32_t)span);
+            const uint8_t t = s_bayer4[y & 3U][x & 3U];
+            buf[(size_t)y * w + x] = (uint16_t)((ui_page_style_dither_channel(r, 5, t) << 11) |
+                                                (ui_page_style_dither_channel(g, 6, t) << 5) |
+                                                ui_page_style_dither_channel(b, 5, t));
+        }
+    }
+
+    slot->used = true;
+    slot->from_rgb = from_rgb;
+    slot->to_rgb = to_rgb;
+    slot->horizontal = horizontal;
+    slot->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    slot->dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    slot->dsc.header.w = w;
+    slot->dsc.header.h = h;
+    slot->dsc.header.stride = w * 2U;
+    slot->dsc.data_size = w * h * 2U;
+    slot->dsc.data = (const uint8_t *)buf;
+    return &slot->dsc;
+}
+
 static void ui_page_style_track(lv_obj_t *page_container, int dim)
 {
     for (size_t i = 0; i < s_wallpaper_page_count; i++) {
@@ -147,22 +251,27 @@ void ui_page_style_apply(lv_obj_t *page_container, const ui_page_style_t *style)
     lv_obj_set_style_bg_color(page_container, lv_color_hex(bg_rgb), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(page_container, LV_OPA_COVER, LV_PART_MAIN);
 
-    if (ui_tile_style_hex_to_rgb(style->bg_grad_color, &rgb)) {
-        lv_grad_dir_t dir = LV_GRAD_DIR_VER;
-        if (strcmp(style->bg_grad_dir, "hor") == 0) {
-            dir = LV_GRAD_DIR_HOR;
-        } else if (strcmp(style->bg_grad_dir, "none") == 0) {
-            dir = LV_GRAD_DIR_NONE;
-        }
-        lv_obj_set_style_bg_grad_color(page_container, lv_color_hex(rgb), LV_PART_MAIN);
-        lv_obj_set_style_bg_grad_dir(page_container, dir, LV_PART_MAIN);
-        lv_obj_set_style_bg_grad_opa(page_container, LV_OPA_COVER, LV_PART_MAIN);
-    } else {
-        lv_obj_set_style_bg_grad_dir(page_container, LV_GRAD_DIR_NONE, LV_PART_MAIN);
-    }
+    /* LVGL's own gradient is only a fallback for pages (banding, see above). */
+    lv_obj_set_style_bg_grad_dir(page_container, LV_GRAD_DIR_NONE, LV_PART_MAIN);
 
     if (!style->wallpaper) {
-        lv_obj_set_style_bg_image_src(page_container, NULL, LV_PART_MAIN);
+        const lv_image_dsc_t *grad = NULL;
+        if (strcmp(style->bg_grad_dir, "none") != 0 && ui_tile_style_hex_to_rgb(style->bg_grad_color, &rgb)) {
+            const bool horizontal = strcmp(style->bg_grad_dir, "hor") == 0;
+            grad = ui_page_style_gradient_image(bg_rgb, rgb, horizontal);
+            if (grad == NULL) {
+                lv_obj_set_style_bg_grad_color(page_container, lv_color_hex(rgb), LV_PART_MAIN);
+                lv_obj_set_style_bg_grad_dir(page_container, horizontal ? LV_GRAD_DIR_HOR : LV_GRAD_DIR_VER,
+                    LV_PART_MAIN);
+                lv_obj_set_style_bg_grad_opa(page_container, LV_OPA_COVER, LV_PART_MAIN);
+            }
+        }
+        lv_obj_set_style_bg_image_src(page_container, grad, LV_PART_MAIN);
+        if (grad != NULL) {
+            lv_obj_set_style_bg_image_opa(page_container, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_bg_image_tiled(page_container, false, LV_PART_MAIN);
+            lv_obj_set_style_bg_image_recolor_opa(page_container, LV_OPA_TRANSP, LV_PART_MAIN);
+        }
         return;
     }
 
