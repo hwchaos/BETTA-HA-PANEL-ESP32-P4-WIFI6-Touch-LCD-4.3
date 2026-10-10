@@ -150,6 +150,43 @@ static uint32_t s_reveal_count = 0;
 static uint32_t s_reveal_blip_count = 0;
 static int64_t s_reveal_last_ms = 0;
 static lv_obj_t *s_overlay = NULL;
+/* Popups (light colour, cover, heating, alarm, sensor history, alerts) live on
+ * lv_layer_top(), above every screen child - including this overlay. One left
+ * open hid the clock: the saver dimmed the panel, but the popup stayed on the
+ * glass. While the clock shows, the popups are hidden and they come back with
+ * the menu.
+ * The children are hidden one by one, never the layer itself: a layer has no
+ * parent, and clearing a flag on it walks up to a screen that does not exist
+ * (LoadProhibited in lv_obj_mark_layout_as_dirty). USER_1 marks what this
+ * module hid, so a popup closed in the meantime is simply no longer there. */
+#define SAVER_HID_FLAG LV_OBJ_FLAG_USER_1
+static bool s_top_layer_hidden = false;
+
+static void ui_screen_saver_set_top_layer_hidden(bool hidden)
+{
+    if (hidden == s_top_layer_hidden) {
+        return;
+    }
+    lv_obj_t *top = lv_layer_top();
+    if (top == NULL) {
+        return;
+    }
+    const uint32_t count = lv_obj_get_child_count(top);
+    for (uint32_t i = 0; i < count; i++) {
+        lv_obj_t *child = lv_obj_get_child(top, (int32_t)i);
+        if (child == NULL) {
+            continue;
+        }
+        if (hidden) {
+            if (!lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+                lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN | SAVER_HID_FLAG);
+            }
+        } else if (lv_obj_has_flag(child, SAVER_HID_FLAG)) {
+            lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN | SAVER_HID_FLAG);
+        }
+    }
+    s_top_layer_hidden = hidden;
+}
 static lv_obj_t *s_time_label = NULL;
 /* AM/PM badge: the same two letters drawn on top of each other with a 1 px
  * offset. LVGL only thickens outlines for vector fonts, so stacking copies is
@@ -614,6 +651,7 @@ static void ui_screen_saver_hide_overlay(void)
         lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
     }
     s_overlay_shown = false;
+    ui_screen_saver_set_top_layer_hidden(false);
     /* The menu is back on screen: camera snapshots may run again. */
     ui_cameras_page_set_suspended(false);
     if (was_shown && !s_screen_off) {
@@ -685,6 +723,7 @@ void ui_screen_saver_handle_screen_clean(void)
     s_date_label = NULL;
     s_bg_image = NULL;
     s_overlay_shown = false;
+    ui_screen_saver_set_top_layer_hidden(false);
     /* The cleaned screen took the labels with it: forget the rendered text so
      * the rebuilt overlay writes the clock again. */
     s_clock_rendered[0] = '\0';
@@ -1360,6 +1399,7 @@ static void ui_screen_saver_show_overlay(void)
     }
     lv_obj_clear_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_overlay);
+    ui_screen_saver_set_top_layer_hidden(true);
     if (!was_shown) {
         /* Overlay + backlight step at once: the closest thing to a full-screen
          * change this firmware does on its own, so it is worth a log line and a
@@ -1436,6 +1476,26 @@ bool ui_screen_saver_night_active(void)
     return s_night_active;
 }
 
+/* Some backlights (the 4.3" panel) never go fully dark at 0 %: "off" also
+ * lays a black, touchable layer over everything, so the panel looks off
+ * rather than showing a dim menu. A touch on it wakes the panel like any
+ * other touch. */
+static void ui_screen_saver_set_blackout(bool on)
+{
+    if (on && s_blackout == NULL) {
+        s_blackout = lv_obj_create(lv_layer_top());
+        lv_obj_remove_style_all(s_blackout);
+        lv_obj_set_size(s_blackout, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_style_bg_color(s_blackout, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(s_blackout, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_add_flag(s_blackout, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(s_blackout, LV_OBJ_FLAG_SCROLLABLE);
+    } else if (!on && s_blackout != NULL) {
+        lv_obj_delete(s_blackout);
+        s_blackout = NULL;
+    }
+}
+
 static void ui_screen_saver_timer_cb(lv_timer_t *timer)
 {
     system_log_note_lvgl_cb("ui_screen_saver_timer_cb");
@@ -1458,6 +1518,10 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
     int64_t idle_ms = display_ms_since_activity();
     bool activity_recent = idle_ms < SCREEN_SAVER_TICK_MS;
 
+    if (!s_screen_off && s_forced_off_ms == 0) {
+        ui_screen_saver_set_blackout(false);
+    }
+
     if (s_sleep_request) {
         s_sleep_request = false;
         s_screen_off = true;
@@ -1465,15 +1529,7 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
         s_forced_off_ms = esp_timer_get_time() / 1000;
         ui_screen_saver_drop_light_content();
         ui_screen_saver_hide_overlay();
-        if (s_blackout == NULL) {
-            s_blackout = lv_obj_create(lv_layer_top());
-            lv_obj_remove_style_all(s_blackout);
-            lv_obj_set_size(s_blackout, LV_PCT(100), LV_PCT(100));
-            lv_obj_set_style_bg_color(s_blackout, lv_color_black(), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(s_blackout, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_add_flag(s_blackout, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_clear_flag(s_blackout, LV_OBJ_FLAG_SCROLLABLE);
-        }
+        ui_screen_saver_set_blackout(true);
         (void)display_set_brightness_percent(0);
         ESP_LOGI(TAG_SCREEN_SAVER, "screen off (requested)");
         return;
@@ -1485,10 +1541,7 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
         }
         /* Woken by a touch or ui_screen_saver_wake(): back to normal rules. */
         s_forced_off_ms = 0;
-        if (s_blackout != NULL) {
-            lv_obj_delete(s_blackout);
-            s_blackout = NULL;
-        }
+        ui_screen_saver_set_blackout(false);
     }
 
     bool night_now = ui_screen_saver_night_window_active(ui_screen_saver_minutes_of_day());
@@ -1523,6 +1576,7 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
             s_screen_off = true;
             ui_screen_saver_drop_light_content();
             ui_screen_saver_hide_overlay();
+            ui_screen_saver_set_blackout(true);
             (void)display_set_brightness_percent(0);
         } else {
             s_screen_off = false;
@@ -1539,6 +1593,7 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
     if (s_screen_off) {
         if (activity_recent) {
             s_screen_off = false;
+            ui_screen_saver_set_blackout(false);
             ui_screen_saver_apply_backlight();
             ESP_LOGI(TAG_SCREEN_SAVER, "wake (activity) brightness=%d%%", (int)s_brightness);
         } else {
@@ -1552,6 +1607,7 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
         s_wake_to_screensaver = false;
         ui_screen_saver_drop_light_content();
         ui_screen_saver_hide_overlay();
+        ui_screen_saver_set_blackout(true);
         (void)display_set_brightness_percent(0);
         ESP_LOGI(TAG_SCREEN_SAVER, "screen off (idle=%d ms)", (int)idle_ms);
         return;

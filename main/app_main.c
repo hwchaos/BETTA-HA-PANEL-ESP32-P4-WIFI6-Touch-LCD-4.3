@@ -382,7 +382,7 @@ static void p4eth_netinfo_task(void *arg)
         }
         if (display_lock(200)) {
             if (label == NULL) {
-                label = lv_label_create(lv_layer_top());
+                label = lv_label_create(lv_layer_sys());
                 lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
                 lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), LV_PART_MAIN);
                 lv_obj_set_style_bg_opa(label, LV_OPA_70, LV_PART_MAIN);

@@ -793,12 +793,73 @@ void display_note_activity(void)
     display_note_activity_from("internal");
 }
 
+/* Activity sources for /api/debug/activity. Sources are string literals, so
+ * the pointer is kept; the table is small and only diagnostic. */
+#define ACTIVITY_SOURCES_MAX 12
+typedef struct {
+    const char *source;
+    uint32_t count;
+    int64_t last_us;
+} activity_source_slot_t;
+static activity_source_slot_t s_activity_sources[ACTIVITY_SOURCES_MAX];
+static portMUX_TYPE s_activity_sources_lock = portMUX_INITIALIZER_UNLOCKED;
+#define ACTIVITY_LOG_AFTER_IDLE_US (30LL * 1000 * 1000)
+
+static void display_record_activity_source(const char *source, int64_t now_us)
+{
+    const char *who = (source != NULL && source[0] != '\0') ? source : "unknown";
+    taskENTER_CRITICAL(&s_activity_sources_lock);
+    activity_source_slot_t *slot = NULL;
+    for (size_t i = 0; i < ACTIVITY_SOURCES_MAX; i++) {
+        if (s_activity_sources[i].source == NULL || strcmp(s_activity_sources[i].source, who) == 0) {
+            slot = &s_activity_sources[i];
+            break;
+        }
+    }
+    if (slot != NULL) {
+        slot->source = who;
+        slot->count++;
+        slot->last_us = now_us;
+    }
+    taskEXIT_CRITICAL(&s_activity_sources_lock);
+}
+
+size_t display_get_activity_sources(display_activity_source_t *out, size_t max)
+{
+    if (out == NULL) {
+        return 0;
+    }
+    const int64_t now_us = esp_timer_get_time();
+    size_t n = 0;
+    taskENTER_CRITICAL(&s_activity_sources_lock);
+    for (size_t i = 0; i < ACTIVITY_SOURCES_MAX && n < max; i++) {
+        if (s_activity_sources[i].source == NULL) {
+            break;
+        }
+        out[n].source = s_activity_sources[i].source;
+        out[n].count = s_activity_sources[i].count;
+        out[n].ago_ms = (now_us - s_activity_sources[i].last_us) / 1000;
+        n++;
+    }
+    taskEXIT_CRITICAL(&s_activity_sources_lock);
+    return n;
+}
+
 void display_note_activity_from(const char *source)
 {
     if (!s_display_ready) {
         return;
     }
     const int before = s_display_brightness;
+    const int64_t now_us = esp_timer_get_time();
+    /* Something other than a finger restarting a long idle period is what
+     * keeps the screensaver away; leave a trace of it. */
+    if (s_last_activity_us != 0 && now_us - s_last_activity_us >= ACTIVITY_LOG_AFTER_IDLE_US &&
+        (source == NULL || strcmp(source, "touch") != 0)) {
+        system_log_event("activity", "idle timer reset by %s after %d s",
+            source != NULL ? source : "unknown", (int)((now_us - s_last_activity_us) / 1000000));
+    }
+    display_record_activity_source(source != NULL ? source : "internal", now_us);
     /* Real activity means someone is in front of the panel: if the boot splash is
      * somehow still up, the gated request has to land now rather than wait for a
      * hand-over that may never come.  ("internal" is the splash and the saver

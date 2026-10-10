@@ -9,6 +9,7 @@
 
 #include "cJSON.h"
 #include "radar/ld2410.h"
+#include "drivers/display_init.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -333,6 +334,38 @@ esp_err_t api_debug_storage_get_handler(httpd_req_t *req)
     if (err == ESP_OK) {
         err = httpd_resp_send_chunk(req, NULL, 0);
     }
+    return err;
+}
+
+/* GET /api/debug/activity -> what keeps resetting the screensaver's idle timer. */
+esp_err_t api_debug_activity_get_handler(httpd_req_t *req)
+{
+    display_activity_source_t sources[12];
+    const size_t n = display_get_activity_sources(sources, sizeof(sources) / sizeof(sources[0]));
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    }
+    cJSON_AddNumberToObject(root, "idle_ms", (double)display_ms_since_activity());
+    cJSON *list = cJSON_AddArrayToObject(root, "sources");
+    for (size_t i = 0; i < n && list != NULL; i++) {
+        cJSON *item = cJSON_CreateObject();
+        if (item == NULL) {
+            break;
+        }
+        cJSON_AddStringToObject(item, "source", sources[i].source);
+        cJSON_AddNumberToObject(item, "count", sources[i].count);
+        cJSON_AddNumberToObject(item, "ago_ms", (double)sources[i].ago_ms);
+        cJSON_AddItemToArray(list, item);
+    }
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    }
+    httpd_resp_set_type(req, "application/json");
+    const esp_err_t err = httpd_resp_sendstr(req, payload);
+    cJSON_free(payload);
     return err;
 }
 

@@ -62,3 +62,11 @@ __attribute__((weak)) void display_note_activity_from(const char *source)
     (void)source;
     display_note_activity();
 }
+
+/* Only the 7" driver family records activity sources. */
+__attribute__((weak)) size_t display_get_activity_sources(display_activity_source_t *out, size_t max)
+{
+    (void)out;
+    (void)max;
+    return 0;
+}

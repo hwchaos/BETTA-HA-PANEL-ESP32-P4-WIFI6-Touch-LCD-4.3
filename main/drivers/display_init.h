@@ -70,6 +70,15 @@ typedef bool (*display_activity_cb_t)(void);
 void display_set_activity_callback(display_activity_cb_t cb);
 int64_t display_ms_since_activity(void);
 
+/* Diagnostics: what keeps resetting the inactivity timer. Each source (touch,
+ * radar, mqtt, internal, ...) with how often it fired and how long ago. */
+typedef struct {
+    const char *source;
+    uint32_t count;
+    int64_t ago_ms;
+} display_activity_source_t;
+size_t display_get_activity_sources(display_activity_source_t *out, size_t max);
+
 /* Framebuffer count a panel driver may report; callers size their arrays with
  * this so they never overrun a driver that exposes more buffers later. */
 #define DISPLAY_FRAME_BUFFER_MAX 3
