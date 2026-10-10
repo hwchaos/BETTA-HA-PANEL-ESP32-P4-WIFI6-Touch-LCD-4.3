@@ -10,6 +10,9 @@
 
 #include "bsp/display.h"
 #include "bsp/esp32_p4_wifi6_touch_lcd_7b.h"
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+#include "driver/i2c_master.h"
+#endif
 #include "esp_cache.h"
 #include "esp_err.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -386,6 +389,58 @@ void display_boot_brightness_release(void)
     }
 }
 
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+/* 4.3" backlight (schematic): an AP3032 boost LED driver. GPIO26
+ * (LCD_BL_PWM) only feeds the driver's feedback node through 10k, so even the
+ * darkest PWM level leaves a current through the LEDs. Its EN pin is BL_EN =
+ * GPIO33, pulled up to 5 V by 100k: driving it low is the only real "off". */
+#define P43_LCD_BL_EN_GPIO GPIO_NUM_33
+#endif
+
+/* Every backlight write goes through here, so 0 % can switch the driver off on
+ * boards that have an enable line. */
+static esp_err_t display_backlight_write(int percent)
+{
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+    if (percent <= 0) {
+        gpio_set_level(P43_LCD_BL_EN_GPIO, 0);
+    }
+    const esp_err_t err = bsp_display_brightness_set(percent);
+    if (percent > 0) {
+        gpio_set_level(P43_LCD_BL_EN_GPIO, 1);
+    }
+    return err;
+#elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+    /* The kit's 10.1" panel controller (I2C 0x45) takes the backlight level in
+     * register 0x96 (the 10.1"-A layout; 0 switches the LEDs off). The BSP's
+     * LCD type writes 0x86, which this controller does not use for the
+     * backlight, so the level goes to 0x96 here as well. */
+    const esp_err_t err = bsp_display_brightness_set(percent);
+    i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
+    if (bus == NULL) {
+        return err;
+    }
+    const i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = 0x45,
+        .scl_speed_hz = 100 * 1000,
+    };
+    i2c_master_dev_handle_t dev = NULL;
+    esp_err_t bl_err = i2c_master_bus_add_device(bus, &dev_cfg, &dev);
+    if (bl_err == ESP_OK) {
+        const uint8_t frame[2] = {0x96, (uint8_t)((255 * (percent < 0 ? 0 : percent > 100 ? 100 : percent)) / 100)};
+        bl_err = i2c_master_transmit(dev, frame, sizeof(frame), 50);
+        (void)i2c_master_bus_rm_device(dev);
+    }
+    if (bl_err != ESP_OK) {
+        ESP_LOGW(TAG_DISPLAY, "backlight reg 0x96 write failed: %s", esp_err_to_name(bl_err));
+    }
+    return err;
+#else
+    return bsp_display_brightness_set(percent);
+#endif
+}
+
 /* Write the duty without the per-step logging of display_set_brightness_percent()
  * but keep the cached value in sync, so display_get_brightness_percent() and the
  * flap detector always see what the glass is showing. */
@@ -395,7 +450,7 @@ static void display_fade_write(int percent)
     if (next == s_display_brightness) {
         return;
     }
-    if (bsp_display_brightness_set(next) == ESP_OK) {
+    if (display_backlight_write(next) == ESP_OK) {
         s_display_brightness = next;
     }
 }
@@ -492,7 +547,7 @@ esp_err_t display_set_brightness_percent(int percent)
         return ESP_OK;
     }
     const int previous = s_display_brightness;
-    esp_err_t err = bsp_display_brightness_set(next);
+    esp_err_t err = display_backlight_write(next);
     if (err == ESP_OK) {
         s_display_brightness = next;
         /* Every backlight transition is logged: a step change is one of the
@@ -934,9 +989,14 @@ int64_t display_ms_since_activity(void)
 
 static void display_p43_hold_reset(void)
 {
+    /* Backlight driver off. (GPIO26 low would be the brightest PWM level: the
+     * BSP drives that pin inverted.) */
+    gpio_reset_pin(P43_LCD_BL_EN_GPIO);
+    gpio_set_direction(P43_LCD_BL_EN_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(P43_LCD_BL_EN_GPIO, 0);
     gpio_reset_pin(P43_LCD_BL_GPIO);
     gpio_set_direction(P43_LCD_BL_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(P43_LCD_BL_GPIO, 0);
+    gpio_set_level(P43_LCD_BL_GPIO, 1);
     gpio_reset_pin(P43_LCD_RST_GPIO);
     gpio_set_direction(P43_LCD_RST_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_level(P43_LCD_RST_GPIO, 0);
