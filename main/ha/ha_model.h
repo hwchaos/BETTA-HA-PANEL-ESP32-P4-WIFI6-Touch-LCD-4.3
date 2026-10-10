@@ -46,4 +46,7 @@ bool ha_model_get_light_effects(const char *entity_id, char *out_list, size_t ou
     char *out_current, size_t out_current_len);
 size_t ha_model_list_entities(
     const char *domain_filter, const char *search, ha_entity_info_t *out_entities, size_t max_out);
+/* Copies the cached registry/attribute info (device_class, icon, ...) of one
+ * entity. False when the entity is not known (yet). */
+bool ha_model_get_entity(const char *entity_id, ha_entity_info_t *out_entity);
 size_t ha_model_list_states(ha_state_t *out_states, size_t max_out);

@@ -15,6 +15,20 @@
 /* Motion-detection zone in percent of the frame (0..100). */
 #define RUNTIME_MOTION_MAX_ZONES 4
 
+#define RUNTIME_ASSIST_PIPELINE_ID_MAX_LEN 64
+
+/* Waste collection chips in the top bar. */
+#define RUNTIME_WASTE_SLOTS 4
+/* Entities that raise the red alert triangle in the top bar. */
+#define RUNTIME_ALERT_ENTITIES 4
+/* Top bar arrangement, e.g. "L:date,cameras;C:clock;R:gear,ha,network;H:" */
+#define RUNTIME_TOPBAR_LAYOUT_LEN 160
+
+typedef struct {
+    char entity_id[APP_MAX_ENTITY_ID_LEN]; /* "" = slot unused */
+    uint32_t color;                        /* 0xRRGGBB of the bin icon */
+} runtime_waste_slot_t;
+
 typedef struct {
     int x;
     int y;
@@ -77,6 +91,12 @@ typedef struct {
     bool display_topbar_show_clock;
     bool display_topbar_show_date;
     bool display_topbar_show_gear;
+    bool display_nav_left; /* navigation bar on the left instead of the bottom (restart) */
+    runtime_waste_slot_t display_waste[RUNTIME_WASTE_SLOTS];
+    bool display_alert_persistent; /* HA persistent notifications raise the alert */
+    char display_topbar_layout[RUNTIME_TOPBAR_LAYOUT_LEN]; /* "" = default arrangement */
+    char display_topbar_date_format[24]; /* "DD.MM.YYYY", "WD, DD.MM", ... */
+    char display_alert_entities[RUNTIME_ALERT_ENTITIES][APP_MAX_ENTITY_ID_LEN];
     bool display_topbar_show_status;
     bool display_topbar_icon_text;
     bool display_topbar_custom_colors;
@@ -131,6 +151,22 @@ typedef struct {
     bool camera_motion_ignore_lighting;
     int camera_motion_zone_count;      /* 0..4, 0 = whole frame */
     runtime_motion_zone_t camera_motion_zones[RUNTIME_MOTION_MAX_ZONES];
+
+    /* Home Assistant Assist (push-to-talk voice control). */
+    bool assist_enabled;
+    char assist_pipeline_id[RUNTIME_ASSIST_PIPELINE_ID_MAX_LEN]; /* "" = preferred pipeline */
+    bool assist_reply_audio;  /* speak the answer (TTS) through the speaker */
+    int assist_mic_gain;      /* microphone gain in dB, 0..42 */
+    int assist_max_listen_sec; /* hard stop of a recording, 3..30 s */
+
+    /* HLK-LD2410 presence radar on UART1. */
+    bool radar_enabled;
+    int radar_tx_pin;      /* -1 = not wired */
+    int radar_rx_pin;
+    int radar_baud;        /* 256000 by default */
+    bool radar_wake;       /* wake the display on approach */
+    int radar_wake_cm;     /* approach distance */
+    bool radar_keep_awake; /* stay on while someone is there */
 } runtime_settings_t;
 
 void runtime_settings_set_defaults(runtime_settings_t *out);

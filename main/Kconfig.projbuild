@@ -44,6 +44,15 @@ config APP_PANEL_BOARD_WAVESHARE_43
     help
         Sub-variant of the 7B build for the Waveshare 4.3" board.
 
+config APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    bool "Waveshare ESP32-P4-ETH + 10.1-DSI-TOUCH-A (1280x800, Ethernet)"
+    default n
+    depends on APP_PANEL_VARIANT_7INCH_1024 && !APP_PANEL_BOARD_WAVESHARE_43
+    help
+        Sub-variant of the 7B build for the ESP32-P4-POE-ETH-KIT-B: 10.1"
+        800x1280 DSI panel (Nano BSP), ES8311 audio and IP101 Ethernet
+        instead of Wi-Fi. Flash layout compatible with ESPHome.
+
 endmenu
 
 menu "Local Camera (MIPI-CSI)"

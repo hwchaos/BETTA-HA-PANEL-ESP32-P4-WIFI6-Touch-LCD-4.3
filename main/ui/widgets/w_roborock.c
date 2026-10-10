@@ -24,6 +24,7 @@
 #include "freertos/semphr.h"
 
 #include "ha/ha_client.h"
+#include "ha/ha_model.h"
 #include "ha/ha_cover_fetcher.h"
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/theme/theme_default.h"
@@ -163,6 +164,10 @@ typedef struct w_rr_ctx {
 
     bool visible;
     bool destroyed;
+    /* Dreame/Mova (dreame_vacuum integration): rooms come from the entity's
+     * "rooms" attribute and segment cleaning uses dreame_vacuum.vacuum_clean_segment
+     * instead of the Roborock services. */
+    bool dreame;
 } w_rr_ctx_t;
 
 static int64_t w_rr_now_ms(void)
@@ -1614,7 +1619,7 @@ static void w_rr_drain_pending_position(w_rr_ctx_t *ctx)
 
 static void w_rr_request_position(w_rr_ctx_t *ctx)
 {
-    if (ctx == NULL || ctx->entity_id[0] == '\0' || ctx->position_fetching) {
+    if (ctx == NULL || ctx->entity_id[0] == '\0' || ctx->position_fetching || ctx->dreame) {
         return;
     }
     if (!ha_client_is_connected() || !ha_client_is_initial_sync_done()) {
@@ -1646,6 +1651,72 @@ static void w_rr_request_position(w_rr_ctx_t *ctx)
     }
 }
 
+static void w_rr_drain_pending_rooms(w_rr_ctx_t *ctx);
+
+/* Dreame: stage the room list from the vacuum's attributes, as if a
+ * roborock.get_maps response had arrived, then apply it right away. */
+static void w_rr_load_rooms_from_attrs(w_rr_ctx_t *ctx)
+{
+    ha_state_t *state = w_rr_calloc(1, sizeof(*state));
+    w_rr_room_t *parsed = w_rr_calloc(W_RR_MAX_ROOMS, sizeof(*parsed));
+    if (state == NULL || parsed == NULL) {
+        free(state);
+        free(parsed);
+        return;
+    }
+
+    size_t parsed_count = 0;
+    char active_map_name[APP_MAX_NAME_LEN] = {0};
+    if (ha_model_get_state(ctx->entity_id, state)) {
+        cJSON *attrs = cJSON_Parse(state->attributes_json);
+        if (cJSON_IsObject(attrs)) {
+            cJSON *map_name = cJSON_GetObjectItemCaseSensitive(attrs, "selected_map");
+            if (cJSON_IsString(map_name) && map_name->valuestring != NULL) {
+                snprintf(active_map_name, sizeof(active_map_name), "%s", map_name->valuestring);
+            }
+            cJSON *rooms = cJSON_GetObjectItemCaseSensitive(attrs, "rooms");
+            cJSON *room = NULL;
+            cJSON_ArrayForEach(room, rooms)
+            {
+                if (parsed_count >= W_RR_MAX_ROOMS) {
+                    break;
+                }
+                cJSON *id = cJSON_GetObjectItemCaseSensitive(room, "id");
+                cJSON *name = cJSON_GetObjectItemCaseSensitive(room, "name");
+                if (!cJSON_IsString(id) || !cJSON_IsString(name) || id->valuestring == NULL ||
+                    name->valuestring == NULL) {
+                    continue;
+                }
+                w_rr_room_t *dst = &parsed[parsed_count++];
+                snprintf(dst->segment_id, sizeof(dst->segment_id), "%s", id->valuestring);
+                snprintf(dst->name, sizeof(dst->name), "%s", name->valuestring);
+            }
+        }
+        cJSON_Delete(attrs);
+    }
+    free(state);
+
+    if (parsed_count > 1) {
+        qsort(parsed, parsed_count, sizeof(parsed[0]), w_rr_room_cmp);
+    }
+
+    xSemaphoreTake(ctx->staging_mutex, portMAX_DELAY);
+    if (!ctx->destroyed) {
+        if (parsed_count > 0) {
+            memcpy(ctx->pending_rooms, parsed, parsed_count * sizeof(parsed[0]));
+        }
+        ctx->pending_room_count = parsed_count;
+        snprintf(ctx->pending_active_map_name, sizeof(ctx->pending_active_map_name), "%s", active_map_name);
+        ctx->pending_failure = (parsed_count == 0);
+        ctx->pending_ready = true;
+    }
+    xSemaphoreGive(ctx->staging_mutex);
+    free(parsed);
+
+    ctx->rooms_fetching = true;
+    w_rr_drain_pending_rooms(ctx);
+}
+
 static void w_rr_request_rooms(w_rr_ctx_t *ctx)
 {
     if (ctx == NULL || ctx->entity_id[0] == '\0') {
@@ -1666,6 +1737,14 @@ static void w_rr_request_rooms(w_rr_ctx_t *ctx)
     }
     if (!ha_client_is_connected() || !ha_client_is_initial_sync_done()) {
         ctx->popup_room_request_pending = true;
+        return;
+    }
+
+    if (ctx->dreame) {
+        ctx->popup_room_request_pending = false;
+        ctx->room_load_failed = false;
+        ctx->last_room_fetch_ms = now_ms;
+        w_rr_load_rooms_from_attrs(ctx);
         return;
     }
 
@@ -2324,11 +2403,17 @@ static void w_rr_popup_clean_event_cb(lv_event_t *event)
     }
 
     char payload[512];
-    snprintf(payload, sizeof(payload),
-        "{\"entity_id\":\"%s\",\"command\":\"app_segment_clean\",\"params\":[{\"segments\":[%s],\"repeat\":%d}]}",
-        ctx->entity_id, segments, ctx->repeat_count);
-
-    esp_err_t err = ha_client_call_service("vacuum", "send_command", payload);
+    esp_err_t err;
+    if (ctx->dreame) {
+        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\",\"segments\":[%s],\"repeats\":%d}",
+            ctx->entity_id, segments, ctx->repeat_count);
+        err = ha_client_call_service("dreame_vacuum", "vacuum_clean_segment", payload);
+    } else {
+        snprintf(payload, sizeof(payload),
+            "{\"entity_id\":\"%s\",\"command\":\"app_segment_clean\",\"params\":[{\"segments\":[%s],\"repeat\":%d}]}",
+            ctx->entity_id, segments, ctx->repeat_count);
+        err = ha_client_call_service("vacuum", "send_command", payload);
+    }
     if (err != ESP_OK) {
         ESP_LOGW(W_RR_TAG, "segment clean failed (%s): %s", ctx->entity_id, esp_err_to_name(err));
         if (ctx->popup_status_label != NULL) {
@@ -2551,6 +2636,14 @@ static void w_rr_apply_primary_state(w_rr_ctx_t *ctx, const ha_state_t *state)
 
     cJSON *attrs = cJSON_Parse(state->attributes_json);
     if (cJSON_IsObject(attrs)) {
+        /* Dreame: a "rooms" list (compacted by ha_client.c) or its own
+         * suction level list in the attributes. */
+        const bool was_dreame = ctx->dreame;
+        ctx->dreame = cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(attrs, "rooms")) ||
+                      cJSON_GetObjectItemCaseSensitive(attrs, "suction_level_list") != NULL;
+        if (ctx->dreame && (!was_dreame || ctx->room_count == 0)) {
+            ctx->popup_room_request_pending = true;
+        }
         cJSON *battery_level = cJSON_GetObjectItemCaseSensitive(attrs, "battery_level");
         if (!cJSON_IsNumber(battery_level)) {
             battery_level = cJSON_GetObjectItemCaseSensitive(attrs, "battery");

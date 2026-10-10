@@ -8,10 +8,15 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "radar/ld2410.h"
+#include "esp_partition.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "app_config.h"
 #include "ha/ha_client.h"
 #include "ha/ha_model.h"
+#include "ui/ui_mdi_icon.h"
 
 #define API_ENTITIES_MAX_ITEMS_DEFAULT 128U
 #define API_ENTITIES_MAX_ITEMS_MIN 8U
@@ -173,4 +178,210 @@ esp_err_t api_light_entities_delete_handler(httpd_req_t *req)
 
     set_json_headers(req);
     return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+/* GET /api/mdi/icons?q=desk&limit=40 -> {"items":["desk","desk-lamp",...]}
+ * Name search over the embedded Material Design Icons for the editor's icon
+ * picker (prefix matches first). */
+esp_err_t api_mdi_icons_get_handler(httpd_req_t *req)
+{
+    char query[48] = {0};
+    char limit_raw[8] = {0};
+    int query_len = httpd_req_get_url_query_len(req);
+    if (query_len > 0) {
+        char *qs = (char *)malloc((size_t)query_len + 1U);
+        if (qs != NULL) {
+            if (httpd_req_get_url_query_str(req, qs, (size_t)query_len + 1U) == ESP_OK) {
+                httpd_query_key_value(qs, "q", query, sizeof(query));
+                httpd_query_key_value(qs, "limit", limit_raw, sizeof(limit_raw));
+            }
+            free(qs);
+        }
+    }
+    size_t limit = (size_t)strtoul(limit_raw, NULL, 10);
+    if (limit == 0 || limit > 100) {
+        limit = 40;
+    }
+
+    const char *names[100];
+    const size_t count = ui_mdi_icon_search(query, names, limit);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *items = cJSON_AddArrayToObject(root, "items");
+    for (size_t i = 0; i < count; i++) {
+        cJSON_AddItemToArray(items, cJSON_CreateString(names[i]));
+    }
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    set_json_headers(req);
+    esp_err_t err = httpd_resp_sendstr(req, payload);
+    cJSON_free(payload);
+    return err;
+}
+
+/* GET /api/assist/pipelines -> {"pipelines":[{"id","name","language"}],"preferred":"..."}
+ * Asks Home Assistant over the websocket and waits for the answer. */
+static SemaphoreHandle_t s_pipelines_done;
+static uint32_t s_pipelines_gen;
+static char *s_pipelines_json;
+
+static void api_assist_pipelines_cb(bool success, cJSON *result, void *user)
+{
+    if ((uint32_t)(uintptr_t)user != s_pipelines_gen) {
+        return; /* answer of a request that already timed out */
+    }
+    cJSON *out = cJSON_CreateObject();
+    cJSON *list = cJSON_AddArrayToObject(out, "pipelines");
+    cJSON *pipelines = success ? cJSON_GetObjectItemCaseSensitive(result, "pipelines") : NULL;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, pipelines)
+    {
+        cJSON *entry = cJSON_CreateObject();
+        const char *keys[] = {"id", "name", "language", "stt_engine", "tts_engine"};
+        for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+            cJSON *v = cJSON_GetObjectItemCaseSensitive(item, keys[i]);
+            cJSON_AddStringToObject(entry, keys[i], cJSON_IsString(v) ? v->valuestring : "");
+        }
+        cJSON_AddItemToArray(list, entry);
+    }
+    cJSON *preferred = success ? cJSON_GetObjectItemCaseSensitive(result, "preferred_pipeline") : NULL;
+    cJSON_AddStringToObject(out, "preferred", cJSON_IsString(preferred) ? preferred->valuestring : "");
+    cJSON_AddBoolToObject(out, "ok", success);
+    s_pipelines_json = cJSON_PrintUnformatted(out);
+    cJSON_Delete(out);
+    xSemaphoreGive(s_pipelines_done);
+}
+
+esp_err_t api_assist_pipelines_get_handler(httpd_req_t *req)
+{
+    if (s_pipelines_done == NULL) {
+        s_pipelines_done = xSemaphoreCreateBinary();
+        if (s_pipelines_done == NULL) {
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+        }
+    }
+    (void)xSemaphoreTake(s_pipelines_done, 0);
+    if (s_pipelines_json != NULL) {
+        cJSON_free(s_pipelines_json);
+        s_pipelines_json = NULL;
+    }
+    const uint32_t gen = ++s_pipelines_gen;
+    esp_err_t err = ha_client_list_assist_pipelines(api_assist_pipelines_cb, (void *)(uintptr_t)gen);
+    const char *fallback = "{\"pipelines\":[],\"preferred\":\"\",\"ok\":false}";
+    set_json_headers(req);
+    if (err != ESP_OK || xSemaphoreTake(s_pipelines_done, pdMS_TO_TICKS(5000)) != pdTRUE || s_pipelines_json == NULL) {
+        s_pipelines_gen++;
+        return httpd_resp_sendstr(req, fallback);
+    }
+    err = httpd_resp_sendstr(req, s_pipelines_json);
+    cJSON_free(s_pipelines_json);
+    s_pipelines_json = NULL;
+    return err;
+}
+
+/* GET /api/debug/storage?offset=0&len=65536 -> raw bytes of the "storage"
+ * (LittleFS) partition. Read-only; used to recover data from blocks the file
+ * system has already released. */
+esp_err_t api_debug_storage_get_handler(httpd_req_t *req)
+{
+    const esp_partition_t *part =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
+    if (part == NULL) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no storage partition");
+    }
+    char qs[64] = {0};
+    char raw[16] = {0};
+    size_t offset = 0;
+    size_t len = 65536;
+    if (httpd_req_get_url_query_str(req, qs, sizeof(qs)) == ESP_OK) {
+        if (httpd_query_key_value(qs, "offset", raw, sizeof(raw)) == ESP_OK) {
+            offset = (size_t)strtoul(raw, NULL, 0);
+        }
+        if (httpd_query_key_value(qs, "len", raw, sizeof(raw)) == ESP_OK) {
+            len = (size_t)strtoul(raw, NULL, 0);
+        }
+    }
+    if (offset >= part->size) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "offset out of range");
+    }
+    if (len == 0 || len > 65536) {
+        len = 65536;
+    }
+    if (offset + len > part->size) {
+        len = part->size - offset;
+    }
+    uint8_t *buf = malloc(4096);
+    if (buf == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    char size_hdr[16];
+    snprintf(size_hdr, sizeof(size_hdr), "%u", (unsigned)part->size);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "X-Partition-Size", size_hdr);
+    esp_err_t err = ESP_OK;
+    for (size_t done = 0; done < len && err == ESP_OK; done += 4096) {
+        const size_t n = (len - done) > 4096 ? 4096 : (len - done);
+        err = esp_partition_read(part, offset + done, buf, n);
+        if (err == ESP_OK) {
+            err = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)n);
+        }
+    }
+    free(buf);
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, NULL, 0);
+    }
+    return err;
+}
+
+/* GET /api/radar -> live state of the LD2410 presence radar. */
+esp_err_t api_radar_get_handler(httpd_req_t *req)
+{
+    char query[32] = {0};
+    char selftest_msg[96] = {0};
+    bool selftest = false;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK && strstr(query, "selftest=1") != NULL) {
+        selftest = true;
+        (void)ld2410_self_test(selftest_msg, sizeof(selftest_msg));
+    }
+    ld2410_status_t st;
+    ld2410_get_status(&st);
+    static const char *const targets[] = {"none", "moving", "static", "both"};
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "enabled", st.enabled);
+    cJSON_AddBoolToObject(root, "running", st.running);
+    cJSON_AddBoolToObject(root, "detected", st.detected);
+    cJSON_AddStringToObject(root, "error", st.error);
+    cJSON_AddNumberToObject(root, "frames", st.frames);
+    cJSON_AddNumberToObject(root, "bad_frames", st.bad_frames);
+    cJSON_AddNumberToObject(root, "rx_bytes", st.rx_bytes);
+    char hex[3 * 16 + 1] = {0};
+    for (int i = 0; i < st.first_count; i++) {
+        snprintf(hex + i * 3, sizeof(hex) - (size_t)i * 3, "%02X ", st.first_bytes[i]);
+    }
+    cJSON_AddStringToObject(root, "first_bytes", hex);
+    if (st.last_frame_age_ms != UINT32_MAX) {
+        cJSON_AddNumberToObject(root, "last_frame_age_ms", st.last_frame_age_ms);
+    }
+    cJSON_AddStringToObject(root, "target", targets[st.target & 3]);
+    cJSON_AddNumberToObject(root, "moving_cm", st.moving_cm);
+    cJSON_AddNumberToObject(root, "moving_energy", st.moving_energy);
+    cJSON_AddNumberToObject(root, "static_cm", st.static_cm);
+    cJSON_AddNumberToObject(root, "static_energy", st.static_energy);
+    cJSON_AddNumberToObject(root, "detect_cm", st.detect_cm);
+    cJSON_AddBoolToObject(root, "near", st.near);
+    if (selftest) {
+        cJSON_AddStringToObject(root, "selftest", selftest_msg);
+    }
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    set_json_headers(req);
+    esp_err_t err = httpd_resp_sendstr(req, payload);
+    cJSON_free(payload);
+    return err;
 }

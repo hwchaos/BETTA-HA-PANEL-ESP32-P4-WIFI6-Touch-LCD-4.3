@@ -39,6 +39,45 @@ esp_err_t ha_client_call_service(const char *domain, const char *service, const 
  * call back into ha_client directly and MUST NOT touch LVGL without proper
  * locking — it runs on the HA WS RX task. Typical usage: marshal work into
  * lv_async_call(). */
+/* History of one entity over the last `hours`, for the sensor history popup.
+ * `statistics` true asks recorder/statistics_during_period (5-minute or hourly
+ * mean/min/max, compact; only for entities with a state_class), false asks
+ * history/history_during_period (raw states, minimal response). The callback
+ * gets HA's "result" object: {entity_id: [ {...}, ... ]}. */
+/* ---- Assist (voice) ------------------------------------------------------
+ * Pipeline events ("run-start", "stt-end", "intent-end", "tts-end", "run-end",
+ * "error") are passed to the callback from the WS receive task; `event` is
+ * only valid during the call. A failed start is reported as an "error" event. */
+typedef void (*ha_client_event_cb_t)(cJSON *event, void *user);
+
+/* Starts assist_pipeline/run from speech to speech (STT -> intent -> TTS).
+ * `pipeline_id` NULL/"" uses the preferred pipeline. Only one run at a time;
+ * a new run replaces the previous one. */
+/* Keeps a WS subscription ({"type": type}) alive across re-logins; its events
+ * are passed to `cb` from the WS receive task. One entry per type. */
+esp_err_t ha_client_ws_subscribe(const char *type, ha_client_event_cb_t cb, void *user);
+
+esp_err_t ha_client_assist_run(const char *pipeline_id, uint32_t sample_rate, ha_client_event_cb_t cb, void *user);
+
+/* Stops forwarding events of the current run. */
+void ha_client_assist_detach(void);
+
+/* Raw binary frame on the HA websocket (Assist audio). */
+esp_err_t ha_client_send_binary(const uint8_t *data, size_t len);
+
+/* "http://host:8123" of the connected Home Assistant (no trailing slash). */
+bool ha_client_get_base_url(char *out, size_t out_len);
+
+/* assist_pipeline/pipeline/list; the callback gets {"pipelines":[...],
+ * "preferred_pipeline":"..."}. */
+esp_err_t ha_client_list_assist_pipelines(ha_client_response_cb_t cb, void *user);
+
+/* Energy page shown: refresh the HA energy totals now if they are older than a minute. */
+void ha_client_energy_page_shown(void);
+
+esp_err_t ha_client_request_history(
+    const char *entity_id, int hours, bool statistics, ha_client_response_cb_t cb, void *user);
+
 esp_err_t ha_client_call_service_with_response(
     const char *domain,
     const char *service,
@@ -53,6 +92,9 @@ esp_err_t ha_client_call_service_with_response(
  * from any task; never invokes the callback. */
 void ha_client_cancel_pending_responses_for_user(void *user);
 esp_err_t ha_client_notify_layout_updated(void);
+/* Entities the UI shows outside the layout (e.g. top bar waste chips); they
+ * are subscribed together with the layout's entities. */
+void ha_client_set_extra_entities(size_t first_slot, const char *const *entity_ids, size_t count);
 esp_err_t ha_client_request_energy_refresh(void);
 esp_err_t ha_client_get_domain_entities_json(const char *domain, const char *search, bool refresh, char **out_json);
 esp_err_t ha_client_cancel_domain_entities(const char *domain, const char *search);

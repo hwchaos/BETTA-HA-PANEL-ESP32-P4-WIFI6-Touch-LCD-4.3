@@ -37,6 +37,8 @@ esp_err_t api_version_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "screen_h", APP_SCREEN_HEIGHT);
     cJSON_AddNumberToObject(root, "canvas_w", APP_CONTENT_BOX_WIDTH);
     cJSON_AddNumberToObject(root, "canvas_h", APP_CONTENT_BOX_HEIGHT);
+    /* Widget size limits follow the panel class, not the (nav dependent) canvas. */
+    cJSON_AddBoolToObject(root, "compact_layout", APP_LAYOUT_COMPACT ? true : false);
 
     /* Feature flag so the web UI can hide the built-in camera tab when the
      * feature is compiled out of this build. */

@@ -29,6 +29,7 @@
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_memory.h"
+#include "ui/widgets/w_widget_util.h"
 #include "ui/ui_value_anim.h"
 #include "ui/theme/theme_default.h"
 
@@ -1588,7 +1589,7 @@ esp_err_t w_graph_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget
     ctx->range_max_scaled = 0;
     ctx->line_color = lv_color_hex(APP_UI_COLOR_NAV_TAB_ACTIVE);
     lv_color_t parsed_color = lv_color_hex(0);
-    if (graph_parse_hex_color(def->graph_line_color, &parsed_color)) {
+    if (graph_parse_hex_color(def->graph_line_color, &parsed_color) && !w_color_is_editor_default(parsed_color)) {
         ctx->line_color = parsed_color;
     }
     ctx->unavailable = true;

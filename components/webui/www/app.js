@@ -14,6 +14,12 @@ const DEFAULT_BUTTON_MODE = "auto";
 const DEFAULT_BUTTON_ACCENT_COLOR = "#6fe8ff";
 const DEFAULT_SLIDER_ACCENT_COLOR = "#6fe8ff";
 const DEFAULT_GRAPH_LINE_COLOR = "#6fe8ff";
+/* Tile types whose icon can be chosen in the editor (see ui_mdi_icon.c and
+ * widget_apply_custom_icon() in ui_widget_factory.c). */
+const ICON_WIDGET_TYPES = new Set([
+  "button", "sensor", "light_tile", "cover_tile", "cover", "fan", "lock", "heating_tile",
+  "binary_sensor", "presence", "scene_tile", "person_tile",
+]);
 const DEFAULT_GRAPH_TIME_WINDOW_MIN = 120;
 const GRAPH_POINTS_MIN = 16;
 const GRAPH_POINTS_MAX = 64;
@@ -39,7 +45,9 @@ const RADIO_MAX_PREVIEW_TILES = 9;
 const LOG_VERBOSITY_LEVELS = new Set([0, 1, 2, 3, 4, 5]);
 const ENERGY_SOURCE_HA = "ha_energy";
 const ENERGY_SOURCE_MANUAL = "manual_live";
-const ENERGY_SOURCES = new Set([ENERGY_SOURCE_HA, ENERGY_SOURCE_MANUAL]);
+/* HA energy totals plus a second, swipeable view with live power sensors. */
+const ENERGY_SOURCE_HA_LIVE = "ha_energy_live";
+const ENERGY_SOURCES = new Set([ENERGY_SOURCE_HA, ENERGY_SOURCE_MANUAL, ENERGY_SOURCE_HA_LIVE]);
 const ENERGY_PREVIEW_COLORS = {
   grid: "#039bef",
   solar: "#ff9800",
@@ -47,7 +55,10 @@ const ENERGY_PREVIEW_COLORS = {
   idle: "#435566",
 };
 
+let PANEL_COMPACT_LAYOUT = null;
+
 function isCompactCanvas() {
+  if (typeof PANEL_COMPACT_LAYOUT === "boolean") return PANEL_COMPACT_LAYOUT;
   return CANVAS_WIDTH <= 480 || CANVAS_HEIGHT <= 380;
 }
 
@@ -332,20 +343,15 @@ const ENTITY_PICKER_CONFIGS = {
 const SETTINGS_NAV_ITEMS = [
   { sectionId: "settingsWifiSection", headingId: "settingsWifiHeading", labelKey: "settings.wifi.heading" },
   { sectionId: "settingsHaSection", headingId: "settingsHaHeading", labelKey: "settings.ha.heading" },
-  { sectionId: "settingsXiaozhiSection", headingId: "settingsXiaozhiHeading", labelKey: "settings.xiaozhi.heading" },
-  { sectionId: "settingsCamerasSection", headingId: "settingsCamerasHeading", labelKey: "settings.cameras.heading" },
+  { sectionId: "settingsAssistSection", headingId: "settingsAssistHeading", labelKey: "settings.assist.heading" },
   { sectionId: "settingsLocalCamSection", headingId: "settingsLocalCamHeading", labelKey: "settings.localCam.heading" },
-  { sectionId: "settingsTimeSection", headingId: "settingsTimeHeading", labelKey: "settings.time.heading" },
   { sectionId: "settingsDisplaySection", headingId: "settingsDisplayHeading", labelKey: "settings.display.heading" },
-  { sectionId: "settingsSdSection", headingId: "settingsSdHeading", labelKey: "settings.sd.heading" },
+  { sectionId: "settingsStatusbarSection", headingId: "settingsStatusbarHeading", labelKey: "settings.statusbar.heading" },
+  { sectionId: "settingsRadarSection", headingId: "settingsRadarHeading", labelKey: "settings.radar.heading" },
   { sectionId: "settingsPagesSection", headingId: "settingsPagesHeading", labelKey: "settings.pages.heading" },
-  { sectionId: "settingsMqttSection", headingId: "settingsMqttHeading", labelKey: "settings.mqtt.heading" },
-  { sectionId: "settingsUiSection", headingId: "settingsUiHeading", labelKey: "settings.ui.heading" },
   { sectionId: "settingsThemeSection", headingId: "settingsThemeHeading", labelKey: "settings.theme.heading" },
-  { sectionId: "settingsApSection", headingId: "settingsApHeading", labelKey: "settings.ap.heading" },
   { sectionId: "settingsOtaSection", headingId: "settingsOtaHeading", labelKey: "settings.ota.heading" },
   { sectionId: "settingsSystemSection", headingId: "settingsSystemHeading", labelKey: "settings.system.heading" },
-  { sectionId: "settingsBackupSection", headingId: "settingsBackupHeading", labelKey: "settings.backup.heading" },
   { sectionId: "settingsDiagnosticsSection", headingId: "settingsDiagnosticsHeading", labelKey: "settings.diagnostics.heading" },
   { sectionId: "settingsLogsSection", headingId: "settingsLogsHeading", labelKey: "settings.logs.heading" },
 ];
@@ -616,6 +622,9 @@ const WEB_I18N_BUILTIN = {
     "layout.inspector.secondary_entity_roborock": "Map entity (image, optional)",
     "layout.inspector.button_mode": "Button mode",
     "layout.inspector.button_accent_color": "Button accent color",
+    "layout.inspector.icon": "Icon",
+    "layout.inspector.icon_placeholder": "default (e.g. mdi:desk)",
+    "layout.inspector.sensor_history_popup": "History popup on tap",
     "layout.inspector.button_style": "Button style",
     "layout.inspector.slider_entity_domain": "Slider entity type",
     "layout.inspector.sensor_value_color": "Value color (empty = auto)",
@@ -832,6 +841,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token_placeholder": "Leave empty to keep the stored token",
     "settings.ha.rest_fallback": "Enable HA REST fallback (Default: Off, WS-only preferred)",
     "settings.xiaozhi.heading": "Xiaozhi AI",
+    "settings.assist.heading": "Voice assistant (HA Assist)",
     "settings.xiaozhi.enabled": "Enable Xiaozhi AI voice assistant",
     "settings.xiaozhi.cloud_activation": "Cloud activation (pairing code)",
     "settings.xiaozhi.server": "WebSocket URL (ws:// or wss://)",
@@ -1089,6 +1099,8 @@ const WEB_I18N_BUILTIN = {
     "wifi.scan.option_select": "Select network ({count} found)",
     "settings.time.info": "Applied after reboot. Time sync starts when Wi-Fi is connected.",
     "settings.display.heading": "Display / Screensaver",
+    "settings.statusbar.heading": "Status bar",
+    "settings.radar.heading": "Presence sensor (LD2410)",
     "settings.display.info": "Brightness and colors apply immediately. Wallpaper upload is stored on the device.",
     "settings.display.brightness": "Brightness (%)",
     "settings.display.screensaver_enabled": "Screensaver",
@@ -1543,6 +1555,9 @@ const WEB_I18N_BUILTIN = {
     "layout.inspector.secondary_entity_roborock": "Karten-Entitaet (image, optional)",
     "layout.inspector.button_mode": "Button Modus",
     "layout.inspector.button_accent_color": "Button Akzentfarbe",
+    "layout.inspector.icon": "Icon",
+    "layout.inspector.icon_placeholder": "Standard (z. B. mdi:desk)",
+    "layout.inspector.sensor_history_popup": "Verlauf-Popup beim Antippen",
     "layout.inspector.button_style": "Button-Stil",
     "layout.inspector.slider_entity_domain": "Slider Entitaetstyp",
     "layout.inspector.slider_direction": "Slider Richtung",
@@ -1657,6 +1672,9 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token_placeholder": "Leer lassen, um vorhandenen Token zu behalten",
     "settings.ha.rest_fallback": "HA REST Fallback aktivieren (Standard: Aus, WS bevorzugt)",
     "settings.xiaozhi.heading": "Xiaozhi KI",
+    "settings.assist.heading": "Sprachassistent (HA Assist)",
+    "settings.statusbar.heading": "Statusleiste",
+    "settings.radar.heading": "Präsenzsensor (LD2410)",
     "settings.xiaozhi.enabled": "Xiaozhi-KI-Sprachassistent aktivieren",
     "settings.xiaozhi.cloud_activation": "Cloud-Aktivierung (Kopplungscode)",
     "settings.xiaozhi.server": "WebSocket-URL (ws:// oder wss://)",
@@ -4316,6 +4334,10 @@ const el = {
   fButtonMode: document.getElementById("fButtonMode"),
   fSliderEntityDomain: document.getElementById("fSliderEntityDomain"),
   fButtonAccentColor: document.getElementById("fButtonAccentColor"),
+  fIconWrap: document.getElementById("fIconWrap"),
+  fIcon: document.getElementById("fIcon"),
+  fIconPreview: document.getElementById("fIconPreview"),
+  mdiIconOptions: document.getElementById("mdiIconOptions"),
   fButtonStyle: document.getElementById("fButtonStyle"),
   sliderOptions: document.getElementById("sliderOptions"),
   fSliderDirection: document.getElementById("fSliderDirection"),
@@ -4366,6 +4388,7 @@ const el = {
   fClockShowDate: document.getElementById("fClockShowDate"),
   sensorOptions: document.getElementById("sensorOptions"),
   fSensorValueColor: document.getElementById("fSensorValueColor"),
+  fSensorHistoryPopup: document.getElementById("fSensorHistoryPopup"),
   tileLookGroup: document.getElementById("tileLookGroup"),
   fTilePreset: document.getElementById("fTilePreset"),
   fTileBgColor: document.getElementById("fTileBgColor"),
@@ -5952,7 +5975,9 @@ async function loadAppVersion() {
     editor.appProject = typeof payload?.project === "string" ? payload.project : "";
     editor.appScreenW = Number(payload?.screen_w) || 0;
     editor.appScreenH = Number(payload?.screen_h) || 0;
+    editor.featureLocalCamera = payload?.feature_local_camera === true;
     applyCanvasGeometry(payload);
+    applyLocalCameraFeature();
   } catch (_) {
     editor.appVersion = "";
     editor.appProject = "";
@@ -6100,6 +6125,7 @@ function renderHaDiagnosticsBanner() {
 
 function applyCanvasGeometry(payload) {
   if (!payload || typeof payload !== "object") return;
+  if (typeof payload.compact_layout === "boolean") PANEL_COMPACT_LAYOUT = payload.compact_layout;
   const w = Number(payload.canvas_w);
   const h = Number(payload.canvas_h);
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
@@ -6299,6 +6325,8 @@ function applyWebTranslations() {
   setTextById("fSecondaryEntityLabel", "layout.inspector.secondary_entity");
   setTextById("fButtonModeLabel", "layout.inspector.button_mode");
   setTextById("fButtonAccentColorLabel", "layout.inspector.button_accent_color");
+  setTextById("fIconLabel", "layout.inspector.icon");
+  if (el.fIcon) el.fIcon.placeholder = t("layout.inspector.icon_placeholder");
   setTextById("fButtonStyleLabel", "layout.inspector.button_style");
   setTextById("fBinaryShowTitleLabel", "layout.inspector.binary_show_title");
   setTextById("fBinaryColorOnLabel", "layout.inspector.binary_color_on");
@@ -6324,6 +6352,7 @@ function applyWebTranslations() {
   setTextById("fClockShowSecondsLabel", "layout.inspector.clock_show_seconds");
   setTextById("fClockShowDateLabel", "layout.inspector.clock_show_date");
   setTextById("fSensorValueColorLabel", "layout.inspector.sensor_value_color");
+  setTextById("fSensorHistoryPopupLabel", "layout.inspector.sensor_history_popup");
   setTextById("inspectorGroupTileLookLabel", "layout.tile_look.group");
   setTextById("fTilePresetLabel", "layout.tile_look.preset");
   setTextById("fTileBgColorLabel", "layout.tile_look.bg_color");
@@ -6472,6 +6501,9 @@ function applyWebTranslations() {
   setTextById("settingsHaRestEnabledLabel", "settings.ha.rest_fallback");
 
   setTextById("settingsXiaozhiHeading", "settings.xiaozhi.heading");
+  setTextById("settingsAssistHeading", "settings.assist.heading");
+  setTextById("settingsStatusbarHeading", "settings.statusbar.heading");
+  setTextById("settingsRadarHeading", "settings.radar.heading");
   setTextById("settingsXiaozhiEnabledLabel", "settings.xiaozhi.enabled");
   setTextById("settingsXiaozhiServerLabel", "settings.xiaozhi.server");
   setTextById("settingsXiaozhiOtaUrlLabel", "settings.xiaozhi.ota_url");
@@ -6995,7 +7027,12 @@ function setActiveSettingsSection(sectionId) {
   } else {
     clearDiagnosticsPoll();
   }
-  if (item.sectionId === "settingsCamerasSection" && sectionChanged) {
+  if (item.sectionId === "settingsRadarSection") {
+    startRadarPoll();
+  } else {
+    stopRadarPoll();
+  }
+  if (item.sectionId === "settingsStatusbarSection" && sectionChanged) {
     void loadCameras();
   }
   if (item.sectionId === "settingsLocalCamSection" && sectionChanged) {
@@ -7586,6 +7623,7 @@ function renderSettings() {
   if (el.settingsHaRestEnabled) {
     el.settingsHaRestEnabled.checked = ha.rest_enabled === true;
   }
+  applyAssistSettings(settings.assist || {});
 
   const xiaozhi = settings.xiaozhi || {};
   if (el.settingsXiaozhiEnabled) {
@@ -7827,6 +7865,8 @@ function renderSettings() {
   if (el.settingsTopbarShowGear) {
     el.settingsTopbarShowGear.checked = display.topbar_show_gear !== false;
   }
+  const navPosition = document.getElementById("settingsNavPosition");
+  if (navPosition) navPosition.value = display.nav_position === "left" ? "left" : "bottom";
   if (el.settingsTopbarShowStatus) {
     el.settingsTopbarShowStatus.checked = display.topbar_show_status !== false;
   }
@@ -8130,6 +8170,17 @@ async function loadSettings(silent = false) {
     editor.settings = await apiGet("/api/settings");
     await loadI18nLanguage(editor.settings?.ui?.language || DEFAULT_UI_LANGUAGE, true);
     renderSettings();
+    applyWasteSettings(editor.settings?.display?.waste);
+    applyAlertSettings(editor.settings?.display?.alerts);
+    applyRadarSettings(editor.settings?.radar);
+    applyTopbarArrangement(editor.settings?.display?.topbar_layout);
+    const dateFormat = document.getElementById("settingsTopbarDateFormat");
+    if (dateFormat) {
+      dateFormat.value = editor.settings?.display?.topbar_date_format || "WD, DD.MM.YYYY";
+      dateFormat.onchange = () => renderTopbarArrangement();
+      renderTopbarArrangement();
+    }
+    applyNetworkKind(editor.settings);
     if (!silent) {
       setStatus(t("status.settings_loaded"));
     }
@@ -8622,6 +8673,7 @@ async function saveSettings() {
       ws_url: haUrl,
       rest_enabled: haRestEnabled,
     },
+    assist: collectAssistPayload(),
     xiaozhi: {
       server: xiaozhiServer,
       ota_url: xiaozhiOtaUrl,
@@ -8698,7 +8750,19 @@ async function saveLocalCamera() {
   }
 }
 
+/* Builds without the MIPI camera have no /api/camera/* endpoints. */
+function applyLocalCameraFeature() {
+  const available = editor.featureLocalCamera === true;
+  document.querySelectorAll('[data-settings-section="settingsLocalCamSection"]').forEach((btn) => {
+    btn.classList.toggle("hidden", !available);
+  });
+  if (!available && editor.activeSettingsSection === "settingsLocalCamSection") {
+    setActiveSettingsSection("settingsHaSection");
+  }
+}
+
 async function loadLocalCameraStatus() {
+  if (editor.featureLocalCamera !== true) return;
   const statusEl = el.settingsLocalCamStatus;
   try {
     const data = await apiGet("/api/camera/status");
@@ -8724,6 +8788,7 @@ async function loadLocalCameraStatus() {
 }
 
 async function refreshLocalCameraPreview() {
+  if (editor.featureLocalCamera !== true) return;
   const img = el.settingsLocalCamSnapshot;
   const hint = el.settingsLocalCamSnapshotHint;
   if (!img) return;
@@ -9005,6 +9070,15 @@ function collectDisplayPayload() {
   if (el.settingsTopbarShowClock) display.topbar_show_clock = el.settingsTopbarShowClock.checked;
   if (el.settingsTopbarShowDate) display.topbar_show_date = el.settingsTopbarShowDate.checked;
   if (el.settingsTopbarShowGear) display.topbar_show_gear = el.settingsTopbarShowGear.checked;
+  const navPositionSelect = document.getElementById("settingsNavPosition");
+  if (navPositionSelect) display.nav_position = navPositionSelect.value === "left" ? "left" : "bottom";
+  const waste = collectWastePayload();
+  if (waste) display.waste = waste;
+  const alerts = collectAlertPayload();
+  if (alerts) display.alerts = alerts;
+  if (document.getElementById("topbarArrangeList")) display.topbar_layout = topbarArrangementSpec();
+  const dateFormatSelect = document.getElementById("settingsTopbarDateFormat");
+  if (dateFormatSelect) display.topbar_date_format = dateFormatSelect.value;
   if (el.settingsTopbarShowStatus) display.topbar_show_status = el.settingsTopbarShowStatus.checked;
   if (el.settingsTopbarIconText) display.topbar_icon_text = el.settingsTopbarIconText.checked;
   if (el.settingsTopbarCustomColors) display.topbar_custom_colors = el.settingsTopbarCustomColors.checked;
@@ -10080,6 +10154,442 @@ function collectMqttPayload() {
   }
   return mqtt;
 }
+
+/* ---- LD2410 presence radar ---- */
+let radarPollTimer = null;
+
+function applyRadarSettings(radar) {
+  const r = radar && typeof radar === "object" ? radar : {};
+  const byId = (id) => document.getElementById(id);
+  if (!byId("settingsRadarEnabled")) return;
+  byId("settingsRadarEnabled").checked = r.enabled === true;
+  byId("settingsRadarTx").value = Number.isFinite(r.tx_pin) ? r.tx_pin : -1;
+  byId("settingsRadarRx").value = Number.isFinite(r.rx_pin) ? r.rx_pin : -1;
+  byId("settingsRadarBaud").value = String(r.baud || 256000);
+  byId("settingsRadarWake").checked = r.wake !== false;
+  byId("settingsRadarWakeCm").value = String(r.wake_cm || 150);
+  byId("settingsRadarWakeCmValue").textContent = String(r.wake_cm || 150);
+  byId("settingsRadarKeepAwake").checked = r.keep_awake !== false;
+}
+
+function collectRadarPayload() {
+  const byId = (id) => document.getElementById(id);
+  const int = (id, fallback) => {
+    const n = parseInt(byId(id)?.value, 10);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  return {
+    enabled: byId("settingsRadarEnabled").checked,
+    tx_pin: int("settingsRadarTx", -1),
+    rx_pin: int("settingsRadarRx", -1),
+    baud: int("settingsRadarBaud", 256000),
+    wake: byId("settingsRadarWake").checked,
+    wake_cm: int("settingsRadarWakeCm", 150),
+    keep_awake: byId("settingsRadarKeepAwake").checked,
+  };
+}
+
+async function refreshRadarStatus() {
+  const dot = document.getElementById("radarStatusDot");
+  const text = document.getElementById("radarStatusText");
+  const detail = document.getElementById("radarStatusDetail");
+  if (!dot || !text) return;
+  try {
+    const st = await apiGet("/api/radar");
+    dot.className = "radar-dot";
+    const targetNames = { none: "niemand", moving: "Bewegung", static: "steht still", both: "Bewegung + still" };
+    if (!st.enabled) {
+      text.textContent = "Ausgeschaltet";
+      if (detail) detail.textContent = "";
+      return;
+    }
+    if (st.error) {
+      dot.classList.add("err");
+      text.textContent = `Fehler: ${st.error}`;
+    } else if (!st.detected) {
+      dot.classList.add("err");
+      text.textContent = st.frames > 0 ? "Keine Daten mehr vom Sensor" : "Kein LD2410 erkannt (keine Daten auf RX)";
+    } else {
+      dot.classList.add(st.near ? "near" : "ok");
+      text.textContent = `LD2410 erkannt – ${targetNames[st.target] || st.target}${st.near ? " (in Annäherungs-Distanz)" : ""}`;
+    }
+    if (detail) {
+      detail.textContent = [
+        `Bewegung: ${st.moving_cm} cm (Signal ${st.moving_energy})`,
+        `still: ${st.static_cm} cm (Signal ${st.static_energy})`,
+        `Frames: ${st.frames}${st.bad_frames ? `, fehlerhaft: ${st.bad_frames}` : ""}`,
+      ].join(" · ");
+    }
+  } catch (err) {
+    dot.className = "radar-dot err";
+    text.textContent = `Status nicht abrufbar: ${err.message}`;
+  }
+}
+
+function startRadarPoll() {
+  if (radarPollTimer) return;
+  void refreshRadarStatus();
+  radarPollTimer = window.setInterval(refreshRadarStatus, 2000);
+}
+
+function stopRadarPoll() {
+  if (!radarPollTimer) return;
+  window.clearInterval(radarPollTimer);
+  radarPollTimer = null;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const range = document.getElementById("settingsRadarWakeCm");
+  if (range) {
+    range.addEventListener("input", () => {
+      document.getElementById("settingsRadarWakeCmValue").textContent = range.value;
+    });
+  }
+  const selftest = document.getElementById("radarSelfTestBtn");
+  if (selftest) {
+    selftest.addEventListener("click", async () => {
+      const info = document.getElementById("radarInfo");
+      try {
+        if (info) info.textContent = "Selbsttest läuft…";
+        const st = await apiGet("/api/radar?selftest=1");
+        if (info) info.textContent = `Selbsttest (UART intern, ohne Sensor): ${st.selftest || "-"}`;
+      } catch (err) {
+        if (info) info.textContent = `Selbsttest fehlgeschlagen: ${err.message}`;
+      }
+    });
+  }
+  const apply = document.getElementById("applyRadarBtn");
+  if (apply) {
+    apply.addEventListener("click", async () => {
+      const info = document.getElementById("radarInfo");
+      try {
+        if (info) info.textContent = "Speichere…";
+        await putSettings({ radar: collectRadarPayload(), reboot: false });
+        await loadSettings(true);
+        if (info) info.textContent = "Gespeichert.";
+        void refreshRadarStatus();
+      } catch (err) {
+        if (info) info.textContent = `Fehler: ${err.message}`;
+      }
+    });
+  }
+});
+
+/* ---- Top bar arrangement ---- */
+const TOPBAR_ITEMS = [
+  { id: "date", label: "Datum", zone: "L" },
+  { id: "cameras", label: "Kameras", zone: "L" },
+  { id: "weather", label: "Wetter", zone: "L" },
+  { id: "waste", label: "Müll", zone: "L" },
+  { id: "clock", label: "Uhrzeit", zone: "C" },
+  { id: "alert", label: "Warnung", zone: "R" },
+  { id: "assist", label: "Mikrofon", zone: "R" },
+  { id: "gear", label: "Einstellungen", zone: "R" },
+  { id: "ha", label: "Home Assistant", zone: "R" },
+  { id: "network", label: "Netzwerk", zone: "R" },
+];
+const TOPBAR_ZONES = [
+  ["L", "Links"],
+  ["C", "Mitte"],
+  ["R", "Rechts"],
+  ["H", "Aus"],
+];
+let topbarArrangement = TOPBAR_ITEMS.map((it) => ({ id: it.id, zone: it.zone }));
+
+/* Same rules as the firmware (ui_topbar_format_date). */
+function formatTopbarDatePreview() {
+  const fmt = document.getElementById("settingsTopbarDateFormat")?.value || "WD, DD.MM.YYYY";
+  let out = fmt.replace("WD", "Sa").replace("YYYY", "2026").replace("DD", "24").replace("MM", "10");
+  if (!fmt.includes("YYYY") && fmt.includes(".") && !out.endsWith(".")) out += ".";
+  return out;
+}
+
+function topbarItemLabel(id) {
+  return TOPBAR_ITEMS.find((it) => it.id === id)?.label || id;
+}
+
+function applyTopbarArrangement(spec) {
+  const placed = [];
+  if (typeof spec === "string" && spec.trim()) {
+    for (const part of spec.split(";")) {
+      const [zone, names] = part.split(":");
+      if (!["L", "C", "R", "H"].includes(zone) || !names) continue;
+      for (const name of names.split(",")) {
+        if (TOPBAR_ITEMS.some((it) => it.id === name) && !placed.some((p) => p.id === name)) {
+          placed.push({ id: name, zone });
+        }
+      }
+    }
+  }
+  for (const it of TOPBAR_ITEMS) {
+    if (!placed.some((p) => p.id === it.id)) placed.push({ id: it.id, zone: it.zone });
+  }
+  topbarArrangement = placed;
+  renderTopbarArrangement();
+}
+
+function topbarArrangementSpec() {
+  return ["L", "C", "R", "H"]
+    .map((z) => `${z}:${topbarArrangement.filter((it) => it.zone === z).map((it) => it.id).join(",")}`)
+    .join(";");
+}
+
+function moveTopbarItem(id, dir) {
+  const idx = topbarArrangement.findIndex((it) => it.id === id);
+  if (idx < 0) return;
+  const zone = topbarArrangement[idx].zone;
+  /* swap with the neighbour in the same zone */
+  let j = idx + dir;
+  while (j >= 0 && j < topbarArrangement.length && topbarArrangement[j].zone !== zone) j += dir;
+  if (j < 0 || j >= topbarArrangement.length) return;
+  const tmp = topbarArrangement[idx];
+  topbarArrangement[idx] = topbarArrangement[j];
+  topbarArrangement[j] = tmp;
+  renderTopbarArrangement();
+}
+
+function renderTopbarArrangement() {
+  const list = document.getElementById("topbarArrangeList");
+  const preview = document.getElementById("topbarPreview");
+  if (!list || !preview) return;
+  list.innerHTML = "";
+  const ordered = ["L", "C", "R", "H"].flatMap((z) => topbarArrangement.filter((it) => it.zone === z));
+  topbarArrangement = ordered;
+  for (const it of ordered) {
+    const row = document.createElement("div");
+    row.className = "tba-row";
+    const name = document.createElement("span");
+    name.textContent = topbarItemLabel(it.id);
+    const select = document.createElement("select");
+    for (const [value, text] of TOPBAR_ZONES) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      select.appendChild(opt);
+    }
+    select.value = it.zone;
+    select.onchange = () => {
+      it.zone = select.value;
+      /* a moved element goes to the end of its new zone */
+      topbarArrangement = topbarArrangement.filter((x) => x !== it).concat([it]);
+      renderTopbarArrangement();
+    };
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "btn small";
+    up.textContent = "▲";
+    up.onclick = () => moveTopbarItem(it.id, -1);
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "btn small";
+    down.textContent = "▼";
+    down.onclick = () => moveTopbarItem(it.id, 1);
+    row.append(name, select, up, down);
+    list.appendChild(row);
+  }
+  const zones = { L: preview.querySelector(".tbp-left"), C: preview.querySelector(".tbp-center"), R: preview.querySelector(".tbp-right") };
+  for (const z of Object.values(zones)) if (z) z.innerHTML = "";
+  for (const it of ordered) {
+    const target = zones[it.zone];
+    if (!target) continue;
+    const chip = document.createElement("span");
+    chip.className = "tbp-chip" + (it.id === "clock" ? " clock" : "");
+    chip.textContent = it.id === "clock" ? "12:34" : it.id === "date" ? formatTopbarDatePreview() : topbarItemLabel(it.id);
+    target.appendChild(chip);
+  }
+}
+
+/* ---- Waste collection chips in the top bar ---- */
+const WASTE_SLOT_COUNT = 4;
+const WASTE_DEFAULT_COLORS = [0x9e9e9e, 0x8d6e63, 0x42a5f5, 0xffca28];
+
+function applyWasteSettings(waste) {
+  const slots = Array.isArray(waste) ? waste : [];
+  for (let i = 0; i < WASTE_SLOT_COUNT; i++) {
+    const entity = document.getElementById(`settingsWasteEntity${i}`);
+    const color = document.getElementById(`settingsWasteColor${i}`);
+    if (!entity || !color) continue;
+    const slot = slots[i] || {};
+    entity.value = typeof slot.entity_id === "string" ? slot.entity_id : "";
+    color.value = rgbIntToHex(Number.isFinite(slot.color) ? slot.color : WASTE_DEFAULT_COLORS[i]);
+  }
+}
+
+function collectWastePayload() {
+  if (!document.getElementById("settingsWasteEntity0")) return undefined;
+  const out = [];
+  for (let i = 0; i < WASTE_SLOT_COUNT; i++) {
+    const entity = document.getElementById(`settingsWasteEntity${i}`);
+    const color = document.getElementById(`settingsWasteColor${i}`);
+    out.push({
+      entity_id: (entity?.value || "").trim(),
+      color: hexToRgbInt(color?.value || rgbIntToHex(WASTE_DEFAULT_COLORS[i])),
+    });
+  }
+  return out;
+}
+
+function applyAlertSettings(alerts) {
+  const cfg = alerts && typeof alerts === "object" ? alerts : {};
+  const persistent = document.getElementById("settingsAlertPersistent");
+  if (persistent) persistent.checked = cfg.persistent !== false;
+  const entities = Array.isArray(cfg.entities) ? cfg.entities : [];
+  for (let i = 0; i < 4; i++) {
+    const input = document.getElementById(`settingsAlertEntity${i}`);
+    if (input) input.value = typeof entities[i] === "string" ? entities[i] : "";
+  }
+}
+
+function collectAlertPayload() {
+  const persistent = document.getElementById("settingsAlertPersistent");
+  if (!persistent) return undefined;
+  const entities = [];
+  for (let i = 0; i < 4; i++) {
+    entities.push((document.getElementById(`settingsAlertEntity${i}`)?.value || "").trim());
+  }
+  return { persistent: persistent.checked, entities };
+}
+
+function bindWasteEntityAutocomplete() {
+  const list = document.getElementById("wasteEntityOptions");
+  if (!list) return;
+  const inputs = [];
+  for (let i = 0; i < WASTE_SLOT_COUNT; i++) inputs.push(document.getElementById(`settingsWasteEntity${i}`));
+  for (let i = 0; i < 4; i++) inputs.push(document.getElementById(`settingsAlertEntity${i}`));
+  for (const input of inputs) {
+    if (!input) continue;
+    let timer = null;
+    input.addEventListener("input", () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(async () => {
+        const { domain, search } = parseEntitySearchInput(input.value || "", "sensor");
+        if (search.length < 2) return;
+        /* HA discovery (not only the layout's entities); it answers "pending"
+         * while Home Assistant is still being asked. */
+        const params = new URLSearchParams({ domain: domain || "sensor", search, limit: "30" });
+        for (let attempt = 0; attempt < 8; attempt++) {
+          try {
+            const data = await apiGet(`/api/ha/light_entities?${params.toString()}`);
+            const items = Array.isArray(data.items) ? data.items : [];
+            if (items.length > 0 || !data.pending) {
+              setEntityOptionsList(list, items.map((it) => ({ id: it.id || it.entity_id, name: it.name || "" })));
+              return;
+            }
+          } catch (_) {
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 700));
+        }
+      }, 250);
+    });
+  }
+}
+
+/* Boards without Wi-Fi (Ethernet kit): no Wi-Fi / setup AP settings. */
+function applyNetworkKind(settings) {
+  const ethernet = settings?.wifi?.ethernet === true;
+  for (const id of ["settingsWifiSection", "settingsApSection"]) {
+    document.querySelectorAll(`[data-settings-section="${id}"]`).forEach((btn) => {
+      btn.classList.toggle("hidden", ethernet);
+    });
+    const section = document.getElementById(id);
+    if (section && ethernet) section.classList.add("hidden");
+  }
+  if (ethernet && ["settingsWifiSection", "settingsApSection"].includes(editor.activeSettingsSection)) {
+    setActiveSettingsSection("settingsHaSection");
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  bindWasteEntityAutocomplete();
+  const applyStatusbar = document.getElementById("applyStatusbarBtn");
+  if (applyStatusbar) {
+    applyStatusbar.addEventListener("click", () => document.getElementById("applyDisplayBtn")?.click());
+  }
+});
+
+/* ---- HA Assist (voice) settings ---- */
+let assistSelectedPipeline = "";
+
+function applyAssistSettings(assist) {
+  const byId = (id) => document.getElementById(id);
+  if (!byId("settingsAssistEnabled")) return;
+  byId("settingsAssistEnabled").checked = assist.enabled === true;
+  byId("settingsAssistReply").checked = assist.reply_audio !== false;
+  const gain = Number.isFinite(assist.mic_gain) ? assist.mic_gain : 30;
+  byId("settingsAssistGain").value = String(gain);
+  byId("settingsAssistGainValue").textContent = String(gain);
+  byId("settingsAssistMaxListen").value = String(Number.isFinite(assist.max_listen_sec) ? assist.max_listen_sec : 10);
+  assistSelectedPipeline = assist.pipeline_id || "";
+  setAssistPipelineOptions([], "", assistSelectedPipeline);
+  loadAssistPipelines();
+}
+
+function setAssistPipelineOptions(pipelines, preferred, selected) {
+  const select = document.getElementById("settingsAssistPipeline");
+  if (!select) return;
+  select.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  const preferredEntry = pipelines.find((p) => p.id === preferred);
+  def.textContent = preferredEntry ? `Bevorzugte Pipeline (${preferredEntry.name})` : "Bevorzugte Pipeline";
+  select.appendChild(def);
+  for (const p of pipelines) {
+    const option = document.createElement("option");
+    option.value = p.id;
+    const details = [p.language, p.stt_engine, p.tts_engine].filter(Boolean).join(", ");
+    option.textContent = details ? `${p.name} (${details})` : p.name;
+    select.appendChild(option);
+  }
+  if (selected && !pipelines.some((p) => p.id === selected)) {
+    const option = document.createElement("option");
+    option.value = selected;
+    option.textContent = pipelines.length ? `${selected} (nicht gefunden)` : selected;
+    select.appendChild(option);
+  }
+  select.value = selected || "";
+}
+
+async function loadAssistPipelines() {
+  const select = document.getElementById("settingsAssistPipeline");
+  if (!select) return;
+  const selected = select.value || assistSelectedPipeline;
+  try {
+    const data = await apiGet("/api/assist/pipelines");
+    if (data && data.ok) {
+      setAssistPipelineOptions(Array.isArray(data.pipelines) ? data.pipelines : [], data.preferred || "", selected);
+    }
+  } catch (_err) {
+    /* HA offline: keep the stored id */
+  }
+}
+
+function collectAssistPayload() {
+  const byId = (id) => document.getElementById(id);
+  if (!byId("settingsAssistEnabled")) return undefined;
+  const clampInt = (value, min, max, fallback) => {
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+  return {
+    enabled: byId("settingsAssistEnabled").checked,
+    pipeline_id: byId("settingsAssistPipeline").value || "",
+    reply_audio: byId("settingsAssistReply").checked,
+    mic_gain: clampInt(byId("settingsAssistGain").value, 0, 42, 30),
+    max_listen_sec: clampInt(byId("settingsAssistMaxListen").value, 3, 30, 10),
+  };
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const gain = document.getElementById("settingsAssistGain");
+  if (gain) {
+    gain.addEventListener("input", () => {
+      document.getElementById("settingsAssistGainValue").textContent = gain.value;
+    });
+  }
+  const reload = document.getElementById("settingsAssistReload");
+  if (reload) reload.addEventListener("click", () => loadAssistPipelines());
+});
 
 function collectSystemPayload() {
   const system = {};
@@ -11779,11 +12289,14 @@ function renderPageEditor() {
 function updateEnergySourceUi(source) {
   const checkedSource = ENERGY_SOURCES.has(source) ? source : ENERGY_SOURCE_HA;
   const isManual = checkedSource === ENERGY_SOURCE_MANUAL;
+  const isHaLive = checkedSource === ENERGY_SOURCE_HA_LIVE;
   if (el.energyManualOptions) {
-    el.energyManualOptions.classList.toggle("hidden", !isManual);
+    el.energyManualOptions.classList.toggle("hidden", !isManual && !isHaLive);
   }
   if (el.energySourceHint) {
-    el.energySourceHint.textContent = t(isManual ? "layout.energy.source_hint_manual" : "layout.energy.source_hint_ha");
+    el.energySourceHint.textContent = isHaLive
+      ? "Seite 1: Tageswerte aus dem HA-Energie-Dashboard. Seite 2 (wischen): aktuelle Leistung aus den Sensoren unten (W/kW, Netz positiv = Bezug)."
+      : t(isManual ? "layout.energy.source_hint_manual" : "layout.energy.source_hint_ha");
   }
 }
 
@@ -12194,7 +12707,20 @@ function renderEnergyCanvasPreview(page) {
   const gasValue = snapshot ? energyPreviewFormatValue(snapshot.gas_value, snapshot.gas_unit) : "--";
   const waterValue = snapshot ? energyPreviewFormatValue(snapshot.water_value, snapshot.water_unit) : "--";
   const homeRingStyle = energyPreviewHomeRingStyle(snapshotFlows);
-  const flows = (compact ? [
+  /* Wide short canvas (800x360, 4.3" landscape): same geometry as the firmware's
+   * wide compact layout in main/ui/ui_energy_page.c (grid 160/184, solar 400/86,
+   * home 640/184, battery 400/271, all circles 118 px + 5 px ring, bend radius 16). */
+  const wide = compact && CANVAS_WIDTH >= 700;
+  const flows = (wide ? [
+    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M385 145 V156 A16 16 0 0 1 369 172 H219", [295, 172]),
+    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M415 145 V156 A16 16 0 0 0 431 172 H581", [505, 172]),
+    energyPreviewFlowMarkup("battery-in", nodes.solar && nodes.battery, "M400 145 V212", [400, 178]),
+    energyPreviewFlowMarkup("grid", nodes.grid && nodes.home, "M219 184 H581", [300, 184]),
+    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home, "M415 212 A16 16 0 0 1 431 196 H581", [505, 196]),
+    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery, "M219 196 H369 A16 16 0 0 1 385 212", [295, 196]),
+    energyPreviewFlowMarkup("gas", nodes.gas && nodes.home, "M640 145 V125", [640, 135]),
+    energyPreviewFlowMarkup("water", nodes.water && nodes.home, "M640 212 V243", [640, 228]),
+  ] : compact ? [
     energyPreviewFlowMarkup("low-carbon", nodes.lowCarbon && nodes.grid, "M76 126 V162", [76, 150]),
     energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M225 125 V169 A24 24 0 0 1 201 193 H119", [174, 193]),
     energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M255 125 V169 A24 24 0 0 0 279 193 H356", [318, 193]),
@@ -12234,8 +12760,10 @@ function renderEnergyCanvasPreview(page) {
     nodes.water ? energyPreviewLabelMarkup("water", t("layout.energy.water"), autoLabel) : "",
   ].join("");
   const node = document.createElement("div");
-  node.className = compact ? "energy-page-preview compact" : "energy-page-preview";
-  const viewBox = compact ? "0 0 480 360" : "0 0 720 600";
+  node.className = wide
+    ? "energy-page-preview compact wide"
+    : (compact ? "energy-page-preview compact" : "energy-page-preview");
+  const viewBox = wide ? "0 0 800 360" : (compact ? "0 0 480 360" : "0 0 720 600");
   node.innerHTML = `
     <div class="energy-preview-card">
       <div class="energy-preview-heading">
@@ -12613,6 +13141,9 @@ function renderInspector() {
     }
     resetClockInspectorFields();
     clearTileLookInspector();
+    if (el.fIconWrap) {
+      el.fIconWrap.classList.add("hidden");
+    }
     renderEntityOptions();
     return;
   }
@@ -12633,6 +13164,14 @@ function renderInspector() {
   const isAlarm = widget.type === "alarm_tile";
   const isClockAlarm = widget.type === "clock_alarm";
   const isSensor = widget.type === "sensor";
+  const hasIcon = ICON_WIDGET_TYPES.has(widget.type);
+  if (el.fIconWrap) {
+    el.fIconWrap.classList.toggle("hidden", !hasIcon);
+  }
+  if (el.fIcon) {
+    el.fIcon.value = hasIcon ? (widget.icon || "") : "";
+    updateIconPreview();
+  }
   if (el.buttonOptions) {
     el.buttonOptions.classList.toggle("hidden", !isButton);
   }
@@ -12938,9 +13477,15 @@ function renderInspector() {
     if (el.fSensorValueColor) {
       el.fSensorValueColor.value = valueColor;
     }
+    if (el.fSensorHistoryPopup) {
+      el.fSensorHistoryPopup.checked = widget.sensor_history_popup === true;
+    }
   } else {
     if (el.fSensorValueColor) {
       el.fSensorValueColor.value = "";
+    }
+    if (el.fSensorHistoryPopup) {
+      el.fSensorHistoryPopup.checked = false;
     }
   }
 
@@ -13133,7 +13678,7 @@ function applyEnergyPageConfig(options = {}) {
   if (options.render !== false) {
     renderAll();
   }
-  if (page.energy.source === ENERGY_SOURCE_HA) {
+  if (page.energy.source === ENERGY_SOURCE_HA || page.energy.source === ENERGY_SOURCE_HA_LIVE) {
     void loadEnergyPreview();
   }
   return true;
@@ -13299,6 +13844,56 @@ function renderInspectorChange(refreshInspector) {
   renderCanvas();
 }
 
+/* "desk", "mdi:desk", " MDI:Desk " -> "mdi:desk"; "" stays "" (automatic). */
+function normalizeMdiIcon(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const name = raw.startsWith("mdi:") ? raw.slice(4) : raw;
+  return /^[a-z0-9-]+$/.test(name) ? `mdi:${name}` : "";
+}
+
+function updateIconPreview() {
+  if (!el.fIconPreview) return;
+  const icon = normalizeMdiIcon(el.fIcon?.value);
+  el.fIconPreview.className = icon ? `mdi icon-input-preview mdi-${icon.slice(4)}` : "mdi icon-input-preview";
+}
+
+let iconSuggestTimer = null;
+let iconSuggestSeq = 0;
+
+/* Suggestions come from the panel itself, so they match the icons it can draw. */
+function scheduleIconSuggestions(immediate = false) {
+  if (iconSuggestTimer !== null) {
+    window.clearTimeout(iconSuggestTimer);
+    iconSuggestTimer = null;
+  }
+  const run = async () => {
+    if (!el.fIcon || !el.mdiIconOptions) return;
+    const query = normalizeMdiIcon(el.fIcon.value).slice(4) || String(el.fIcon.value || "").trim().replace(/^mdi:/i, "");
+    const seq = ++iconSuggestSeq;
+    try {
+      const data = await apiGet(`/api/mdi/icons?limit=40&q=${encodeURIComponent(query)}`);
+      if (seq !== iconSuggestSeq) return;
+      el.mdiIconOptions.innerHTML = "";
+      for (const name of Array.isArray(data.items) ? data.items : []) {
+        const option = document.createElement("option");
+        option.value = `mdi:${name}`;
+        el.mdiIconOptions.appendChild(option);
+      }
+    } catch (_) {
+      // Keep the previous suggestions.
+    }
+  };
+  if (immediate) {
+    void run();
+    return;
+  }
+  iconSuggestTimer = window.setTimeout(() => {
+    iconSuggestTimer = null;
+    void run();
+  }, 200);
+}
+
 function applyInspector(options = {}) {
   const widget = selectedWidget();
   if (!widget) return false;
@@ -13343,6 +13938,16 @@ function applyInspector(options = {}) {
     }
   } else {
     widget.secondary_entity_id = "";
+  }
+  if (ICON_WIDGET_TYPES.has(widgetType)) {
+    const icon = normalizeMdiIcon(el.fIcon?.value);
+    if (icon) {
+      widget.icon = icon;
+    } else {
+      delete widget.icon;
+    }
+  } else {
+    delete widget.icon;
   }
   if (widgetType === "button") {
     widget.button_mode = buttonMode;
@@ -13465,8 +14070,14 @@ function applyInspector(options = {}) {
   }
   if (widgetType === "sensor") {
     widget.sensor_value_color = normalizeHexColor(el.fSensorValueColor?.value, "");
+    if (el.fSensorHistoryPopup?.checked) {
+      widget.sensor_history_popup = true;
+    } else {
+      delete widget.sensor_history_popup;
+    }
   } else {
     delete widget.sensor_value_color;
+    delete widget.sensor_history_popup;
   }
   applyTileLookFromInspector(widget);
   widget.rect = clampRectToCanvas(
@@ -14128,6 +14739,14 @@ function bindUi() {
   }
   bindInspectorAutoApply(el.fTitle, ["input"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fButtonAccentColor, ["input", "change"], { softEntityValidation: true });
+  bindInspectorAutoApply(el.fIcon, ["change"], { softEntityValidation: true });
+  if (el.fIcon) {
+    el.fIcon.addEventListener("input", () => {
+      updateIconPreview();
+      scheduleIconSuggestions();
+    });
+    el.fIcon.addEventListener("focus", () => scheduleIconSuggestions(true));
+  }
   bindInspectorAutoApply(el.fButtonStyle, ["change"], { refreshInspector: true, softEntityValidation: true });
   bindInspectorAutoApply(el.fBinaryShowTitle, ["change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fBinaryColorOn, ["input", "change"], { softEntityValidation: true });
@@ -14135,6 +14754,7 @@ function bindUi() {
   bindInspectorAutoApply(el.fBinaryTextOn, ["input"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fBinaryTextOff, ["input"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fSensorValueColor, ["input", "change"], { softEntityValidation: true });
+  bindInspectorAutoApply(el.fSensorHistoryPopup, ["change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fClockShowSeconds, ["change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fClockShowDate, ["change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fAlarmCode, ["input", "change"], { softEntityValidation: true });

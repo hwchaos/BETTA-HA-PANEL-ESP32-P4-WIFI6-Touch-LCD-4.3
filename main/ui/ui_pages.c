@@ -16,6 +16,14 @@
 #include "settings/runtime_settings.h"
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
+#include "ui/ui_assist.h"
+#include "ui/ui_geometry.h"
+#include "ui/ui_topbar_waste.h"
+#include "ui/ui_topbar_alerts.h"
+#include "ui/ui_mdi_icon.h"
+#include "ha/ha_client.h"
+#include "assist/panel_assist.h"
+#include "ui/theme/theme_fx.h"
 #include "ui/theme/theme_default.h"
 #include "ui/ui_page_transition.h"
 #include "ui/ui_screen_saver.h"
@@ -67,6 +75,8 @@ static char s_camera_page_id[APP_MAX_PAGE_ID_LEN] = {0};
 static lv_obj_t *s_camera_icon = NULL;
 /* Weather shortcut; only shown while a "pogoda" page is registered. */
 static lv_obj_t *s_weather_icon = NULL;
+/* HA Assist push-to-talk; only shown while Assist is enabled. */
+static lv_obj_t *s_assist_icon = NULL;
 static lv_obj_t *s_nav_bar = NULL;
 static lv_obj_t *s_nav_home_button = NULL;
 static lv_obj_t *s_nav_home_label = NULL;
@@ -107,6 +117,9 @@ static uint32_t  s_betta_last_ms = 0;
  * long time string can never run into the gear or the chips. */
 #define TOPBAR_MARGIN 12
 #define TOPBAR_GAP 10
+/* Every icon chip of the top bar (gear, cameras, weather, assist, alert, HA,
+ * network) is the same square; waste chips share the height. */
+#define TOPBAR_CHIP_SIZE 34
 #define TOPBAR_CLOCK_FONTS 4
 /* Short budget for the once-a-minute clock and rare status updates: both run
  * from a context that already owns the display lock (see ui_runtime). */
@@ -131,6 +144,7 @@ typedef struct {
     uint32_t gear_color;
     uint32_t ha_color;
     uint32_t wifi_color;
+    char date_format[24];
 } ui_topbar_cfg_t;
 
 static ui_topbar_cfg_t s_topbar_cfg = {
@@ -291,8 +305,10 @@ static void ui_pages_set_topbar_camera_icon(lv_obj_t *label)
     }
 #if APP_HAVE_MDI_TOPBAR_FONT
     if (!s_topbar_cfg.icon_text) {
-        lv_label_set_text(label, LV_SYMBOL_VIDEO);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
+        if (!ui_mdi_icon_apply(label, "cctv", 24)) {
+            lv_label_set_text(label, LV_SYMBOL_VIDEO);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
+        }
         return;
     }
 #endif
@@ -351,6 +367,57 @@ static int16_t ui_pages_find(const char *page_id)
 
 static void ui_topbar_update_camera_tint(uint16_t selected_index);
 
+/* Left navigation: home on top, then one full-width row per room. */
+static void ui_pages_layout_nav_left(const uint16_t *nav_page, uint16_t nav_count, uint16_t selected_index)
+{
+    const lv_coord_t margin = 10;
+    const lv_coord_t gap = 8;
+    const lv_coord_t btn_w = APP_NAV_LEFT_WIDTH - 2 * margin - 1;
+    const lv_coord_t avail_h = APP_SCREEN_HEIGHT - APP_CONTENT_BOX_Y - 2 * margin;
+    const uint16_t rows = (uint16_t)(nav_count + 1U);
+    /* Rows share the height, but stay finger sized and never get huge. */
+    lv_coord_t btn_h = (avail_h - (lv_coord_t)(rows - 1U) * gap) / (lv_coord_t)rows;
+    const lv_coord_t max_h = (APP_SCREEN_HEIGHT >= 700) ? 72 : 56;
+    if (btn_h > max_h) {
+        btn_h = max_h;
+    }
+    if (btn_h < 44) {
+        btn_h = 44;
+    }
+
+    lv_coord_t y = margin;
+    lv_obj_set_size(s_nav_home_button, btn_w, btn_h);
+    lv_obj_set_pos(s_nav_home_button, margin, y);
+    ui_pages_style_nav_button(s_nav_home_button, s_nav_home_label, (selected_index == 0), true);
+    lv_obj_clear_flag(s_nav_home_button, LV_OBJ_FLAG_HIDDEN);
+    y += btn_h + gap;
+
+    uint16_t slot = 0;
+    for (uint16_t n = 0; n < nav_count && slot < (APP_MAX_PAGES - 1); n++, slot++) {
+        const uint16_t page_index = nav_page[n];
+        lv_obj_t *btn = s_nav_extra_buttons[slot];
+        lv_obj_t *label = s_nav_extra_labels[slot];
+        if (btn == NULL || label == NULL) {
+            continue;
+        }
+        s_nav_extra_page_index[slot] = page_index;
+        lv_label_set_text(label, s_pages[page_index].title);
+        lv_obj_set_size(btn, btn_w, btn_h);
+        lv_obj_set_pos(btn, margin, y);
+        lv_obj_set_width(label, btn_w - 16);
+        lv_obj_center(label);
+        lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+        ui_pages_style_nav_button(btn, label, (page_index == selected_index), false);
+        y += btn_h + gap;
+    }
+    for (; slot < (APP_MAX_PAGES - 1); slot++) {
+        s_nav_extra_page_index[slot] = APP_MAX_PAGES;
+        if (s_nav_extra_buttons[slot] != NULL) {
+            lv_obj_add_flag(s_nav_extra_buttons[slot], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
 static void ui_pages_apply_tab_style(uint16_t selected_index)
 {
     ui_topbar_update_camera_tint(selected_index);
@@ -383,6 +450,11 @@ static void ui_pages_apply_tab_style(uint16_t selected_index)
         if (s_pages[page_index].in_nav) {
             nav_page[nav_count++] = page_index;
         }
+    }
+
+    if (ui_geometry_nav_left()) {
+        ui_pages_layout_nav_left(nav_page, nav_count, selected_index);
+        return;
     }
 
     lv_coord_t tabs_start = nav_home_x + nav_home_w + nav_home_gap;
@@ -445,6 +517,29 @@ static void ui_pages_style_topbar_chip(lv_obj_t *obj)
     lv_obj_set_style_pad_bottom(obj, 4, LV_PART_MAIN);
     lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_set_style_text_font(obj, TOPBAR_ICON_FONT, LV_PART_MAIN);
+}
+
+/* Square icon chip: chip look, fixed TOPBAR_CHIP_SIZE, glyph centred whatever
+ * font it uses (MDI subset, tiny_ttf MDI, Montserrat symbol). */
+static void ui_topbar_square_chip(lv_obj_t *obj)
+{
+    lv_obj_set_style_bg_color(obj, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(obj, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(obj, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_set_style_radius(obj, 10, LV_PART_MAIN);
+    lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    const lv_font_t *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+    lv_coord_t pad = (font != NULL) ? (TOPBAR_CHIP_SIZE - 2 - lv_font_get_line_height(font)) / 2 : 0;
+    if (pad < 0) {
+        pad = 0;
+    }
+    lv_obj_set_style_pad_left(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(obj, pad, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN);
+    lv_obj_set_size(obj, TOPBAR_CHIP_SIZE, TOPBAR_CHIP_SIZE);
 }
 
 static void ui_topbar_set_visible(lv_obj_t *obj, bool visible)
@@ -568,7 +663,17 @@ static void ui_topbar_render_status(void)
         } else {
             snprintf(wifi_text, sizeof(wifi_text), "%s", ui_i18n_get("topbar.wifi_off", "Wi-Fi off"));
         }
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+        /* No Wi-Fi on this board: the chip shows the wired link. */
+        (void)mdi_cp;
+        if (s_topbar_cfg.icon_text ||
+            !ui_mdi_icon_apply(s_wifi_icon, s_status_wifi ? "ethernet" : "ethernet-off", 24)) {
+            lv_label_set_text(s_wifi_icon, s_status_wifi ? "LAN" : ui_i18n_get("topbar.lan_off", "LAN aus"));
+            lv_obj_set_style_text_font(s_wifi_icon, TOPBAR_ICON_FONT, LV_PART_MAIN);
+        }
+#else
         ui_pages_set_topbar_icon(s_wifi_icon, mdi_cp, wifi_text);
+#endif
         lv_obj_set_style_text_color(s_wifi_icon, ui_topbar_status_color(wifi_on, s_topbar_cfg.wifi_color), LV_PART_MAIN);
     }
 
@@ -630,6 +735,106 @@ static void ui_topbar_apply_style(void)
 /* Chain the elements from the left (date, cameras, weather) and from the right
  * (status chips, settings), then fit the clock into the gap that is left
  * over. */
+/* ---- Top bar arrangement ------------------------------------------------- */
+
+typedef enum {
+    TB_DATE = 0,
+    TB_CLOCK,
+    TB_CAMERAS,
+    TB_WEATHER,
+    TB_WASTE,
+    TB_ALERT,
+    TB_ASSIST,
+    TB_GEAR,
+    TB_HA,
+    TB_NETWORK,
+    TB_COUNT
+} tb_item_t;
+
+enum { TB_ZONE_LEFT = 0, TB_ZONE_CENTER = 1, TB_ZONE_RIGHT = 2, TB_ZONE_HIDDEN = 3 };
+
+static const char *const k_tb_names[TB_COUNT] = {
+    "date", "clock", "cameras", "weather", "waste", "alert", "assist", "gear", "ha", "network"};
+static const uint8_t k_tb_default_zone[TB_COUNT] = {
+    TB_ZONE_LEFT, TB_ZONE_CENTER, TB_ZONE_LEFT, TB_ZONE_LEFT, TB_ZONE_LEFT,
+    TB_ZONE_RIGHT, TB_ZONE_RIGHT, TB_ZONE_RIGHT, TB_ZONE_RIGHT, TB_ZONE_RIGHT};
+
+/* Display order (left to right within each zone) and zone of every element. */
+static tb_item_t s_tb_order[TB_COUNT] = {
+    TB_DATE, TB_CAMERAS, TB_WEATHER, TB_WASTE, TB_CLOCK, TB_ALERT, TB_ASSIST, TB_GEAR, TB_HA, TB_NETWORK};
+static uint8_t s_tb_zone[TB_COUNT] = {
+    TB_ZONE_LEFT, TB_ZONE_CENTER, TB_ZONE_LEFT, TB_ZONE_LEFT, TB_ZONE_LEFT,
+    TB_ZONE_RIGHT, TB_ZONE_RIGHT, TB_ZONE_RIGHT, TB_ZONE_RIGHT, TB_ZONE_RIGHT};
+
+/* "L:date,cameras;C:clock;R:alert,gear;H:weather" - elements missing from the
+ * spec keep their default zone and go after the listed ones. */
+static void ui_topbar_parse_layout(const char *spec)
+{
+    static const tb_item_t k_default_order[TB_COUNT] = {
+        TB_DATE, TB_CAMERAS, TB_WEATHER, TB_WASTE, TB_CLOCK, TB_ALERT, TB_ASSIST, TB_GEAR, TB_HA, TB_NETWORK};
+    bool placed[TB_COUNT] = {false};
+    int n = 0;
+    if (spec != NULL) {
+        char buf[RUNTIME_TOPBAR_LAYOUT_LEN];
+        snprintf(buf, sizeof(buf), "%s", spec);
+        char *save_zone = NULL;
+        for (char *part = strtok_r(buf, ";", &save_zone); part != NULL; part = strtok_r(NULL, ";", &save_zone)) {
+            if (part[0] == '\0' || part[1] != ':') {
+                continue;
+            }
+            const char zc = part[0];
+            const int zone = zc == 'L' ? TB_ZONE_LEFT : zc == 'C' ? TB_ZONE_CENTER : zc == 'R' ? TB_ZONE_RIGHT
+                           : zc == 'H' ? TB_ZONE_HIDDEN : -1;
+            if (zone < 0) {
+                continue;
+            }
+            char *save_item = NULL;
+            for (char *name = strtok_r(part + 2, ",", &save_item); name != NULL;
+                 name = strtok_r(NULL, ",", &save_item)) {
+                for (int i = 0; i < TB_COUNT; i++) {
+                    if (!placed[i] && strcmp(name, k_tb_names[i]) == 0) {
+                        placed[i] = true;
+                        s_tb_zone[i] = (uint8_t)zone;
+                        s_tb_order[n++] = (tb_item_t)i;
+                    }
+                }
+            }
+        }
+    }
+    for (int k = 0; k < TB_COUNT; k++) {
+        const tb_item_t it = k_default_order[k];
+        if (!placed[it]) {
+            s_tb_zone[it] = k_tb_default_zone[it];
+            s_tb_order[n++] = it;
+        }
+    }
+}
+
+static lv_obj_t *ui_topbar_item_obj(tb_item_t it)
+{
+    switch (it) {
+    case TB_DATE: return s_date_label;
+    case TB_CLOCK: return s_time_label;
+    case TB_CAMERAS: return s_camera_icon;
+    case TB_WEATHER: return s_weather_icon;
+    case TB_ALERT: return ui_topbar_alerts_chip();
+    case TB_ASSIST: return s_assist_icon;
+    case TB_GEAR: return s_gear_icon;
+    case TB_HA: return s_api_icon;
+    case TB_NETWORK: return s_wifi_icon;
+    default: return NULL;
+    }
+}
+
+static lv_coord_t ui_topbar_item_width(tb_item_t it)
+{
+    if (it == TB_WASTE) {
+        return ui_topbar_waste_width(TOPBAR_GAP);
+    }
+    lv_obj_t *obj = ui_topbar_item_obj(it);
+    return obj != NULL ? lv_obj_get_width(obj) : 0;
+}
+
 static void ui_topbar_apply_layout(void)
 {
     if (s_topbar == NULL) {
@@ -642,6 +847,7 @@ static void ui_topbar_apply_layout(void)
      * configurable status group: each appears as soon as its page exists. */
     const bool show_camera = ui_topbar_camera_available();
     const bool show_weather = ui_topbar_weather_available();
+    const bool show_assist = s_assist_icon != NULL && panel_assist_is_enabled();
     const bool show_clock = s_topbar_cfg.show_clock && s_time_label != NULL;
     const bool show_status = s_topbar_cfg.show_status;
 
@@ -649,6 +855,7 @@ static void ui_topbar_apply_layout(void)
     ui_topbar_set_visible(s_gear_icon, show_gear);
     ui_topbar_set_visible(s_camera_icon, show_camera);
     ui_topbar_set_visible(s_weather_icon, show_weather);
+    ui_topbar_set_visible(s_assist_icon, show_assist);
     ui_topbar_set_visible(s_time_label, show_clock);
     ui_topbar_set_visible(s_api_icon, show_status && s_api_icon != NULL);
     ui_topbar_set_visible(s_wifi_icon, show_status && s_wifi_icon != NULL);
@@ -658,117 +865,154 @@ static void ui_topbar_apply_layout(void)
     if (s_date_label != NULL) {
         lv_obj_set_width(s_date_label, LV_SIZE_CONTENT);
     }
-    if (s_gear_icon != NULL) {
-        /* The gear is a bare glyph box by default; with a word label it borrows
-         * the chip look so both modes keep the same top bar rhythm. */
-        if (s_topbar_cfg.icon_text) {
-            ui_pages_style_topbar_chip(s_gear_icon);
-            lv_obj_set_size(s_gear_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        } else {
-            lv_obj_set_style_pad_all(s_gear_icon, 0, LV_PART_MAIN);
-            lv_obj_set_style_radius(s_gear_icon, 8, LV_PART_MAIN);
-            lv_obj_set_size(s_gear_icon, 28, 28);
+    lv_obj_t *const glyph_chips[] = {
+        s_gear_icon, s_camera_icon, s_weather_icon, s_api_icon, s_wifi_icon, s_assist_icon, ui_topbar_alerts_chip()};
+    for (size_t i = 0; i < sizeof(glyph_chips) / sizeof(glyph_chips[0]); i++) {
+        lv_obj_t *chip = glyph_chips[i];
+        if (chip == NULL) {
+            continue;
         }
-    }
-    if (s_camera_icon != NULL) {
-        /* Same two modes as the gear: a bare glyph box, or a word chip. */
-        if (s_topbar_cfg.icon_text) {
-            ui_pages_style_topbar_chip(s_camera_icon);
-            lv_obj_set_size(s_camera_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        const bool word_chip = s_topbar_cfg.icon_text &&
+                               (chip == s_gear_icon || chip == s_camera_icon || chip == s_weather_icon ||
+                                   chip == s_api_icon || chip == s_wifi_icon);
+        if (word_chip) {
+            ui_pages_style_topbar_chip(chip);
+            lv_obj_set_size(chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         } else {
-            lv_obj_set_style_pad_all(s_camera_icon, 0, LV_PART_MAIN);
-            lv_obj_set_style_radius(s_camera_icon, 8, LV_PART_MAIN);
-            lv_obj_set_size(s_camera_icon, 28, 28);
+            ui_topbar_square_chip(chip);
         }
-    }
-    if (s_weather_icon != NULL) {
-        if (s_topbar_cfg.icon_text) {
-            ui_pages_style_topbar_chip(s_weather_icon);
-            lv_obj_set_size(s_weather_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        } else {
-            lv_obj_set_style_pad_all(s_weather_icon, 0, LV_PART_MAIN);
-            lv_obj_set_style_radius(s_weather_icon, 8, LV_PART_MAIN);
-            lv_obj_set_size(s_weather_icon, 28, 28);
-        }
-    }
-    if (s_api_icon != NULL) {
-        lv_obj_set_width(s_api_icon, LV_SIZE_CONTENT);
-    }
-    if (s_wifi_icon != NULL) {
-        lv_obj_set_width(s_wifi_icon, LV_SIZE_CONTENT);
     }
     lv_obj_update_layout(s_topbar);
 
-    lv_coord_t right = APP_SCREEN_WIDTH - TOPBAR_MARGIN;
-    if (show_status && s_wifi_icon != NULL) {
-        const lv_coord_t w = lv_obj_get_width(s_wifi_icon);
-        lv_obj_align(s_wifi_icon, LV_ALIGN_LEFT_MID, right - w, 0);
-        right -= w + TOPBAR_GAP;
-    }
-    if (show_status && s_api_icon != NULL) {
-        const lv_coord_t w = lv_obj_get_width(s_api_icon);
-        lv_obj_align(s_api_icon, LV_ALIGN_LEFT_MID, right - w, 0);
-        right -= w + TOPBAR_GAP;
-    }
-    /* Settings closes the right cluster, so it never touches the app shortcuts
-     * (cameras / weather) that live on the left. */
-    if (show_gear) {
-        const lv_coord_t w = lv_obj_get_width(s_gear_icon);
-        lv_obj_align(s_gear_icon, LV_ALIGN_LEFT_MID, right - w, 0);
-        right -= w + TOPBAR_GAP;
-    }
-
-    lv_coord_t left = TOPBAR_MARGIN;
-    if (show_date) {
-        const lv_coord_t w = lv_obj_get_width(s_date_label);
-        lv_obj_align(s_date_label, LV_ALIGN_LEFT_MID, left, 0);
-        left += w + TOPBAR_GAP;
-    }
-    if (show_camera) {
-        lv_obj_align(s_camera_icon, LV_ALIGN_LEFT_MID, left, 0);
-        left += lv_obj_get_width(s_camera_icon) + TOPBAR_GAP;
-    }
-    if (show_weather) {
-        lv_obj_align(s_weather_icon, LV_ALIGN_LEFT_MID, left, 0);
-        left += lv_obj_get_width(s_weather_icon) + TOPBAR_GAP;
-    }
-
-    if (!show_clock) {
-        return;
-    }
-
-    char text[32] = {0};
-    ui_topbar_clock_text(text, sizeof(text));
-    lv_coord_t avail = right - left;
-    if (avail < 40) {
-        avail = 40;
-    }
-
-    const lv_font_t *fonts[TOPBAR_CLOCK_FONTS] = {
-        APP_FONT_TEXT_34, APP_FONT_TEXT_28, APP_FONT_TEXT_24, APP_FONT_TEXT_22};
-    const lv_font_t *font = fonts[TOPBAR_CLOCK_FONTS - 1];
-    lv_coord_t text_w = 0;
-    for (size_t i = 0; i < TOPBAR_CLOCK_FONTS; i++) {
-        lv_point_t size = {0};
-        lv_txt_get_size(&size, text, fonts[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        font = fonts[i];
-        text_w = size.x;
-        if (text_w <= avail) {
-            break;
+    /* ---- arrangement: left group, centre group (around the screen centre),
+     * right group; the clock takes the largest font that fits. ---- */
+    ui_topbar_waste_set_suppressed(s_tb_zone[TB_WASTE] == TB_ZONE_HIDDEN);
+    ui_topbar_alerts_set_suppressed(s_tb_zone[TB_ALERT] == TB_ZONE_HIDDEN);
+    bool visible[TB_COUNT] = {
+        [TB_DATE] = show_date,
+        [TB_CLOCK] = show_clock,
+        [TB_CAMERAS] = show_camera,
+        [TB_WEATHER] = show_weather,
+        [TB_WASTE] = ui_topbar_waste_width(TOPBAR_GAP) > 0,
+        [TB_ALERT] = ui_topbar_alerts_visible(),
+        [TB_ASSIST] = show_assist,
+        [TB_GEAR] = show_gear,
+        [TB_HA] = show_status && s_api_icon != NULL,
+        [TB_NETWORK] = show_status && s_wifi_icon != NULL,
+    };
+    for (int i = 0; i < TB_COUNT; i++) {
+        if (s_tb_zone[i] == TB_ZONE_HIDDEN) {
+            visible[i] = false;
+            if (i != TB_WASTE && i != TB_ALERT) {
+                ui_topbar_set_visible(ui_topbar_item_obj((tb_item_t)i), false);
+            }
         }
     }
 
-    lv_obj_set_style_text_font(s_time_label, font, LV_PART_MAIN);
-    if (text_w > avail) {
-        /* Still too wide after the smallest size: elide instead of overlapping. */
-        lv_obj_set_width(s_time_label, avail);
-        lv_label_set_long_mode(s_time_label, LV_LABEL_LONG_DOT);
-        text_w = avail;
-    } else {
-        lv_obj_set_width(s_time_label, LV_SIZE_CONTENT);
-        lv_label_set_long_mode(s_time_label, LV_LABEL_LONG_WRAP);
+    /* Squeeze levels: first the clock shrinks, then the date. */
+    static const struct {
+        uint8_t clock;
+        uint8_t date;
+    } k_levels[] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {3, 1}, {3, 2}, {3, 3}};
+    const size_t level_count = sizeof(k_levels) / sizeof(k_levels[0]);
+    const lv_font_t *clock_fonts[4] = {APP_FONT_TEXT_34, APP_FONT_TEXT_28, APP_FONT_TEXT_24, APP_FONT_TEXT_22};
+    const lv_font_t *date_fonts[4] = {TOPBAR_DATE_FONT, APP_FONT_TEXT_20, APP_FONT_TEXT_18, APP_FONT_TEXT_16};
+    lv_coord_t zone_w[3] = {0, 0, 0};
+
+    /* Applies a squeeze level and measures the three groups. */
+#define TB_MEASURE(level)                                                                                   \
+    do {                                                                                                    \
+        if (visible[TB_CLOCK]) {                                                                            \
+            lv_obj_set_style_text_font(s_time_label, clock_fonts[k_levels[(level)].clock], LV_PART_MAIN);   \
+            lv_obj_set_width(s_time_label, LV_SIZE_CONTENT);                                                \
+            lv_label_set_long_mode(s_time_label, LV_LABEL_LONG_WRAP);                                       \
+            lv_obj_update_layout(s_time_label);                                                             \
+        }                                                                                                   \
+        if (visible[TB_DATE]) {                                                                             \
+            lv_obj_set_style_text_font(s_date_label, date_fonts[k_levels[(level)].date], LV_PART_MAIN);     \
+            lv_obj_update_layout(s_date_label);                                                             \
+        }                                                                                                   \
+        for (int z_ = 0; z_ < 3; z_++) {                                                                    \
+            zone_w[z_] = 0;                                                                                 \
+            int n_ = 0;                                                                                     \
+            for (int k_ = 0; k_ < TB_COUNT; k_++) {                                                         \
+                const tb_item_t it_ = s_tb_order[k_];                                                       \
+                if (!visible[it_] || s_tb_zone[it_] != z_) {                                                \
+                    continue;                                                                               \
+                }                                                                                           \
+                zone_w[z_] += ui_topbar_item_width(it_) + (n_ > 0 ? TOPBAR_GAP : 0);                        \
+                n_++;                                                                                       \
+            }                                                                                               \
+        }                                                                                                   \
+    } while (0)
+
+    /* Edges of the free space between the left and the right group. */
+#define TB_LEFT_END() (TOPBAR_MARGIN + zone_w[TB_ZONE_LEFT] + (zone_w[TB_ZONE_LEFT] > 0 ? TOPBAR_GAP : 0))
+#define TB_RIGHT_START() \
+    (APP_SCREEN_WIDTH - TOPBAR_MARGIN - zone_w[TB_ZONE_RIGHT] - (zone_w[TB_ZONE_RIGHT] > 0 ? TOPBAR_GAP : 0))
+
+    bool exact = true;  /* centre group exactly on the screen centre */
+    bool found = false;
+    size_t level = 0;
+    /* 1) exact centre, shrinking the clock and then the date */
+    for (level = 0; level < level_count && !found; level++) {
+        TB_MEASURE(level);
+        const lv_coord_t cw = zone_w[TB_ZONE_CENTER];
+        if (cw == 0) {
+            found = TB_LEFT_END() <= TB_RIGHT_START();
+        } else {
+            const lv_coord_t c_start = APP_SCREEN_WIDTH / 2 - cw / 2;
+            found = TB_LEFT_END() <= c_start && c_start + cw <= TB_RIGHT_START();
+        }
     }
-    lv_obj_align(s_time_label, LV_ALIGN_LEFT_MID, left + (avail - text_w) / 2, 0);
+    /* 2) centred in the free gap instead, with the largest fonts that fit */
+    if (!found && zone_w[TB_ZONE_CENTER] > 0) {
+        exact = false;
+        for (level = 0; level < level_count && !found; level++) {
+            TB_MEASURE(level);
+            found = TB_LEFT_END() + zone_w[TB_ZONE_CENTER] <= TB_RIGHT_START();
+        }
+    }
+    if (!found) {
+        TB_MEASURE(level_count - 1);
+    }
+
+    lv_coord_t x[3] = {
+        TOPBAR_MARGIN,
+        APP_SCREEN_WIDTH / 2 - zone_w[TB_ZONE_CENTER] / 2,
+        APP_SCREEN_WIDTH - TOPBAR_MARGIN - zone_w[TB_ZONE_RIGHT],
+    };
+    if (zone_w[TB_ZONE_CENTER] > 0) {
+        const lv_coord_t left_end = TB_LEFT_END();
+        const lv_coord_t right_start = TB_RIGHT_START();
+        if (!exact) {
+            x[TB_ZONE_CENTER] = left_end + (right_start - left_end - zone_w[TB_ZONE_CENTER]) / 2;
+        }
+        /* never overlap a side group */
+        if (x[TB_ZONE_CENTER] < left_end) {
+            x[TB_ZONE_CENTER] = left_end;
+        }
+        if (x[TB_ZONE_CENTER] + zone_w[TB_ZONE_CENTER] > right_start) {
+            x[TB_ZONE_CENTER] = right_start - zone_w[TB_ZONE_CENTER];
+        }
+    }
+#undef TB_MEASURE
+#undef TB_LEFT_END
+#undef TB_RIGHT_START
+    for (int k = 0; k < TB_COUNT; k++) {
+        const tb_item_t it = s_tb_order[k];
+        const int z = s_tb_zone[it];
+        if (!visible[it] || z == TB_ZONE_HIDDEN) {
+            continue;
+        }
+        if (it == TB_WASTE) {
+            x[z] = ui_topbar_waste_layout(x[z], TOPBAR_GAP);
+            continue;
+        }
+        lv_obj_t *obj = ui_topbar_item_obj(it);
+        lv_obj_align(obj, LV_ALIGN_LEFT_MID, x[z], 0);
+        x[z] += lv_obj_get_width(obj) + TOPBAR_GAP;
+    }
     lv_obj_update_layout(s_topbar);
 }
 
@@ -779,6 +1023,15 @@ void ui_pages_apply_topbar_settings(const runtime_settings_t *settings)
     }
 
     s_topbar_cfg.loaded = true;
+    ui_topbar_waste_apply_settings(settings);
+    ui_topbar_alerts_apply_settings(settings);
+    ui_topbar_parse_layout(settings->display_topbar_layout);
+    const bool date_format_changed = strcmp(s_topbar_cfg.date_format, settings->display_topbar_date_format) != 0;
+    snprintf(s_topbar_cfg.date_format, sizeof(s_topbar_cfg.date_format), "%s", settings->display_topbar_date_format);
+    if (date_format_changed && s_topbar_have_time) {
+        s_topbar_date_text[0] = '\0'; /* rewrite the label in the new format */
+        ui_pages_set_topbar_datetime(&s_topbar_time);
+    }
     s_topbar_cfg.show_clock = settings->display_topbar_show_clock;
     s_topbar_cfg.show_date = settings->display_topbar_show_date;
     s_topbar_cfg.show_gear = settings->display_topbar_show_gear;
@@ -1048,7 +1301,8 @@ static void ui_pages_create_topbar(lv_obj_t *screen)
     lv_obj_clear_flag(s_topbar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(s_topbar, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_topbar, lv_color_hex(APP_UI_COLOR_TOPBAR_BG), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_topbar, LV_OPA_COVER, LV_PART_MAIN);
+    const theme_fx_t *fx = theme_fx_active();
+    lv_obj_set_style_bg_opa(s_topbar, (fx != NULL) ? fx->bar_opa : LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_topbar, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(s_topbar, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
     lv_obj_set_style_border_color(s_topbar, lv_color_hex(APP_UI_COLOR_TOPBAR_BORDER), LV_PART_MAIN);
@@ -1084,6 +1338,27 @@ static void ui_pages_create_topbar(lv_obj_t *screen)
     lv_obj_add_event_cb(s_gear_icon, ui_topbar_gear_event_cb, LV_EVENT_CLICKED, NULL);
     ui_pages_set_topbar_icon(s_gear_icon, MDI_CP_COG, ui_i18n_get("topbar.settings", "SET"));
 
+    /* Assist microphone, left of the gear (see ui_topbar_apply_layout). */
+    s_assist_icon = lv_label_create(s_topbar);
+    lv_obj_remove_style_all(s_assist_icon);
+    lv_obj_set_size(s_assist_icon, 34, 28);
+    lv_obj_add_flag(s_assist_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(s_assist_icon, 12);
+    lv_obj_set_style_bg_color(s_assist_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_assist_icon, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_assist_icon, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_assist_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_CHIP_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_assist_icon, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_assist_icon, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(s_assist_icon, 2, LV_PART_MAIN);
+    lv_obj_set_style_text_align(s_assist_icon, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_assist_icon, lv_color_hex(APP_UI_COLOR_TOPBAR_MUTED), LV_PART_MAIN);
+    ui_assist_attach_chip(s_assist_icon);
+    lv_obj_add_flag(s_assist_icon, LV_OBJ_FLAG_HIDDEN);
+
+    /* Red alert triangle (left of the assist microphone when shown). */
+    (void)ui_topbar_alerts_create(s_topbar, ui_topbar_apply_layout);
+
     /* Radio app shortcut, right next to the gear. It is only made visible once
      * a cameras page has been registered (see ui_topbar_apply_layout). */
     s_camera_icon = lv_label_create(s_topbar);
@@ -1108,6 +1383,8 @@ static void ui_pages_create_topbar(lv_obj_t *screen)
 
     /* Weather (Pogoda) shortcut, right after the cameras. Like the cameras chip it
      * only becomes visible once a "pogoda" page has been registered. */
+    ui_topbar_waste_create(s_topbar, ui_topbar_apply_layout);
+
     s_weather_icon = lv_label_create(s_topbar);
     lv_obj_remove_style_all(s_weather_icon);
     lv_obj_set_size(s_weather_icon, 28, 28);
@@ -1156,21 +1433,36 @@ static void ui_pages_create_topbar(lv_obj_t *screen)
 
 static void ui_pages_create_nav(lv_obj_t *screen)
 {
+    const bool nav_left = ui_geometry_nav_left();
     s_nav_bar = lv_obj_create(screen);
     lv_obj_remove_style_all(s_nav_bar);
-    lv_obj_set_size(s_nav_bar, APP_SCREEN_WIDTH, 60);
-    lv_obj_set_pos(s_nav_bar, 0, APP_SCREEN_HEIGHT - 60);
+    if (nav_left) {
+        /* Vertical bar under the top bar, left of the content box. */
+        lv_obj_set_size(s_nav_bar, APP_NAV_LEFT_WIDTH, APP_SCREEN_HEIGHT - APP_CONTENT_BOX_Y);
+        lv_obj_set_pos(s_nav_bar, 0, APP_CONTENT_BOX_Y);
+    } else {
+        lv_obj_set_size(s_nav_bar, APP_SCREEN_WIDTH, APP_NAV_BAR_HEIGHT);
+        lv_obj_set_pos(s_nav_bar, 0, APP_SCREEN_HEIGHT - APP_NAV_BAR_HEIGHT);
+    }
     lv_obj_clear_flag(s_nav_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(s_nav_bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_nav_bar, ui_nav_bar_bg_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(s_nav_bar, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    const theme_fx_t *fx = theme_fx_active();
+    lv_obj_set_style_bg_opa(s_nav_bar, (fx != NULL) ? fx->bar_opa : LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     /* Same separators as the Guition panels: a 1 px top border drawn *inside*
      * the bar, and no shadow. The old floating shadow (16 px, offset -7) bled
      * ~10 px above the bar into the gutter under the tiles, which read as the
      * menu eating the bottom of the tile area. The content frame's bottom border
      * lands on this row as well, so the opaque bar still hides it. */
     lv_obj_set_style_border_width(s_nav_bar, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_side(s_nav_bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(
+        s_nav_bar, nav_left ? LV_BORDER_SIDE_RIGHT : LV_BORDER_SIDE_TOP, LV_PART_MAIN | LV_STATE_DEFAULT);
+    if (nav_left) {
+        /* More rooms than fit vertically: the bar scrolls. */
+        lv_obj_add_flag(s_nav_bar, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(s_nav_bar, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(s_nav_bar, LV_SCROLLBAR_MODE_OFF);
+    }
     lv_obj_set_style_border_color(s_nav_bar, ui_nav_bar_border_color(), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_opa(s_nav_bar, LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(s_nav_bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1224,6 +1516,13 @@ void ui_pages_init(void)
     s_gear_icon = NULL;
     s_camera_icon = NULL;
     s_weather_icon = NULL;
+    s_assist_icon = NULL;
+    ui_topbar_waste_reset();
+    ui_topbar_alerts_reset();
+    /* New labels: the next datetime update must write them even when the
+     * minute has not changed since the last build. */
+    s_topbar_date_text[0] = '\0';
+    s_topbar_time_text[0] = '\0';
     s_nav_bar = NULL;
     s_nav_home_button = NULL;
     s_nav_home_label = NULL;
@@ -1265,6 +1564,14 @@ void ui_pages_init(void)
     lv_obj_set_style_bg_color(s_background, lv_color_hex(APP_UI_COLOR_SCREEN_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_background, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_background, 0, LV_PART_MAIN);
+    /* Effect themes paint a generated backdrop behind everything; the content
+     * box and both bars are then (partly) see-through. */
+    const theme_fx_t *fx = theme_fx_active();
+    const lv_image_dsc_t *backdrop = theme_fx_backdrop();
+    if (backdrop != NULL) {
+        lv_obj_set_style_bg_image_src(s_background, backdrop, LV_PART_MAIN);
+        lv_obj_set_style_bg_image_opa(s_background, LV_OPA_COVER, LV_PART_MAIN);
+    }
 
     s_content_box = lv_obj_create(screen);
     lv_obj_remove_style_all(s_content_box);
@@ -1286,10 +1593,10 @@ void ui_pages_init(void)
     lv_obj_clear_flag(s_content_box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(s_content_box, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_content_box, lv_color_hex(APP_UI_COLOR_CONTENT_BG), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_content_box, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_content_box, (backdrop != NULL) ? LV_OPA_TRANSP : LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_content_box, content_frame, LV_PART_MAIN);
     lv_obj_set_style_border_color(s_content_box, lv_color_hex(APP_UI_COLOR_CONTENT_BORDER), LV_PART_MAIN);
-    lv_obj_set_style_border_opa(s_content_box, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_content_box, (fx != NULL) ? LV_OPA_TRANSP : LV_OPA_70, LV_PART_MAIN);
     lv_obj_set_style_pad_all(s_content_box, 0, LV_PART_MAIN);
 
     ui_pages_create_topbar(screen);
@@ -1392,6 +1699,9 @@ bool ui_pages_show_index(uint16_t index)
         display_flash_watch_note(note);
     }
     system_log_event("ui", "page -> %s", s_pages[index].id);
+    if (strncmp(s_pages[index].id, "energy", 6) == 0) {
+        ha_client_energy_page_shown();
+    }
     if (s_show_cb != NULL) {
         s_show_cb(s_pages[index].id, index);
     }
@@ -1461,6 +1771,51 @@ void ui_pages_set_topbar_status(
     display_unlock();
 }
 
+/* Date in the configured format: WD = weekday, DD, MM, YYYY; a format without
+ * the year ends with a dot when it uses dots ("24.10."). */
+static void ui_topbar_format_date(char *out, size_t out_len, const struct tm *t, const char *weekday)
+{
+    const char *fmt = s_topbar_cfg.date_format[0] != '\0' ? s_topbar_cfg.date_format : "WD, DD.MM.YYYY";
+    size_t n = 0;
+    bool has_year = false;
+    bool dotted = false;
+    out[0] = '\0';
+    for (const char *p = fmt; *p != '\0' && n + 1 < out_len;) {
+        int w = 0;
+        if (strncmp(p, "WD", 2) == 0) {
+            w = snprintf(out + n, out_len - n, "%s", weekday);
+            p += 2;
+        } else if (strncmp(p, "YYYY", 4) == 0) {
+            w = snprintf(out + n, out_len - n, "%04d", t->tm_year + 1900);
+            has_year = true;
+            p += 4;
+        } else if (strncmp(p, "DD", 2) == 0) {
+            w = snprintf(out + n, out_len - n, "%02d", t->tm_mday);
+            p += 2;
+        } else if (strncmp(p, "MM", 2) == 0) {
+            w = snprintf(out + n, out_len - n, "%02d", t->tm_mon + 1);
+            p += 2;
+        } else {
+            if (*p == '.') {
+                dotted = true;
+            }
+            out[n] = *p++;
+            out[n + 1] = '\0';
+            w = 1;
+        }
+        if (w > 0) {
+            n += (size_t)w;
+        }
+        if (n >= out_len) {
+            n = out_len - 1;
+        }
+    }
+    if (!has_year && dotted && n + 1 < out_len && n > 0 && out[n - 1] != '.') {
+        out[n++] = '.';
+        out[n] = '\0';
+    }
+}
+
 void ui_pages_set_topbar_datetime(const struct tm *timeinfo)
 {
     if (timeinfo == NULL) {
@@ -1478,9 +1833,8 @@ void ui_pages_set_topbar_datetime(const struct tm *timeinfo)
 
     char date_buf[40] = {0};
     char time_buf[32] = {0};
-    snprintf(date_buf, sizeof(date_buf), "%s %02d.%02d.%04d",
-        ui_i18n_get(WEEKDAYS[wday].key, WEEKDAYS[wday].fallback), timeinfo->tm_mday, timeinfo->tm_mon + 1,
-        timeinfo->tm_year + 1900);
+    ui_topbar_format_date(date_buf, sizeof(date_buf), timeinfo,
+        ui_i18n_get(WEEKDAYS[wday].key, WEEKDAYS[wday].fallback));
     s_topbar_time = *timeinfo;
     s_topbar_have_time = true;
     ui_topbar_clock_text(time_buf, sizeof(time_buf));

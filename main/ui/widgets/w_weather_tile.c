@@ -1219,7 +1219,26 @@ static const lv_font_t *weather_pick_render_icon_font(
     return weather_find_icon_font_for_cp(codepoint);
 }
 
+static void weather_humanize_condition_raw(const char *src, char *dst, size_t dst_size);
+
+/* HA reports conditions as codes ("partlycloudy"); the HA frontend translates
+ * them, so the panel does too ("weather.cond.<code>"), falling back to the
+ * code made readable. */
 static void weather_humanize_condition(const char *src, char *dst, size_t dst_size)
+{
+    if (src != NULL && src[0] != '\0' && strlen(src) < 40) {
+        char key[56];
+        snprintf(key, sizeof(key), "weather.cond.%s", src);
+        const char *translated = ui_i18n_get(key, NULL);
+        if (translated != NULL && translated[0] != '\0') {
+            weather_copy_text(dst, dst_size, translated);
+            return;
+        }
+    }
+    weather_humanize_condition_raw(src, dst, dst_size);
+}
+
+static void weather_humanize_condition_raw(const char *src, char *dst, size_t dst_size)
 {
     if (dst == NULL || dst_size == 0) {
         return;
@@ -1310,7 +1329,14 @@ static int weather_weekday_from_ymd(int year, int month, int day)
 
 static void weather_day_from_datetime(const char *datetime, char *out, size_t out_size)
 {
-    static const char *weekday_names[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    /* Same short weekday names as the top bar date ("weekday.*"). */
+    static const struct {
+        const char *key;
+        const char *fallback;
+    } weekday_names[7] = {
+        {"weekday.su", "Sun"}, {"weekday.mo", "Mon"}, {"weekday.tu", "Tue"}, {"weekday.we", "Wed"},
+        {"weekday.th", "Thu"}, {"weekday.fr", "Fri"}, {"weekday.sa", "Sat"},
+    };
     if (out == NULL || out_size == 0) {
         return;
     }
@@ -1328,7 +1354,7 @@ static void weather_day_from_datetime(const char *datetime, char *out, size_t ou
         weather_copy_text(out, out_size, "--");
         return;
     }
-    weather_copy_text(out, out_size, weekday_names[weekday]);
+    weather_copy_text(out, out_size, ui_i18n_get(weekday_names[weekday].key, weekday_names[weekday].fallback));
 }
 
 static bool weather_datetime_is_today(const char *datetime)
@@ -1705,7 +1731,7 @@ static void weather_build_3day_rows(const weather_values_t *values, weather_3day
 
     weather_3day_row_t *current = &rows[0];
     current->valid = true;
-    weather_copy_text(current->day, sizeof(current->day), "Now");
+    weather_copy_text(current->day, sizeof(current->day), ui_i18n_get("weather.now", "Now"));
     /* "Now" must reflect the live weather entity state, not today's forecast summary. */
     weather_copy_text(current->condition_key, sizeof(current->condition_key),
         values->condition_key[0] != '\0' ? values->condition_key : values->today_condition_key);

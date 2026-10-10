@@ -75,3 +75,7 @@ esp_err_t wifi_mgr_get_sta_ap_info(wifi_mgr_sta_ap_info_t *out_info);
 esp_err_t wifi_mgr_get_sta_rssi(int8_t *out_rssi_dbm);
 esp_err_t wifi_mgr_get_link_stats(wifi_mgr_link_stats_t *out_stats);
 esp_err_t wifi_mgr_scan(wifi_mgr_scan_result_t *results, size_t max_results, size_t *out_count);
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+/* Ethernet kit: PHY link (cable + switch) is up, with or without an address. */
+bool wifi_mgr_eth_link_up(void);
+#endif

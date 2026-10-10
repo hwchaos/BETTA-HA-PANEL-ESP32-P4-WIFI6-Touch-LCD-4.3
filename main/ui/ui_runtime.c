@@ -41,7 +41,6 @@
 #include "ui/ui_widget_factory.h"
 #include "ui/theme/theme_default.h"
 #include "util/log_tags.h"
-#include "xiaozhi/xiaozhi_ui.h"
 
 #define UI_MODEL_RECONCILE_INTERVAL_MS 1000
 
@@ -882,6 +881,7 @@ static bool ui_runtime_widget_from_json(cJSON *widget_json, ui_widget_def_t *out
     cJSON *slider_accent_color = cJSON_GetObjectItemCaseSensitive(widget_json, "slider_accent_color");
     cJSON *button_accent_color = cJSON_GetObjectItemCaseSensitive(widget_json, "button_accent_color");
     cJSON *button_mode = cJSON_GetObjectItemCaseSensitive(widget_json, "button_mode");
+    cJSON *icon = cJSON_GetObjectItemCaseSensitive(widget_json, "icon");
     cJSON *graph_line_color = cJSON_GetObjectItemCaseSensitive(widget_json, "graph_line_color");
     cJSON *graph_point_count = cJSON_GetObjectItemCaseSensitive(widget_json, "graph_point_count");
     cJSON *graph_time_window_min = cJSON_GetObjectItemCaseSensitive(widget_json, "graph_time_window_min");
@@ -904,6 +904,7 @@ static bool ui_runtime_widget_from_json(cJSON *widget_json, ui_widget_def_t *out
     cJSON *clock_show_seconds = cJSON_GetObjectItemCaseSensitive(widget_json, "clock_show_seconds");
     cJSON *clock_show_date = cJSON_GetObjectItemCaseSensitive(widget_json, "clock_show_date");
     cJSON *sensor_value_color = cJSON_GetObjectItemCaseSensitive(widget_json, "sensor_value_color");
+    cJSON *sensor_history_popup = cJSON_GetObjectItemCaseSensitive(widget_json, "sensor_history_popup");
     cJSON *tile_border_width = cJSON_GetObjectItemCaseSensitive(widget_json, "tile_border_width");
     cJSON *tile_radius = cJSON_GetObjectItemCaseSensitive(widget_json, "tile_radius");
     cJSON *tile_opacity = cJSON_GetObjectItemCaseSensitive(widget_json, "tile_opacity");
@@ -945,6 +946,9 @@ static bool ui_runtime_widget_from_json(cJSON *widget_json, ui_widget_def_t *out
     }
     if (cJSON_IsString(button_accent_color) && button_accent_color->valuestring != NULL) {
         snprintf(out->button_accent_color, sizeof(out->button_accent_color), "%s", button_accent_color->valuestring);
+    }
+    if (cJSON_IsString(icon) && icon->valuestring != NULL) {
+        snprintf(out->icon, sizeof(out->icon), "%s", icon->valuestring);
     }
     if (cJSON_IsString(button_mode) && button_mode->valuestring != NULL) {
         snprintf(out->button_mode, sizeof(out->button_mode), "%s", button_mode->valuestring);
@@ -1035,6 +1039,7 @@ static bool ui_runtime_widget_from_json(cJSON *widget_json, ui_widget_def_t *out
     if (cJSON_IsBool(clock_show_date)) {
         out->clock_show_date = cJSON_IsTrue(clock_show_date);
     }
+    out->sensor_history_popup = cJSON_IsTrue(sensor_history_popup);
     if (cJSON_IsString(sensor_value_color) && sensor_value_color->valuestring != NULL) {
         snprintf(out->sensor_value_color, sizeof(out->sensor_value_color), "%s", sensor_value_color->valuestring);
     }
@@ -1119,7 +1124,8 @@ static void ui_runtime_energy_config_from_json(cJSON *page_json, const char *pag
     bool source_was_configured =
         cJSON_IsString(source_item) && source_item->valuestring != NULL && source_item->valuestring[0] != '\0';
     ui_runtime_copy_json_string(energy, "source", out->source, sizeof(out->source));
-    if (strcmp(out->source, "manual_live") != 0 && strcmp(out->source, "ha_energy") != 0) {
+    if (strcmp(out->source, "manual_live") != 0 && strcmp(out->source, "ha_energy") != 0 &&
+        strcmp(out->source, "ha_energy_live") != 0) {
         snprintf(out->source, sizeof(out->source), "%s", "ha_energy");
     }
 
@@ -1330,7 +1336,7 @@ static void ui_runtime_add_default_weather_page(void)
     }
 
     static const ui_widget_def_t defs[] = {
-        { .id = "pogoda_now", .type = "weather_tile", .title = "Pogoda", .entity_id = "weather.dom",
+        { .id = "pogoda_now", .type = "weather_tile", .title = "Wetter", .entity_id = "weather.dom",
           .x = 0, .y = 0, .w = 390, .h = 230,
           .tile_bg_color = "#143a63", .tile_bg_grad_color = "#0b2038", .tile_bg_grad_dir = "ver",
           .tile_border_color = "#4f9dff", .tile_border_width = 1, .tile_radius = 16, .tile_opacity = 100,
@@ -1349,7 +1355,7 @@ static void ui_runtime_add_default_weather_page(void)
           .tile_border_color = "#2ecc9a", .tile_border_width = 1, .tile_radius = 16, .tile_opacity = 100,
           .tile_text_color = "#d8f7ec", .tile_title_color = "#7dffcf", .tile_label_color = "#8fd9c1",
           .tile_value_color = "#ffffff", .tile_icon_color = "#3ddba6", .tile_font_scale = "m" },
-        { .id = "pogoda_hum", .type = "sensor", .title = "Wilgotność",
+        { .id = "pogoda_hum", .type = "sensor", .title = "Luftfeuchtigkeit",
           .entity_id = "sensor.temperatura_salon_wilgotnosc",
           .x = 400, .y = 240, .w = 624, .h = 230,
           .tile_bg_color = "#0f2a22", .tile_bg_grad_color = "#07130f", .tile_bg_grad_dir = "ver",
@@ -1577,6 +1583,13 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
             has_weather_page = true;
         }
 
+        /* The Xiaozhi assistant was removed; old layouts may still list its
+         * page, which is skipped instead of showing an empty tab. */
+        if (cJSON_IsString(page_type) && page_type->valuestring != NULL &&
+            strcmp(page_type->valuestring, "xiaozhi") == 0) {
+            continue;
+        }
+
         /* Cameras pages are opened from the top-bar cameras chip instead. */
         bool is_cameras_type = cJSON_IsString(page_type) && page_type->valuestring != NULL &&
                                strcmp(page_type->valuestring, "cameras") == 0;
@@ -1617,13 +1630,6 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
             if (err == ESP_OK) {
                 s_energy_page_count++;
             }
-            continue;
-        }
-
-        bool is_xiaozhi_page = cJSON_IsString(page_type) && page_type->valuestring != NULL &&
-                               strcmp(page_type->valuestring, "xiaozhi") == 0;
-        if (is_xiaozhi_page) {
-            xz_ui_build(page_container);
             continue;
         }
 

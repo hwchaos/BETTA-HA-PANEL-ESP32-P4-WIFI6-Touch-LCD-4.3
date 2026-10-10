@@ -12,6 +12,13 @@
 #include "cJSON.h"
 
 #include "app_config.h"
+
+/* A stored layout must stay valid whichever side the navigation bar is on:
+ * with the bar at the bottom the canvas is widest, with the bar on the left it
+ * is tallest. The runtime fits every tile into the actual content box, so
+ * switching never invalidates (and never resets) a layout. */
+#define LAYOUT_CANVAS_MAX_W (APP_CONTENT_BOX_WIDTH_BASE)
+#define LAYOUT_CANVAS_MAX_H (APP_SCREEN_HEIGHT - APP_CONTENT_BOX_Y)
 #include "ui/theme/theme_palette.h"
 #include "ui/ui_radio_page.h"
 
@@ -129,8 +136,8 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
     widget_size_limits_t limits = {
         .min_w = 60,
         .min_h = 60,
-        .max_w = APP_CONTENT_BOX_WIDTH,
-        .max_h = APP_CONTENT_BOX_HEIGHT,
+        .max_w = LAYOUT_CANVAS_MAX_W,
+        .max_h = LAYOUT_CANVAS_MAX_H,
     };
 
     if (type == NULL) {
@@ -272,8 +279,8 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_w = 260;
         limits.min_h = 220;
 #endif
-        limits.max_w = APP_CONTENT_BOX_WIDTH;
-        limits.max_h = APP_CONTENT_BOX_HEIGHT;
+        limits.max_w = LAYOUT_CANVAS_MAX_W;
+        limits.max_h = LAYOUT_CANVAS_MAX_H;
     } else if (strcmp(type, "roborock_tile") == 0) {
 #if APP_LAYOUT_COMPACT
         limits.min_w = 220;
@@ -282,8 +289,8 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_w = 240;
         limits.min_h = 220;
 #endif
-        limits.max_w = APP_CONTENT_BOX_WIDTH;
-        limits.max_h = APP_CONTENT_BOX_HEIGHT;
+        limits.max_w = LAYOUT_CANVAS_MAX_W;
+        limits.max_h = LAYOUT_CANVAS_MAX_H;
     } else if (strcmp(type, "lock") == 0 || strcmp(type, "fan") == 0 || strcmp(type, "cover") == 0) {
 #if APP_LAYOUT_COMPACT
         limits.min_w = 100;
@@ -323,8 +330,8 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.min_w = 180;
         limits.min_h = 140;
 #endif
-        limits.max_w = APP_CONTENT_BOX_WIDTH;
-        limits.max_h = APP_CONTENT_BOX_HEIGHT;
+        limits.max_w = LAYOUT_CANVAS_MAX_W;
+        limits.max_h = LAYOUT_CANVAS_MAX_H;
     } else if (strcmp(type, "scene_tile") == 0) {
         /* Icon plus the scene name - the whole tile is the button. */
 #if APP_LAYOUT_COMPACT
@@ -360,11 +367,11 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
         limits.max_h = 480;
     }
 
-    if (limits.max_w > APP_CONTENT_BOX_WIDTH) {
-        limits.max_w = APP_CONTENT_BOX_WIDTH;
+    if (limits.max_w > LAYOUT_CANVAS_MAX_W) {
+        limits.max_w = LAYOUT_CANVAS_MAX_W;
     }
-    if (limits.max_h > APP_CONTENT_BOX_HEIGHT) {
-        limits.max_h = APP_CONTENT_BOX_HEIGHT;
+    if (limits.max_h > LAYOUT_CANVAS_MAX_H) {
+        limits.max_h = LAYOUT_CANVAS_MAX_H;
     }
     return limits;
 }
@@ -637,7 +644,8 @@ static bool is_valid_energy_source(const char *source)
     if (source == NULL || source[0] == '\0') {
         return false;
     }
-    return strcmp(source, "ha_energy") == 0 || strcmp(source, "manual_live") == 0;
+    return strcmp(source, "ha_energy") == 0 || strcmp(source, "manual_live") == 0 ||
+           strcmp(source, "ha_energy_live") == 0;
 }
 
 static void validate_energy_entity_field(cJSON *energy, const char *key, const char *page_id,
@@ -687,7 +695,7 @@ static void validate_energy_page(cJSON *page, const char *page_id, layout_valida
         } else if (source->valuestring[0] != '\0' && !is_valid_energy_source(source->valuestring)) {
             snprintf(msg,
                 sizeof(msg),
-                "page %s energy.source must be ha_energy or manual_live",
+                "page %s energy.source must be ha_energy, manual_live or ha_energy_live",
                 page_id != NULL ? page_id : "?");
             layout_validation_add(result, msg);
         }
@@ -1002,6 +1010,7 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
     cJSON *slider_direction = cJSON_GetObjectItemCaseSensitive(widget, "slider_direction");
     cJSON *slider_accent_color = cJSON_GetObjectItemCaseSensitive(widget, "slider_accent_color");
     cJSON *button_accent_color = cJSON_GetObjectItemCaseSensitive(widget, "button_accent_color");
+    cJSON *icon = cJSON_GetObjectItemCaseSensitive(widget, "icon");
     cJSON *button_mode = cJSON_GetObjectItemCaseSensitive(widget, "button_mode");
     cJSON *graph_line_color = cJSON_GetObjectItemCaseSensitive(widget, "graph_line_color");
     cJSON *graph_point_count = cJSON_GetObjectItemCaseSensitive(widget, "graph_point_count");
@@ -1263,6 +1272,12 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
 
     if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "sensor") == 0) {
         cJSON *sensor_value_color = cJSON_GetObjectItemCaseSensitive(widget, "sensor_value_color");
+        cJSON *sensor_history_popup = cJSON_GetObjectItemCaseSensitive(widget, "sensor_history_popup");
+        if (sensor_history_popup != NULL && !cJSON_IsBool(sensor_history_popup)) {
+            snprintf(msg, sizeof(msg), "widget %s: sensor_history_popup must be true/false",
+                cJSON_IsString(id) ? id->valuestring : "?");
+            layout_validation_add(result, msg);
+        }
         if (sensor_value_color != NULL) {
             if (!cJSON_IsString(sensor_value_color) || sensor_value_color->valuestring == NULL ||
                 (sensor_value_color->valuestring[0] != '\0' && !is_valid_hex_rgb_color(sensor_value_color->valuestring))) {
@@ -1271,6 +1286,13 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
                 layout_validation_add(result, msg);
             }
         }
+    }
+
+    if (icon != NULL && (!cJSON_IsString(icon) || icon->valuestring == NULL ||
+                            strlen(icon->valuestring) >= APP_MAX_ICON_LEN)) {
+        snprintf(msg, sizeof(msg), "widget %s: icon must be a short \"mdi:name\" string",
+            cJSON_IsString(id) ? id->valuestring : "?");
+        layout_validation_add(result, msg);
     }
 
     if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "button") == 0) {
@@ -1459,8 +1481,8 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
             int rw = w->valueint;
             int rh = h->valueint;
             widget_size_limits_t limits = widget_size_limits_for_type(cJSON_IsString(type) ? type->valuestring : NULL);
-            if (rw <= 0 || rh <= 0 || rx < 0 || ry < 0 || (rx + rw) > APP_CONTENT_BOX_WIDTH ||
-                (ry + rh) > APP_CONTENT_BOX_HEIGHT) {
+            if (rw <= 0 || rh <= 0 || rx < 0 || ry < 0 || (rx + rw) > LAYOUT_CANVAS_MAX_W ||
+                (ry + rh) > LAYOUT_CANVAS_MAX_H) {
                 snprintf(msg, sizeof(msg), "widget %s: rect out of bounds for content box",
                     cJSON_IsString(id) ? id->valuestring : "?");
                 layout_validation_add(result, msg);

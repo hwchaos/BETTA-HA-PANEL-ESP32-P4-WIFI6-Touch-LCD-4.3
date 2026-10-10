@@ -119,6 +119,12 @@ esp_err_t layout_store_init(void)
         return ESP_OK;
     }
 
-    ESP_LOGW(TAG_LAYOUT, "Stored layout failed validation, writing defaults");
+    /* Keep the rejected layout next to the defaults so it can be restored. */
+    ESP_LOGW(TAG_LAYOUT, "Stored layout failed validation, keeping it as %s and writing defaults",
+        APP_LAYOUT_PATH ".bad");
+    (void)remove(APP_LAYOUT_PATH ".bad");
+    if (rename(APP_LAYOUT_PATH, APP_LAYOUT_PATH ".bad") != 0) {
+        ESP_LOGW(TAG_LAYOUT, "Could not keep the rejected layout");
+    }
     return layout_store_save(s_default_layout);
 }

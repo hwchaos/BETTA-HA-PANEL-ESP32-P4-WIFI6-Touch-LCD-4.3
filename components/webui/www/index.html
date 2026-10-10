@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BETTA HA Panel - BETTA Editor</title>
   <link rel="stylesheet" href="/styles.css" />
+  <!-- Icon previews in the editor only; the panel ships its own MDI font. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" />
 </head>
 <body>
   <div id="provisioningRoot" class="provisioning-shell hidden">
@@ -78,7 +80,6 @@
                 <div id="addPageMenu" class="dropdown-menu hidden" role="menu">
                   <button id="addPageMenuNormal" class="dropdown-item" type="button" role="menuitem">Normal Page</button>
                   <button id="addPageMenuEnergy" class="dropdown-item" type="button" role="menuitem">Energy Page</button>
-                  <button id="addPageMenuXiaozhi" class="dropdown-item" type="button" role="menuitem">Xiaozhi Page</button>
                   <button id="addPageMenuCameras" class="dropdown-item" type="button" role="menuitem">Cameras Page</button>
                   <button id="addPageMenuMusic" class="dropdown-item" type="button" role="menuitem">Music Page</button>
                   <button id="addPageMenuRadio" class="dropdown-item" type="button" role="menuitem">Radio Page</button>
@@ -112,6 +113,7 @@
                   <select id="energySource">
                     <option id="energySourceHaOption" value="ha_energy">Home Assistant Energy</option>
                     <option id="energySourceManualOption" value="manual_live">Manual live sensors</option>
+                    <option id="energySourceHaLiveOption" value="ha_energy_live">HA-Energie + Live (wischen)</option>
                   </select>
                 </label>
                 <div class="meta" id="energySourceHint">Uses the Energy dashboard configured in Home Assistant.</div>
@@ -257,13 +259,13 @@
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addHeatingTileBtn">Heating Tile</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addMediaPlayerBtn">Media Player</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addRoborockTileBtn">Roborock</button>
-                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverBtn">Cover</button>
+                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverBtn">Cover (mit Tasten)</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addLockBtn">Lock</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addFanBtn">Fan</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addSelectBtn">Select</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addNumberBtn">Number</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addAlarmTileBtn">Alarm Panel</button>
-                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverTileBtn">Cover</button>
+                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverTileBtn">Cover-Kachel (mit Popup)</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addSceneTileBtn">Scene</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addPersonTileBtn">Person</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addTimerTileBtn">Timer</button>
@@ -374,6 +376,13 @@
               <details class="inspector-group" open>
                 <summary><span id="inspectorGroupStyleLabel">Style</span></summary>
                 <div class="inspector-group-body">
+                  <label id="fIconWrap" class="hidden"><span id="fIconLabel">Icon</span>
+                    <span class="icon-input-row">
+                      <i id="fIconPreview" class="mdi icon-input-preview" aria-hidden="true"></i>
+                      <input id="fIcon" type="text" list="mdiIconOptions" placeholder="automatic" autocomplete="off" />
+                    </span>
+                    <datalist id="mdiIconOptions"></datalist>
+                  </label>
                   <div id="buttonOptions" class="slider-options hidden">
                     <label><span id="fButtonModeLabel">Button mode</span>
                       <select id="fButtonMode">
@@ -542,6 +551,10 @@
                   <div id="sensorOptions" class="slider-options hidden">
                     <label><span id="fSensorValueColorLabel">Value color (empty = auto)</span>
                       <input id="fSensorValueColor" type="text" placeholder="#RRGGBB (auto)" />
+                    </label>
+                    <label class="row">
+                      <input id="fSensorHistoryPopup" type="checkbox" />
+                      <span id="fSensorHistoryPopupLabel">History popup on tap</span>
                     </label>
                   </div>
                   <div id="inspectorStyleEmpty" class="meta hidden" data-i18n-key="inspector.style.empty">No style options for this widget.</div>
@@ -744,9 +757,73 @@
             </label>
             <div id="settingsHaInfo" class="meta"></div>
           </div>
+        <section id="settingsMqttSection" class="settings-subsection">
+            <h2 id="settingsMqttHeading">MQTT / Home Assistant</h2>
+            <div class="form">
+              <label class="row">
+                <input id="settingsMqttEnabled" type="checkbox" />
+                <span id="settingsMqttEnabledLabel">Enable MQTT (auto-discovered as a device in Home Assistant)</span>
+              </label>
+              <label class="row">
+                <input id="settingsMqttUseTls" type="checkbox" />
+                <span id="settingsMqttUseTlsLabel">Use TLS (mqtts, port 8883)</span>
+              </label>
+              <div id="settingsMqttTlsHint" class="meta"></div>
+              <label><span id="settingsMqttHostLabel">Broker host (empty = derive from HA URL)</span>
+                <input id="settingsMqttHost" type="text" placeholder="homeassistant.local" maxlength="128" />
+              </label>
+              <label><span id="settingsMqttPortLabel">Broker port</span>
+                <input id="settingsMqttPort" type="number" min="1" max="65535" step="1" />
+              </label>
+              <label><span id="settingsMqttUsernameLabel">Username</span>
+                <input id="settingsMqttUsername" type="text" maxlength="64" autocomplete="off" />
+              </label>
+              <label><span id="settingsMqttPasswordLabel">Password</span>
+                <input id="settingsMqttPassword" type="password" maxlength="64" autocomplete="new-password" />
+              </label>
+              <label><span id="settingsMqttDiscoveryPrefixLabel">Discovery prefix</span>
+                <input id="settingsMqttDiscoveryPrefix" type="text" placeholder="homeassistant" maxlength="64" />
+              </label>
+              <div id="settingsMqttInfo" class="meta"></div>
+              <div class="row">
+                <button id="applyMqttBtn" class="btn" type="button">Apply MQTT (no reboot)</button>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section>
+          <h2 id="settingsAssistHeading">Sprachassistent (HA Assist)</h2>
+          <div class="form">
+            <label class="row">
+              <input id="settingsAssistEnabled" type="checkbox" />
+              <span>Assist aktivieren (Mikrofon-Taste oben in der Leiste)</span>
+            </label>
+            <label><span>Pipeline</span>
+              <select id="settingsAssistPipeline">
+                <option value="">Bevorzugte Pipeline</option>
+              </select>
+            </label>
+            <div class="row">
+              <button id="settingsAssistReload" type="button">Pipelines neu laden</button>
+            </div>
+            <label class="row">
+              <input id="settingsAssistReply" type="checkbox" />
+              <span>Antwort über den Lautsprecher vorlesen</span>
+            </label>
+            <label><span>Mikrofonverstärkung: <b id="settingsAssistGainValue">30</b> dB</span>
+              <input id="settingsAssistGain" type="range" min="0" max="42" step="3" />
+            </label>
+            <label><span>Maximale Aufnahmedauer (Sekunden)</span>
+              <input id="settingsAssistMaxListen" type="number" min="3" max="30" step="1" />
+            </label>
+            <div id="settingsAssistInfo" class="meta">Gedrückt halten und sprechen, oder kurz tippen und sprechen, bis eine Pause erkannt wird. Die Pipeline (Whisper / Speech-to-Phrase, Piper) wird in Home Assistant unter Einstellungen &rarr; Sprachassistenten eingerichtet.</div>
+          </div>
+        </section>
+
+        <!-- Xiaozhi assistant removed from the firmware; kept hidden so the
+             settings code that still references these fields keeps working. -->
+        <section class="hidden">
           <h2 id="settingsXiaozhiHeading">Xiaozhi AI</h2>
           <div class="form">
             <label class="row">
@@ -769,54 +846,6 @@
           </div>
         </section>
 
-        <section>
-          <h2 id="settingsCamerasHeading">Kamery</h2>
-          <div class="form">
-            <div class="meta" id="camerasHint">Skonfiguruj do 4 kamer (encje HA camera.* lub migawki HTTP).</div>
-            <div id="camerasList" class="cameras-list"></div>
-            <button id="camerasAddBtn" class="btn small primary" type="button">+ Dodaj kamerę</button>
-            <div id="camerasEditor" class="cameras-editor hidden">
-              <label><span id="camerasNameLabel">Nazwa</span>
-                <input id="camerasName" type="text" maxlength="63" placeholder="Kamera" />
-              </label>
-              <label><span id="camerasSourceLabel">Źródło</span>
-                <select id="camerasSource">
-                  <option id="camerasSourceHaOption" value="ha">Encja HA (camera.*)</option>
-                  <option id="camerasSourceHttpOption" value="http">URL migawki HTTP</option>
-                </select>
-              </label>
-              <div id="camerasHaFields">
-                <label><span id="camerasEntityLabel">Encja kamery</span>
-                  <select id="camerasEntity"></select>
-                </label>
-                <div class="meta" id="camerasEntityHint">Brak encji camera.* — sprawdź połączenie z HA.</div>
-              </div>
-              <div id="camerasHttpFields">
-                <label><span id="camerasUrlLabel">URL migawki (http:// lub https://)</span>
-                  <input id="camerasUrl" type="text" maxlength="511" placeholder="http://192.168.1.50/ISAPI/Streaming/channels/101/picture" />
-                </label>
-                <label><span id="camerasUserLabel">Użytkownik (opcjonalnie)</span>
-                  <input id="camerasUser" type="text" maxlength="63" autocomplete="off" />
-                </label>
-                <label><span id="camerasPassLabel">Hasło (opcjonalnie)</span>
-                  <input id="camerasPass" type="password" maxlength="63" autocomplete="off" />
-                </label>
-              </div>
-              <label><span id="camerasRefreshLabel">Odświeżanie (ms)</span>
-                <input id="camerasRefresh" type="number" min="1000" max="60000" step="500" value="2000" />
-              </label>
-              <label class="row">
-                <input id="camerasEnabled" type="checkbox" checked />
-                <span id="camerasEnabledLabel">Włączona</span>
-              </label>
-              <div class="row">
-                <button id="camerasSaveBtn" class="btn primary" type="button">Zapisz</button>
-                <button id="camerasDeleteBtn" class="btn danger" type="button">Usuń</button>
-              </div>
-            </div>
-            <div id="camerasInfo" class="meta"></div>
-          </div>
-        </section>
 
         <section>
           <h2 id="settingsLocalCamHeading">Built-in camera</h2>
@@ -899,18 +928,6 @@
           </div>
         </section>
 
-        <section>
-          <h2 id="settingsTimeHeading">Time</h2>
-          <div class="form">
-            <label><span id="settingsNtpServerLabel">NTP Server</span>
-              <input id="settingsNtpServer" type="text" placeholder="pool.ntp.org" maxlength="127" />
-            </label>
-            <label><span id="settingsTimezoneLabel">Timezone (POSIX TZ)</span>
-              <input id="settingsTimezone" type="text" placeholder="CET-1CEST,M3.5.0/2,M10.5.0/3" maxlength="127" />
-            </label>
-            <div id="settingsTimeInfo" class="meta"></div>
-          </div>
-        </section>
 
         <section>
           <h2 id="settingsDisplayHeading">Display / Screensaver</h2>
@@ -1057,7 +1074,83 @@
             </div>
             <div id="settingsValueAnimHint" class="meta">Animates values that change by themselves (sensors, weather, power). Counting digits keeps the unit in place and works with values like "22.5 °C". 0 ms turns the effect off.</div>
             <hr />
-            <label><span id="settingsTopbarHeading">Top bar</span></label>
+            <div class="grid-2">
+              <label><span>Navigation (Seitenleiste)</span>
+                <select id="settingsNavPosition">
+                  <option value="bottom">Unten (horizontal)</option>
+                  <option value="left">Links (vertikal)</option>
+                </select>
+              </label>
+              <div class="meta">Eine Änderung startet das Panel neu. Die Kachelfläche wird dabei schmaler und höher &ndash; Seiten ggf. im Editor nachziehen.</div>
+            </div>
+            <label><span id="settingsNavHeading">Bottom bar (page tabs)</span></label>
+            <div class="grid-2">
+              <label class="row">
+                <input id="settingsNavCustomColors" type="checkbox" />
+                <span id="settingsNavCustomColorsLabel">Own colours</span>
+              </label>
+            </div>
+            <div id="settingsNavHint" class="meta">The bottom bar shows the home button and one tab per page. Tab titles are shortened with "..." when a page name is too long.</div>
+            <div id="settingsNavColorHint" class="meta">With "Own colours" switched off the bottom bar follows the active theme.</div>
+            <div class="grid-2" id="settingsNavColors">
+              <label><span id="settingsNavBarBgColorLabel">Bar background</span>
+                <input id="settingsNavBarBgColor" type="color" />
+              </label>
+              <label><span id="settingsNavBarBorderColorLabel">Bar top border</span>
+                <input id="settingsNavBarBorderColor" type="color" />
+              </label>
+              <label><span id="settingsNavButtonBgColorLabel">Tab background</span>
+                <input id="settingsNavButtonBgColor" type="color" />
+              </label>
+              <label><span id="settingsNavButtonBorderColorLabel">Tab border</span>
+                <input id="settingsNavButtonBorderColor" type="color" />
+              </label>
+              <label><span id="settingsNavTabIdleColorLabel">Page title colour</span>
+                <input id="settingsNavTabIdleColor" type="color" />
+              </label>
+              <label><span id="settingsNavTabActiveColorLabel">Active page title colour</span>
+                <input id="settingsNavTabActiveColor" type="color" />
+              </label>
+              <label><span id="settingsNavHomeIdleColorLabel">Home icon colour</span>
+                <input id="settingsNavHomeIdleColor" type="color" />
+              </label>
+              <label><span id="settingsNavHomeActiveColorLabel">Active home icon colour</span>
+                <input id="settingsNavHomeActiveColor" type="color" />
+              </label>
+            </div>
+            <div class="row">
+              <button id="applyDisplayBtn" class="btn" type="button">Apply now (no reboot)</button>
+            </div>
+            <div id="settingsDisplayInfo" class="meta"></div>
+          </div>
+        </section>
+
+        <section>
+          <h2 id="settingsStatusbarHeading">Statusleiste</h2>
+          <div class="form">
+            <div class="topbar-arrange">
+              <div class="waste-settings-title">Anordnung</div>
+              <div id="topbarPreview" class="topbar-preview">
+                <div class="tbp-zone tbp-left"></div>
+                <div class="tbp-zone tbp-center"></div>
+                <div class="tbp-zone tbp-right"></div>
+              </div>
+              <div id="topbarArrangeList" class="topbar-arrange-list"></div>
+              <div class="meta">Jedes Element links, mittig oder rechts anordnen (oder ausblenden); die Pfeile ändern die Reihenfolge innerhalb des Bereichs. Die Mitte-Gruppe sitzt genau in der Bildschirmmitte &ndash; ein einzelnes Element dort (z.&nbsp;B. die Uhr) also exakt zentriert. Die Uhr wählt automatisch die größte passende Schrift. Kameras, Wetter, Müll, Warnung und Mikrofon erscheinen nur, wenn sie eingerichtet bzw. aktiv sind.</div>
+            </div>
+            <label><span>Datumsformat</span>
+              <select id="settingsTopbarDateFormat">
+                <option value="DD.MM.YYYY">24.10.2026 (Tag.Monat.Jahr)</option>
+                <option value="MM/DD/YYYY">10/24/2026 (US-Format)</option>
+                <option value="YYYY-MM-DD">2026-10-24 (ISO)</option>
+                <option value="DD.MM">24.10. (ohne Jahr)</option>
+                <option value="MM.DD">10.24. (Monat zuerst, ohne Jahr)</option>
+                <option value="WD, DD.MM.YYYY">Sa, 24.10.2026 (mit Wochentag)</option>
+                <option value="WD, DD.MM">Sa, 24.10. (mit Wochentag, ohne Jahr)</option>
+              </select>
+            </label>
+            <hr />
+            <label><span id="settingsTopbarHeading">Elemente</span></label>
             <div class="grid-2">
               <label class="row">
                 <input id="settingsTopbarShowClock" type="checkbox" />
@@ -1106,73 +1199,144 @@
                 <input id="settingsTopbarWifiColor" type="color" />
               </label>
             </div>
-            <hr />
-            <label><span id="settingsNavHeading">Bottom bar (page tabs)</span></label>
-            <div class="grid-2">
-              <label class="row">
-                <input id="settingsNavCustomColors" type="checkbox" />
-                <span id="settingsNavCustomColorsLabel">Own colours</span>
-              </label>
+            <div class="waste-settings">
+              <div class="waste-settings-title">Müllabfuhr in der oberen Leiste (bis zu 4)</div>
+                <div class="waste-slot-row">
+                  <input id="settingsWasteEntity0" type="text" list="wasteEntityOptions" placeholder="sensor.muell_rest" autocomplete="off" />
+                  <input id="settingsWasteColor0" type="color" title="Farbe des Mülleimers" />
+                </div>
+                <div class="waste-slot-row">
+                  <input id="settingsWasteEntity1" type="text" list="wasteEntityOptions" placeholder="sensor.muell_bio" autocomplete="off" />
+                  <input id="settingsWasteColor1" type="color" title="Farbe des Mülleimers" />
+                </div>
+                <div class="waste-slot-row">
+                  <input id="settingsWasteEntity2" type="text" list="wasteEntityOptions" placeholder="sensor.muell_papier" autocomplete="off" />
+                  <input id="settingsWasteColor2" type="color" title="Farbe des Mülleimers" />
+                </div>
+                <div class="waste-slot-row">
+                  <input id="settingsWasteEntity3" type="text" list="wasteEntityOptions" placeholder="sensor.muell_gelb" autocomplete="off" />
+                  <input id="settingsWasteColor3" type="color" title="Farbe des Mülleimers" />
+                </div>
+              <datalist id="wasteEntityOptions"></datalist>
+              <div class="meta">Je Tonne eine Entität und die Farbe des Mülleimer-Symbols. Am Symbol stehen die Tage bis zur Abholung (z.&nbsp;B. 5T); am Abholtag blinkt es. Verstanden werden Sensoren mit Tagen als Zustand, das Attribut daysTo (Waste Collection Schedule), ein Datum (JJJJ-MM-TT) oder Kalender-Entitäten. Leer = Symbol aus.</div>
             </div>
-            <div id="settingsNavHint" class="meta">The bottom bar shows the home button and one tab per page. Tab titles are shortened with "..." when a page name is too long.</div>
-            <div id="settingsNavColorHint" class="meta">With "Own colours" switched off the bottom bar follows the active theme.</div>
-            <div class="grid-2" id="settingsNavColors">
-              <label><span id="settingsNavBarBgColorLabel">Bar background</span>
-                <input id="settingsNavBarBgColor" type="color" />
+            <hr />
+            <div class="alert-settings">
+              <div class="waste-settings-title">Warnungen (rotes Dreieck)</div>
+              <label class="row">
+                <input id="settingsAlertPersistent" type="checkbox" />
+                <span>Benachrichtigungen aus Home Assistant (persistent notifications)</span>
               </label>
-              <label><span id="settingsNavBarBorderColorLabel">Bar top border</span>
-                <input id="settingsNavBarBorderColor" type="color" />
-              </label>
-              <label><span id="settingsNavButtonBgColorLabel">Tab background</span>
-                <input id="settingsNavButtonBgColor" type="color" />
-              </label>
-              <label><span id="settingsNavButtonBorderColorLabel">Tab border</span>
-                <input id="settingsNavButtonBorderColor" type="color" />
-              </label>
-              <label><span id="settingsNavTabIdleColorLabel">Page title colour</span>
-                <input id="settingsNavTabIdleColor" type="color" />
-              </label>
-              <label><span id="settingsNavTabActiveColorLabel">Active page title colour</span>
-                <input id="settingsNavTabActiveColor" type="color" />
-              </label>
-              <label><span id="settingsNavHomeIdleColorLabel">Home icon colour</span>
-                <input id="settingsNavHomeIdleColor" type="color" />
-              </label>
-              <label><span id="settingsNavHomeActiveColorLabel">Active home icon colour</span>
-                <input id="settingsNavHomeActiveColor" type="color" />
-              </label>
+              <div class="alert-entity-list">
+                <input id="settingsAlertEntity0" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input id="settingsAlertEntity1" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input id="settingsAlertEntity2" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input id="settingsAlertEntity3" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+              </div>
+              <div class="meta">Zusätzliche Entitäten, die als Warnung zählen, sobald sie aktiv sind (z.&nbsp;B. DWD-Wetterwarnung mit Warnstufe &gt; 0, binary_sensor an). Das Dreieck blinkt bei ungelesenen Meldungen; ein Tipp zeigt die Liste, nach &bdquo;Gelesen&ldquo; leuchtet es dauerhaft, bis die Warnung vorbei ist.</div>
             </div>
             <div class="row">
-              <button id="applyDisplayBtn" class="btn" type="button">Apply now (no reboot)</button>
+              <button id="applyStatusbarBtn" class="btn" type="button">Jetzt übernehmen (ohne Neustart)</button>
             </div>
-            <div id="settingsDisplayInfo" class="meta"></div>
           </div>
+        <section id="settingsCamerasSection" class="settings-subsection">
+            <h2 id="settingsCamerasHeading">Kamery</h2>
+            <div class="form">
+              <div class="meta" id="camerasHint">Skonfiguruj do 4 kamer (encje HA camera.* lub migawki HTTP).</div>
+              <div id="camerasList" class="cameras-list"></div>
+              <button id="camerasAddBtn" class="btn small primary" type="button">+ Dodaj kamerę</button>
+              <div id="camerasEditor" class="cameras-editor hidden">
+                <label><span id="camerasNameLabel">Nazwa</span>
+                  <input id="camerasName" type="text" maxlength="63" placeholder="Kamera" />
+                </label>
+                <label><span id="camerasSourceLabel">Źródło</span>
+                  <select id="camerasSource">
+                    <option id="camerasSourceHaOption" value="ha">Encja HA (camera.*)</option>
+                    <option id="camerasSourceHttpOption" value="http">URL migawki HTTP</option>
+                  </select>
+                </label>
+                <div id="camerasHaFields">
+                  <label><span id="camerasEntityLabel">Encja kamery</span>
+                    <select id="camerasEntity"></select>
+                  </label>
+                  <div class="meta" id="camerasEntityHint">Brak encji camera.* — sprawdź połączenie z HA.</div>
+                </div>
+                <div id="camerasHttpFields">
+                  <label><span id="camerasUrlLabel">URL migawki (http:// lub https://)</span>
+                    <input id="camerasUrl" type="text" maxlength="511" placeholder="http://192.168.1.50/ISAPI/Streaming/channels/101/picture" />
+                  </label>
+                  <label><span id="camerasUserLabel">Użytkownik (opcjonalnie)</span>
+                    <input id="camerasUser" type="text" maxlength="63" autocomplete="off" />
+                  </label>
+                  <label><span id="camerasPassLabel">Hasło (opcjonalnie)</span>
+                    <input id="camerasPass" type="password" maxlength="63" autocomplete="off" />
+                  </label>
+                </div>
+                <label><span id="camerasRefreshLabel">Odświeżanie (ms)</span>
+                  <input id="camerasRefresh" type="number" min="1000" max="60000" step="500" value="2000" />
+                </label>
+                <label class="row">
+                  <input id="camerasEnabled" type="checkbox" checked />
+                  <span id="camerasEnabledLabel">Włączona</span>
+                </label>
+                <div class="row">
+                  <button id="camerasSaveBtn" class="btn primary" type="button">Zapisz</button>
+                  <button id="camerasDeleteBtn" class="btn danger" type="button">Usuń</button>
+                </div>
+              </div>
+              <div id="camerasInfo" class="meta"></div>
+            </div>
+          </section>
         </section>
 
-        <section id="settingsSdSection">
-          <h2 id="settingsSdHeading">microSD card</h2>
+
+        <section>
+          <h2 id="settingsRadarHeading">Präsenzsensor (LD2410)</h2>
           <div class="form">
+            <div id="radarStatus" class="radar-status">
+              <div class="radar-status-head"><span id="radarStatusDot" class="radar-dot"></span><span id="radarStatusText">Status wird geladen…</span></div>
+              <div id="radarStatusDetail" class="meta"></div>
+            </div>
             <label class="row">
-              <input id="settingsSdEnabled" type="checkbox" />
-              <span id="settingsSdEnabledLabel">Enable microSD card (TF slot)</span>
+              <input id="settingsRadarEnabled" type="checkbox" />
+              <span>LD2410 aktivieren (UART)</span>
             </label>
-            <div id="settingsSdStatus" class="meta"></div>
-            <div class="row">
-              <button id="sdRefreshBtn" class="btn small" type="button">Refresh</button>
-              <button id="sdExportLogsBtn" class="btn small" type="button">Export logs to card</button>
-              <button id="sdFormatBtn" class="btn small danger" type="button">Format card</button>
+            <div class="grid-2">
+              <label><span>TX-Pin (Panel &rarr; Sensor RX)</span>
+                <input id="settingsRadarTx" type="number" min="-1" max="63" step="1" />
+              </label>
+              <label><span>RX-Pin (Sensor TX &rarr; Panel)</span>
+                <input id="settingsRadarRx" type="number" min="-1" max="63" step="1" />
+              </label>
+              <label><span>Baudrate</span>
+                <select id="settingsRadarBaud">
+                  <option value="256000">256000 (Standard)</option>
+                  <option value="115200">115200</option>
+                  <option value="57600">57600</option>
+                  <option value="38400">38400</option>
+                  <option value="19200">19200</option>
+                  <option value="9600">9600</option>
+                </select>
+              </label>
             </div>
             <hr />
+            <label class="row">
+              <input id="settingsRadarWake" type="checkbox" />
+              <span>Display bei Annäherung einschalten</span>
+            </label>
+            <label><span>Annäherungs-Distanz: <b id="settingsRadarWakeCmValue">150</b> cm</span>
+              <input id="settingsRadarWakeCm" type="range" min="30" max="600" step="10" />
+            </label>
+            <label class="row">
+              <input id="settingsRadarKeepAwake" type="checkbox" />
+              <span>Display an lassen, solange jemand da ist</span>
+            </label>
+            <div class="meta">Ab Werk ist das Kit verdrahtet mit TX GPIO21 / RX GPIO20. -1 = nicht angeschlossen. Die Live-Werte oben zeigen, ob der Sensor Daten liefert und in welcher Entfernung er jemanden erkennt &ndash; damit lässt sich die Annäherungs-Distanz passend einstellen.</div>
             <div class="row">
-              <button id="sdUpBtn" class="btn small" type="button">Up</button>
-              <button id="sdRootBtn" class="btn small" type="button">Card root</button>
-              <button id="sdLogsBtn" class="btn small" type="button">Logs folder</button>
-              <button id="sdPhotosBtn" class="btn small" type="button">Photos folder</button>
+              <button id="applyRadarBtn" class="btn" type="button">Speichern (ohne Neustart)</button>
+              <button id="radarSelfTestBtn" class="btn" type="button">Selbsttest</button>
             </div>
-            <div id="sdPath" class="meta">/</div>
-            <div id="sdFileList" class="sd-file-list"></div>
-            <div id="sdWallpaperStore" class="meta"></div>
-            <div id="settingsSdInfo" class="meta"></div>
+            <div id="radarInfo" class="meta"></div>
           </div>
         </section>
 
@@ -1207,61 +1371,7 @@
           </div>
         </section>
 
-        <section>
-          <h2 id="settingsMqttHeading">MQTT / Home Assistant</h2>
-          <div class="form">
-            <label class="row">
-              <input id="settingsMqttEnabled" type="checkbox" />
-              <span id="settingsMqttEnabledLabel">Enable MQTT (auto-discovered as a device in Home Assistant)</span>
-            </label>
-            <label class="row">
-              <input id="settingsMqttUseTls" type="checkbox" />
-              <span id="settingsMqttUseTlsLabel">Use TLS (mqtts, port 8883)</span>
-            </label>
-            <div id="settingsMqttTlsHint" class="meta"></div>
-            <label><span id="settingsMqttHostLabel">Broker host (empty = derive from HA URL)</span>
-              <input id="settingsMqttHost" type="text" placeholder="homeassistant.local" maxlength="128" />
-            </label>
-            <label><span id="settingsMqttPortLabel">Broker port</span>
-              <input id="settingsMqttPort" type="number" min="1" max="65535" step="1" />
-            </label>
-            <label><span id="settingsMqttUsernameLabel">Username</span>
-              <input id="settingsMqttUsername" type="text" maxlength="64" autocomplete="off" />
-            </label>
-            <label><span id="settingsMqttPasswordLabel">Password</span>
-              <input id="settingsMqttPassword" type="password" maxlength="64" autocomplete="new-password" />
-            </label>
-            <label><span id="settingsMqttDiscoveryPrefixLabel">Discovery prefix</span>
-              <input id="settingsMqttDiscoveryPrefix" type="text" placeholder="homeassistant" maxlength="64" />
-            </label>
-            <div id="settingsMqttInfo" class="meta"></div>
-            <div class="row">
-              <button id="applyMqttBtn" class="btn" type="button">Apply MQTT (no reboot)</button>
-            </div>
-          </div>
-        </section>
 
-        <section>
-          <h2 id="settingsUiHeading">UI</h2>
-          <div class="form">
-            <label><span id="settingsLanguageLabel">Language</span>
-              <select id="settingsLanguage"></select>
-            </label>
-            <div id="settingsUiInfo" class="meta"></div>
-            <div class="row">
-              <button id="reloadLanguagesBtn" class="btn small" type="button">Reload Languages</button>
-              <button id="downloadLanguageBtn" class="btn small" type="button">Download JSON</button>
-            </div>
-            <label><span id="uploadLanguageCodeLabel">Language Code</span>
-              <input id="uploadLanguageCode" type="text" maxlength="15" placeholder="fr" />
-            </label>
-            <label><span id="uploadLanguageFileLabel">Translation JSON File</span>
-              <input id="uploadLanguageFile" type="file" accept="application/json,.json" />
-            </label>
-            <button id="uploadLanguageBtn" class="btn" type="button">Upload / Add Language</button>
-            <div id="settingsTranslationInfo" class="meta"></div>
-          </div>
-        </section>
 
         <section>
           <h2 id="settingsThemeHeading">Theme</h2>
@@ -1299,11 +1409,6 @@
           </div>
         </section>
 
-        <section>
-          <h2 id="settingsApHeading">Setup AP</h2>
-          <div id="settingsApInfo" class="meta"></div>
-          <div id="settingsApHint" class="meta">If setup AP is active, connect to it and open <code>http://192.168.4.1</code>.</div>
-        </section>
 
         <section>
           <h2 id="settingsOtaHeading">Firmware Update</h2>
@@ -1338,23 +1443,87 @@
             </label>
             <div id="settingsSystemInfo" class="meta"></div>
           </div>
+        <section id="settingsTimeSection" class="settings-subsection">
+            <h2 id="settingsTimeHeading">Time</h2>
+            <div class="form">
+              <label><span id="settingsNtpServerLabel">NTP Server</span>
+                <input id="settingsNtpServer" type="text" placeholder="pool.ntp.org" maxlength="127" />
+              </label>
+              <label><span id="settingsTimezoneLabel">Timezone (POSIX TZ)</span>
+                <input id="settingsTimezone" type="text" placeholder="CET-1CEST,M3.5.0/2,M10.5.0/3" maxlength="127" />
+              </label>
+              <div id="settingsTimeInfo" class="meta"></div>
+            </div>
+          </section>
+          <section id="settingsUiSection" class="settings-subsection">
+            <h2 id="settingsUiHeading">UI</h2>
+            <div class="form">
+              <label><span id="settingsLanguageLabel">Language</span>
+                <select id="settingsLanguage"></select>
+              </label>
+              <div id="settingsUiInfo" class="meta"></div>
+              <div class="row">
+                <button id="reloadLanguagesBtn" class="btn small" type="button">Reload Languages</button>
+                <button id="downloadLanguageBtn" class="btn small" type="button">Download JSON</button>
+              </div>
+              <label><span id="uploadLanguageCodeLabel">Language Code</span>
+                <input id="uploadLanguageCode" type="text" maxlength="15" placeholder="fr" />
+              </label>
+              <label><span id="uploadLanguageFileLabel">Translation JSON File</span>
+                <input id="uploadLanguageFile" type="file" accept="application/json,.json" />
+              </label>
+              <button id="uploadLanguageBtn" class="btn" type="button">Upload / Add Language</button>
+              <div id="settingsTranslationInfo" class="meta"></div>
+            </div>
+          </section>
+          <section id="settingsApSection" class="settings-subsection">
+            <h2 id="settingsApHeading">Setup AP</h2>
+            <div id="settingsApInfo" class="meta"></div>
+            <div id="settingsApHint" class="meta">If setup AP is active, connect to it and open <code>http://192.168.4.1</code>.</div>
+          </section>
+          <section id="settingsSdSection" class="settings-subsection">
+            <h2 id="settingsSdHeading">microSD card</h2>
+            <div class="form">
+              <label class="row">
+                <input id="settingsSdEnabled" type="checkbox" />
+                <span id="settingsSdEnabledLabel">Enable microSD card (TF slot)</span>
+              </label>
+              <div id="settingsSdStatus" class="meta"></div>
+              <div class="row">
+                <button id="sdRefreshBtn" class="btn small" type="button">Refresh</button>
+                <button id="sdExportLogsBtn" class="btn small" type="button">Export logs to card</button>
+                <button id="sdFormatBtn" class="btn small danger" type="button">Format card</button>
+              </div>
+              <hr />
+              <div class="row">
+                <button id="sdUpBtn" class="btn small" type="button">Up</button>
+                <button id="sdRootBtn" class="btn small" type="button">Card root</button>
+                <button id="sdLogsBtn" class="btn small" type="button">Logs folder</button>
+                <button id="sdPhotosBtn" class="btn small" type="button">Photos folder</button>
+              </div>
+              <div id="sdPath" class="meta">/</div>
+              <div id="sdFileList" class="sd-file-list"></div>
+              <div id="sdWallpaperStore" class="meta"></div>
+              <div id="settingsSdInfo" class="meta"></div>
+            </div>
+          </section>
+          <section id="settingsBackupSection" class="settings-subsection">
+            <h2 id="settingsBackupHeading">Backup / Restore</h2>
+            <div class="form">
+              <div id="settingsBackupHint" class="meta">The backup contains the layout, public settings and custom themes.</div>
+              <div class="row">
+                <button id="downloadBackupBtn" class="btn small" type="button">Download backup</button>
+              </div>
+              <hr />
+              <label><span id="settingsBackupFileLabel">Backup file to restore</span>
+                <input id="settingsBackupFile" type="file" accept="application/json,.json" />
+              </label>
+              <button id="restoreBackupBtn" class="btn danger" type="button">Restore backup</button>
+              <div id="settingsBackupInfo" class="meta"></div>
+            </div>
+          </section>
         </section>
 
-        <section id="settingsBackupSection">
-          <h2 id="settingsBackupHeading">Backup / Restore</h2>
-          <div class="form">
-            <div id="settingsBackupHint" class="meta">The backup contains the layout, public settings and custom themes.</div>
-            <div class="row">
-              <button id="downloadBackupBtn" class="btn small" type="button">Download backup</button>
-            </div>
-            <hr />
-            <label><span id="settingsBackupFileLabel">Backup file to restore</span>
-              <input id="settingsBackupFile" type="file" accept="application/json,.json" />
-            </label>
-            <button id="restoreBackupBtn" class="btn danger" type="button">Restore backup</button>
-            <div id="settingsBackupInfo" class="meta"></div>
-          </div>
-        </section>
 
         <section id="settingsDiagnosticsSection">
           <h2 id="settingsDiagnosticsHeading">Diagnostics</h2>
@@ -1372,9 +1541,7 @@
             <button id="logsRefreshBtn" class="btn small" type="button">Refresh</button>
             <button id="logsPauseBtn" class="btn small" type="button">Pause</button>
             <button id="logsClearBtn" class="btn small" type="button">Clear</button>
-          </div>
-          <div class="row">
-            <label><input id="logsAutoScroll" type="checkbox" checked /> <span id="logsAutoScrollLabel">Auto-scroll</span></label>
+            <label class="row"><input id="logsAutoScroll" type="checkbox" checked /> <span id="logsAutoScrollLabel">Auto-scroll</span></label>
             <a id="logsDownloadLink" class="btn small" href="/api/logs?all=1" download="betta-system.log">Download log</a>
           </div>
           <div class="form">

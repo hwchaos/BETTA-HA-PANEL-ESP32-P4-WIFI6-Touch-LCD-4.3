@@ -18,6 +18,11 @@
 #include "diag/system_log.h"
 #include "net/wifi_mgr.h"
 #include "util/log_tags.h"
+#include "nvs.h"
+#include "diag/storage_guard.h"
+
+/* ESP32-P4-ETH: rollback when the network is not up this long after boot. */
+#define P4ETH_CONFIRM_DEADLINE_MS (4 * 60 * 1000)
 
 /* Boot counter shared through RTC memory: it survives software, panic and
  * watchdog resets (so a reboot loop is visible in the log) and is zeroed by a
@@ -56,6 +61,33 @@ static void boot_guard_take_prev_stage(void)
     s_info.prev_stage[len] = '\0';
 }
 
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+/* The Ethernet kit falls back to ESPHome when a new image fails, which wipes
+ * the RTC breadcrumbs. Keep the last stage in NVS as well, so the next attempt
+ * can tell where the previous one ended. */
+#define BOOT_GUARD_NVS_NS "betta_diag"
+static bool s_nvs_ready;
+static char s_nvs_prev_stage[BOOT_GUARD_STAGE_MAX] = "";
+
+static void boot_guard_nvs_write_stage(const char *stage)
+{
+    if (!s_nvs_ready || storage_guard_flash_writers_paused()) {
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(BOOT_GUARD_NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        (void)nvs_set_str(h, "stage", stage);
+        (void)nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+const char *boot_guard_prev_run_stage(void)
+{
+    return s_nvs_prev_stage;
+}
+#endif
+
 void boot_guard_stage(const char *stage)
 {
     s_rtc_uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
@@ -64,6 +96,9 @@ void boot_guard_stage(const char *stage)
     }
     strncpy(s_rtc_stage, stage, sizeof(s_rtc_stage) - 1U);
     s_rtc_stage[sizeof(s_rtc_stage) - 1U] = '\0';
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    boot_guard_nvs_write_stage(stage);
+#endif
 }
 
 static esp_err_t boot_guard_read_ota_state(uint32_t *out_state){
@@ -72,8 +107,12 @@ static esp_err_t boot_guard_read_ota_state(uint32_t *out_state){
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Reading otadata maps it through the MMU; a background flash write in that
+     * window resets the chip (HP_SYS_HP_WDT, see storage_guard.h). */
     esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    storage_guard_flash_writers_pause();
     esp_err_t err = esp_ota_get_state_partition(running, &state);
+    storage_guard_flash_writers_resume();
     if (err != ESP_OK) {
         return err;
     }
@@ -134,6 +173,22 @@ void boot_guard_init(void)
 
 void boot_guard_report_boot(void)
 {
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    /* NVS is up now: take the previous run's last stage, then track this run. */
+    {
+        nvs_handle_t h;
+        if (nvs_open(BOOT_GUARD_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+            size_t len = sizeof(s_nvs_prev_stage);
+            if (nvs_get_str(h, "stage", s_nvs_prev_stage, &len) != ESP_OK) {
+                s_nvs_prev_stage[0] = '\0';
+            }
+            nvs_close(h);
+        }
+        s_nvs_ready = true;
+        ESP_LOGW(TAG_APP, "previous run ended at stage '%s'", s_nvs_prev_stage[0] ? s_nvs_prev_stage : "-");
+        boot_guard_nvs_write_stage(s_rtc_stage[0] ? s_rtc_stage : "boot");
+    }
+#endif
     if (!s_initialized) {
         boot_guard_init();
     }
@@ -193,7 +248,26 @@ static void boot_guard_confirm_task(void *arg)
 
         const int64_t uptime_ms = esp_timer_get_time() / 1000;
         const bool wifi_ok = wifi_mgr_is_connected();
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+        /* Strict on the Ethernet kit: a new image is only confirmed with a
+         * working network (and after a short settle time). Without one the
+         * panel cannot be reached for another update, so return to the
+         * previous firmware (ESPHome on the first install) instead. */
+        if (!wifi_ok || uptime_ms < 20000) {
+            if (uptime_ms >= P4ETH_CONFIRM_DEADLINE_MS) {
+                ESP_LOGE(TAG_APP, "no network %llds after boot - rolling back to the previous firmware",
+                         (long long)(uptime_ms / 1000));
+                vTaskDelay(pdMS_TO_TICKS(500));
+                storage_guard_flash_writers_pause();
+                (void)esp_ota_mark_app_invalid_rollback_and_reboot();
+                storage_guard_flash_writers_resume();
+            }
+            continue;
+        }
+        const bool uptime_ok = false;
+#else
         const bool uptime_ok = uptime_ms >= APP_BOOT_CONFIRM_TIMEOUT_MS;
+#endif
         if (!wifi_ok && !uptime_ok) {
             if (uptime_ms >= APP_BOOT_CONFIRM_TIMEOUT_MS / 2) {
                 ESP_LOGW(TAG_APP,
@@ -204,11 +278,18 @@ static void boot_guard_confirm_task(void *arg)
             continue;
         }
 
+        /* Same MMU window as above: background writers wait until otadata is
+         * written. */
+        storage_guard_flash_writers_pause();
         err = esp_ota_mark_app_valid_cancel_rollback();
+        storage_guard_flash_writers_resume();
         if (err == ESP_OK) {
             s_confirmed = true;
             s_info.confirmed = true;
             s_info.rollback_pending = false;
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+            boot_guard_nvs_write_stage("confirmed");
+#endif
             ESP_LOGI(TAG_APP,
                      "firmware confirmed (wifi=%d, uptime=%llds): OTA rollback cancelled",
                      (int)wifi_ok,
@@ -229,9 +310,11 @@ void boot_guard_start_confirm_task(void)
     if (!s_initialized) {
         boot_guard_init();
     }
-    if (s_confirmed || !s_info.rollback_pending) {
+    static bool s_task_started;
+    if (s_confirmed || !s_info.rollback_pending || s_task_started) {
         return;
     }
+    s_task_started = true;
     if (xTaskCreate(boot_guard_confirm_task, "boot_guard", 3072, NULL, 4, NULL) != pdPASS) {
         ESP_LOGW(TAG_APP, "Failed to create boot-guard task");
     }

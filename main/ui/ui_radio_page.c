@@ -244,7 +244,8 @@ static radio_ctx_t *radio_find_by_root(lv_obj_t *root)
     }
     return NULL;
 }
-/* ---------------------------------------------------------- player prefs */
+
+/* ---------------------------------------------------------- player prefs */
 
 /*
  * The player picked on the panel wins over the layout configuration: the layout
@@ -444,7 +445,7 @@ static bool radio_has_target(const radio_ctx_t *ctx)
 static const char *radio_player_label(const radio_ctx_t *ctx, char *buffer, size_t buffer_len)
 {
     if (radio_panel_mode(ctx)) {
-        snprintf(buffer, buffer_len, "%s", ui_i18n_get("radio.player_panel_short", "Głośnik panelu"));
+        snprintf(buffer, buffer_len, "%s", ui_i18n_get("radio.player_panel_short", "Panel-Lautsprecher"));
         return buffer;
     }
 
@@ -660,12 +661,12 @@ static void radio_panel_sync(radio_ctx_t *ctx, bool force)
         radio_show_state(ctx, "radio.playing", "Odtwarzanie", true);
         break;
     case PANEL_RADIO_BUFFERING:
-        radio_show_state(ctx, "radio.connecting", "Łączenie...", false);
+        radio_show_state(ctx, "radio.connecting", "Verbinde...", false);
         break;
     case PANEL_RADIO_ERROR:
         ctx->pending = false;
         ctx->playing_index = -1;
-        radio_show_state(ctx, "radio.error", "Błąd stacji", false);
+        radio_show_state(ctx, "radio.error", "Senderfehler", false);
         ESP_LOGW(TAG, "panel radio error: %s", ctx->panel_error);
         break;
     case PANEL_RADIO_IDLE:
@@ -734,7 +735,7 @@ static void radio_play_station(radio_ctx_t *ctx, size_t index)
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "panel radio refused '%s': %s", name, esp_err_to_name(err));
             system_log_event(TAG, "panel radio play failed (%s)", esp_err_to_name(err));
-            radio_show_state(ctx, "radio.error", "Błąd stacji", false);
+            radio_show_state(ctx, "radio.error", "Senderfehler", false);
             radio_render(ctx);
             return;
         }
@@ -742,7 +743,7 @@ static void radio_play_station(radio_ctx_t *ctx, size_t index)
         ctx->playing_index = (int)index;
         ctx->pending = true;
         ctx->is_playing = false;
-        radio_show_state(ctx, "radio.connecting", "Łączenie...", false);
+        radio_show_state(ctx, "radio.connecting", "Verbinde...", false);
         radio_render(ctx);
         ESP_LOGI(TAG, "panel radio playing '%s' (%s)", name, url);
         return;
@@ -770,7 +771,7 @@ static void radio_play_station(radio_ctx_t *ctx, size_t index)
     snprintf(ctx->now_text, sizeof(ctx->now_text), "%s", name);
     ctx->playing_index = (int)index;
     ctx->pending = true;
-    radio_show_state(ctx, "radio.connecting", "Łączenie...", false);
+    radio_show_state(ctx, "radio.connecting", "Verbinde...", false);
     radio_render(ctx);
     ESP_LOGI(TAG, "play_media '%s' -> %s", name, entity);
 }
@@ -977,7 +978,7 @@ static void radio_style_button(lv_obj_t *button)
 
 /*
  * The player is picked on the panel because only the panel knows whether it has
- * its own speaker: "Głośnik panelu" decodes the stream on the ESP32-P4 and
+ * its own speaker: "Panel-Lautsprecher" decodes the stream on the ESP32-P4 and
  * plays it through the ES8311, "Home Assistant" hands the station to one of the
  * media_player entities.
  */
@@ -1228,7 +1229,7 @@ static void radio_picker_open(radio_ctx_t *ctx)
     lv_obj_set_style_text_color(hint, lv_color_hex(APP_UI_COLOR_TEXT_MUTED), LV_PART_MAIN);
     lv_obj_set_width(hint, LV_PCT(100));
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(hint, ui_i18n_get("radio.player_hint", "Wybierz, gdzie ma grać stacja"));
+    lv_label_set_text(hint, ui_i18n_get("radio.player_hint", "Wähle, wo der Sender spielen soll"));
 
     ctx->picker_list = lv_obj_create(card);
     lv_obj_remove_style_all(ctx->picker_list);
@@ -1244,7 +1245,7 @@ static void radio_picker_open(radio_ctx_t *ctx)
     lv_obj_set_scroll_dir(ctx->picker_list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(ctx->picker_list, LV_SCROLLBAR_MODE_AUTO);
 
-    radio_pick_add_row(ctx, ctx->picker_list, ui_i18n_get("radio.player_panel", "Głośnik panelu"),
+    radio_pick_add_row(ctx, ctx->picker_list, ui_i18n_get("radio.player_panel", "Panel-Lautsprecher"),
         ui_i18n_get("radio.player_panel_hint", "w panelu"), true, NULL);
     radio_add_ha_player_rows(ctx, ctx->picker_list);
 
@@ -1485,7 +1486,7 @@ esp_err_t ui_radio_page_create(
     lv_label_set_long_mode(ctx->msg_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(ctx->msg_label, inner_w - 60);
     lv_label_set_text_fmt(ctx->msg_label, "%s\n\n%s", ui_i18n_get("radio.no_player", "Brak odtwarzacza w HA"),
-        ui_i18n_get("radio.no_player_hint", "Dodaj odtwarzacz media_player do Home Assistant albo wskaż go w edytorze strony."));
+        ui_i18n_get("radio.no_player_hint", "Füge einen media_player in Home Assistant hinzu oder wähle ihn im Seiten-Editor."));
     lv_obj_center(ctx->msg_label);
 
     memset(out_instance, 0, sizeof(*out_instance));
@@ -1637,7 +1638,7 @@ void ui_radio_page_apply_state(ui_radio_page_instance_t *instance, const ha_stat
     } else if (paused) {
         radio_show_state(ctx, "radio.paused", "Pauza", false);
     } else if (!known) {
-        radio_show_state(ctx, "lvgl.common.unavailable", "niedostępny", false);
+        radio_show_state(ctx, "common.unavailable", "nicht verfügbar", false);
     } else {
         radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
     }

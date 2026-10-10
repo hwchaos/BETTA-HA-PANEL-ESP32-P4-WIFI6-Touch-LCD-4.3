@@ -131,6 +131,11 @@ static const cJSON *ui_i18n_lookup_path(const char *key)
 const char *ui_i18n_get(const char *key, const char *fallback)
 {
     const cJSON *node = ui_i18n_lookup_path(key);
+    /* A key that is also a group ("climate.fan" and "climate.fan.auto") keeps
+     * its own text under "_". */
+    if (cJSON_IsObject(node)) {
+        node = cJSON_GetObjectItemCaseSensitive((cJSON *)node, "_");
+    }
     if (cJSON_IsString(node) && node->valuestring != NULL && node->valuestring[0] != '\0') {
         return node->valuestring;
     }

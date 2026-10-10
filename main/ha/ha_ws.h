@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -43,4 +44,6 @@ void ha_ws_stop(void);
 bool ha_ws_is_connected(void);
 bool ha_ws_is_running(void);
 esp_err_t ha_ws_send_text(const char *text);
+/* Binary frame (Assist audio: handler id byte + PCM). */
+esp_err_t ha_ws_send_bin(const uint8_t *data, size_t len);
 bool ha_ws_get_cached_resolved_ipv4(char *host_out, size_t host_out_sz, char *ip_out, size_t ip_out_sz);

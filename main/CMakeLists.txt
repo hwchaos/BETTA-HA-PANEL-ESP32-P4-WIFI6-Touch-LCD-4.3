@@ -27,6 +27,14 @@ else()
     )
 endif()
 
+# Network link: Wi-Fi manager, or the Ethernet manager (same wifi_mgr.h API)
+# on the ESP32-P4-ETH kit.
+if(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+    set(NET_MGR_SRCS "net/eth_mgr.c")
+else()
+    set(NET_MGR_SRCS "net/wifi_mgr.c")
+endif()
+
 # Built-in MIPI-CSI camera (panel7 / Waveshare 7B only).
 set(APP_LOCAL_CAMERA_SRCS "")
 if(CONFIG_APP_FEATURE_LOCAL_CAMERA)
@@ -80,7 +88,7 @@ idf_component_register(
         "layout/layout_validate.c"
         "settings/runtime_settings.c"
         "settings/i18n_store.c"
-        "net/wifi_mgr.c"
+        ${NET_MGR_SRCS}
         "net/net_health.c"
         "net/time_sync.c"
         "mqtt/panel_mqtt.c"
@@ -104,6 +112,8 @@ idf_component_register(
         "ui/ui_i18n.c"
         "ui/ui_widget_factory.c"
         "ui/ui_tile_style.c"
+        "ui/ui_mdi_icon.c"
+        "ui/ui_sensor_history.c"
         "ui/ui_bindings.c"
         "ui/lv_psram_mem.c"
         "ui/widgets/w_sensor.c"
@@ -131,7 +141,9 @@ idf_component_register(
         "ui/widgets/w_person_tile.c"
         "ui/widgets/w_timer_tile.c"
         "ui/fonts/mdi_font_registry.c"
+        "ui/fonts/mdi_names.c"
         "ui/theme/theme_default.c"
+        "ui/theme/theme_fx.c"
         "ui/theme/theme_palette.c"
         "ui/theme/theme_store.c"
         "camera/camera_store.c"
@@ -139,10 +151,13 @@ idf_component_register(
         "util/json_util.c"
         "util/ringbuf.c"
         "radio/panel_radio.c"
-        "xiaozhi/xiaozhi_activate.c"
         "xiaozhi/xiaozhi_audio.c"
-        "xiaozhi/xiaozhi_client.c"
-        "xiaozhi/xiaozhi_ui.c"
+        "assist/panel_assist.c"
+        "ui/ui_assist.c"
+        "ui/ui_geometry.c"
+        "ui/ui_topbar_waste.c"
+        "ui/ui_topbar_alerts.c"
+        "radar/ld2410.c"
     INCLUDE_DIRS
         "."
         "api"
@@ -165,8 +180,10 @@ idf_component_register(
         esp_netif
         esp_event
         esp_wifi
+        esp_eth
         esp_driver_gpio
         esp_driver_i2c
+        esp_driver_uart
         esp_driver_ledc
         esp_driver_sdspi
         esp_driver_sdmmc
@@ -205,7 +222,7 @@ endif()
 
 # ESP-Hosted (P4 + C6 coprocessor) is only used by panel4 / panel10.
 # panels3 (ESP32-S3) has native Wi-Fi and must not pull in the hosted stack.
-if(NOT CONFIG_APP_PANEL_VARIANT_S3_480)
+if(NOT CONFIG_APP_PANEL_VARIANT_S3_480 AND NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
     idf_component_optional_requires(PRIVATE esp_wifi_remote esp_hosted)
 endif()
 
@@ -219,6 +236,13 @@ if(CONFIG_APP_PANEL_VARIANT_S3_480)
     )
 endif()
 
+# The ESP32-P4-ETH kit builds the 7B variant on top of the Nano BSP.
+if(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+    target_include_directories(${COMPONENT_LIB} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/drivers/p4eth_bsp_shim"
+    )
+endif()
+
 # The 4.3" board builds the 7B variant; this shim redirects the 7B BSP header
 # to the 4.3" BSP.
 if(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
@@ -227,8 +251,14 @@ if(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
     )
 endif()
 
+# Full Material Design Icons webfont for ui_mdi_icon.c (any "mdi:..." icon,
+# rendered at runtime by LVGL's Tiny TTF engine).
+if(CONFIG_LV_USE_TINY_TTF)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/ui/fonts/materialdesignicons-webfont.ttf" BINARY)
+endif()
+
 set(APP_HAVE_HOSTED_C6_FW_IMAGE 0)
-if(NOT CONFIG_APP_PANEL_VARIANT_S3_480)
+if(NOT CONFIG_APP_PANEL_VARIANT_S3_480 AND NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
 set(HOSTED_C6_FW_BIN "")
 set(HOSTED_C6_FW_EMBED_DIR "${CMAKE_CURRENT_BINARY_DIR}/hosted_c6_fw")
 set(HOSTED_C6_FW_BIN_RELEASE_GENERIC "${CMAKE_SOURCE_DIR}/release/network_adapter_esp32c6.bin")

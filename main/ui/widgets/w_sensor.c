@@ -13,6 +13,8 @@
 
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
+#include "ui/ui_mdi_icon.h"
+#include "ui/ui_sensor_history.h"
 #include "ui/ui_memory.h"
 #include "ui/ui_value_anim.h"
 #include "ui/theme/theme_default.h"
@@ -77,6 +79,10 @@ typedef struct {
     lv_obj_t *title_label;
     lv_obj_t *value_label;
     lv_obj_t *age_label;
+    lv_obj_t *icon_label;  /* MDI icon left of the value; hidden without one */
+    char entity_id[APP_MAX_ENTITY_ID_LEN];
+    char tile_icon[APP_MAX_ICON_LEN]; /* icon chosen in the editor ("" = automatic) */
+    bool history_popup;               /* tap opens the HA history popup */
     int64_t last_update_ms;
     bool has_timestamp;
     bool unavailable;
@@ -305,8 +311,54 @@ static void sensor_apply_layout(w_sensor_ctx_t *ctx)
     }
     lv_obj_align(ctx->value_label, LV_ALIGN_CENTER, 0, value_y);
 
+    /* Icon + value as one centred row. The icon is sized to the value font. */
+    bool icon_row = false;
+    if (ctx->icon_label != NULL && !lv_obj_has_flag(ctx->icon_label, LV_OBJ_FLAG_HIDDEN)) {
+        const lv_font_t *value_font = lv_obj_get_style_text_font(ctx->value_label, LV_PART_MAIN);
+        /* MDI glyphs fill ~3/4 of the em box: size the font to the value's
+         * line height so the icon reads as tall as the digits. */
+        int32_t px = (int32_t)lv_font_get_line_height(value_font);
+        if (px < 24) {
+            px = 24;
+        }
+        char name[APP_MAX_ICON_LEN];
+        snprintf(name, sizeof(name), "%s", ui_mdi_icon_for_entity(ctx->tile_icon, ctx->entity_id, false));
+        if (ui_mdi_icon_apply(ctx->icon_label, name, px)) {
+            lv_obj_set_width(ctx->value_label, LV_SIZE_CONTENT);
+            lv_obj_update_layout(ctx->value_label);
+            lv_obj_update_layout(ctx->icon_label);
+            const lv_coord_t gap = 6;
+            lv_coord_t vw = lv_obj_get_width(ctx->value_label);
+            const lv_coord_t iw = lv_obj_get_width(ctx->icon_label);
+            if (vw > content_w - iw - gap) {
+                vw = content_w - iw - gap;
+                lv_obj_set_width(ctx->value_label, vw);
+            }
+            const lv_coord_t x0 = (content_w - (iw + gap + vw)) / 2;
+            const lv_coord_t row_y = lv_obj_get_y(ctx->value_label);
+            const lv_coord_t vh = lv_obj_get_height(ctx->value_label);
+            const lv_coord_t ih = lv_obj_get_height(ctx->icon_label);
+            /* lv_obj_align() above left the value centre-aligned; positions
+             * below are absolute, so reset the alignment first. */
+            lv_obj_set_align(ctx->icon_label, LV_ALIGN_TOP_LEFT);
+            lv_obj_set_align(ctx->value_label, LV_ALIGN_TOP_LEFT);
+            lv_obj_set_pos(ctx->icon_label, x0, row_y + (vh - ih) / 2);
+            lv_obj_set_pos(ctx->value_label, x0 + iw + gap, row_y);
+            icon_row = true;
+        } else {
+            lv_obj_add_flag(ctx->icon_label, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     if (show_age) {
-        lv_obj_align_to(ctx->age_label, ctx->value_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+        if (icon_row) {
+            /* Centre under the whole row, not under the shifted value. */
+            lv_obj_set_align(ctx->age_label, LV_ALIGN_TOP_LEFT);
+            lv_obj_set_pos(ctx->age_label, 0,
+                lv_obj_get_y(ctx->value_label) + lv_obj_get_height(ctx->value_label) + 4);
+        } else {
+            lv_obj_align_to(ctx->age_label, ctx->value_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+        }
         lv_obj_update_layout(ctx->age_label);
         lv_coord_t age_bottom = lv_obj_get_y(ctx->age_label) + lv_obj_get_height(ctx->age_label);
         if (age_bottom > content_h - 2) {
@@ -365,6 +417,8 @@ static void w_sensor_event_cb(lv_event_t *event)
         free(ctx);
     } else if (code == LV_EVENT_SIZE_CHANGED) {
         sensor_apply_layout(ctx);
+    } else if (code == LV_EVENT_CLICKED && ctx->history_popup) {
+        ui_sensor_history_open(ctx->entity_id, lv_label_get_text(ctx->title_label), lv_label_get_text(ctx->value_label));
     }
 }
 
@@ -403,6 +457,10 @@ esp_err_t w_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_obj_set_style_text_font(age, SENSOR_META_FONT, LV_PART_MAIN);
     lv_obj_add_flag(age, LV_OBJ_FLAG_HIDDEN);
 
+    lv_obj_t *icon = lv_label_create(card);
+    lv_label_set_text(icon, "");
+    lv_obj_set_style_text_color(icon, lv_color_hex(APP_UI_COLOR_CARD_ICON_ON), LV_PART_MAIN);
+
     w_sensor_ctx_t *ctx = ui_calloc_prefer_psram(1, sizeof(w_sensor_ctx_t));
     if (ctx == NULL) {
         lv_obj_del(card);
@@ -413,6 +471,10 @@ esp_err_t w_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     ctx->title_label = title;
     ctx->value_label = value;
     ctx->age_label = age;
+    ctx->icon_label = icon;
+    snprintf(ctx->entity_id, sizeof(ctx->entity_id), "%s", def->entity_id);
+    snprintf(ctx->tile_icon, sizeof(ctx->tile_icon), "%s", def->icon);
+    ctx->history_popup = def->sensor_history_popup;
     ctx->last_update_ms = 0;
     ctx->has_timestamp = false;
     ctx->unavailable = false;
@@ -424,6 +486,7 @@ esp_err_t w_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
 
     lv_obj_add_event_cb(card, w_sensor_event_cb, LV_EVENT_DELETE, ctx);
     lv_obj_add_event_cb(card, w_sensor_event_cb, LV_EVENT_SIZE_CHANGED, ctx);
+    lv_obj_add_event_cb(card, w_sensor_event_cb, LV_EVENT_CLICKED, ctx);
 
     sensor_update_age_label(ctx);
     sensor_apply_layout(ctx);

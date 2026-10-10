@@ -17,6 +17,7 @@
 #include "ui/ui_slider_touch.h"
 #include "ui/ui_bindings.h"
 #include "ui/ui_memory.h"
+#include "ui/widgets/w_widget_util.h"
 
 typedef enum {
     W_SLIDER_DIR_AUTO = 0,
@@ -782,7 +783,7 @@ esp_err_t w_slider_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     ctx->num_last_sent = 0.0;
 
     lv_color_t parsed_color = lv_color_hex(0);
-    if (slider_parse_hex_color(def->slider_accent_color, &parsed_color)) {
+    if (slider_parse_hex_color(def->slider_accent_color, &parsed_color) && !w_color_is_editor_default(parsed_color)) {
         ctx->accent_color = parsed_color;
     }
 

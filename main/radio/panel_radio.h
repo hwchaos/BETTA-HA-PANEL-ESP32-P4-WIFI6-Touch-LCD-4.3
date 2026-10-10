@@ -45,6 +45,11 @@ typedef enum {
  * and is only used to report back what is playing. */
 esp_err_t panel_radio_play(const char *url, const char *title);
 
+/* Like panel_radio_play(), but for a finite file (e.g. a text-to-speech reply):
+ * when the download ends the buffered audio is played out and the engine stops
+ * instead of reconnecting like it does for a radio stream. */
+esp_err_t panel_radio_play_once(const char *url, const char *title);
+
 /* Stop the stream and give the speaker back.  Safe to call when idle. */
 void panel_radio_stop(void);
 

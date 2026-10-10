@@ -197,20 +197,21 @@ esp_err_t ui_bindings_toggle_entity(const char *entity_id)
         return ha_client_call_service(domain, HA_SERVICE_TURN_ON, payload);
     }
 
-    char payload[192] = {0};
-    if (strcmp(domain, HA_DOMAIN_LIGHT) == 0) {
-#if APP_HA_LIGHT_USE_TRANSITION_ZERO
-        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\",\"transition\":0}", entity_id);
-#else
-        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\"}", entity_id);
-#endif
-    } else {
-        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\"}", entity_id);
-    }
-
     const char *service = HA_SERVICE_TOGGLE;
     if (target_known) {
         service = target_on ? HA_SERVICE_TURN_ON : HA_SERVICE_TURN_OFF;
+    }
+
+    char payload[192] = {0};
+    /* No-fade only when switching on. A turn_off/toggle carrying transition:0
+     * is handled differently by some multi-part lights (main + uplight): only
+     * one part went off, while the same call without it (as the HA UI sends it)
+     * switches the whole fixture off. */
+    if (strcmp(domain, HA_DOMAIN_LIGHT) == 0 && APP_HA_LIGHT_USE_TRANSITION_ZERO &&
+        strcmp(service, HA_SERVICE_TURN_ON) == 0) {
+        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\",\"transition\":0}", entity_id);
+    } else {
+        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\"}", entity_id);
     }
 
     bool optimistic_on = target_known ? target_on : true;
@@ -268,12 +269,9 @@ esp_err_t ui_bindings_set_entity_power(const char *entity_id, bool on)
 #endif
 
     char payload[192] = {0};
-    if (is_light) {
-#if APP_HA_LIGHT_USE_TRANSITION_ZERO
+    /* No-fade only when switching on (see ui_bindings_toggle_entity()). */
+    if (is_light && APP_HA_LIGHT_USE_TRANSITION_ZERO && strcmp(service, HA_SERVICE_TURN_ON) == 0) {
         snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\",\"transition\":0}", entity_id);
-#else
-        snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\"}", entity_id);
-#endif
     } else {
         snprintf(payload, sizeof(payload), "{\"entity_id\":\"%s\"}", entity_id);
     }

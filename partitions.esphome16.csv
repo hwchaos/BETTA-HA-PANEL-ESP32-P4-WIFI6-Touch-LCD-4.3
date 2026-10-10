@@ -1,0 +1,10 @@
+# Identical to the table ESPHome generates for esp-idf with flash_size: 16MB
+# (esphome/components/esp32: get_partition_csv). Keep it byte-compatible: the
+# ESP32-P4-ETH kit is migrated from ESPHome by OTA, which never rewrites the
+# partition table. LittleFS "storage" is registered at runtime above 16 MB.
+# Name,   Type, SubType, Offset,   Size,     Flags
+otadata,  data, ota,     0x9000,   0x2000,
+phy_init, data, phy,     0xB000,   0x1000,
+app0,     app,  ota_0,   0x10000,  0x7C0000,
+app1,     app,  ota_1,   0x7D0000, 0x7C0000,
+nvs,      data, nvs,     0xF90000, 0x70000,

@@ -8,6 +8,8 @@
 
 #include "ui/ui_press_feedback.h"
 #include "ui/ui_tile_style.h"
+#include "ui/theme/theme_fx.h"
+#include "ui/ui_mdi_icon.h"
 
 esp_err_t w_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_instance_t *out_instance);
 void w_sensor_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
@@ -157,10 +159,94 @@ static bool widget_icon_colour_follows_state(const ui_widget_instance_t *instanc
 /* Widgets repaint their labels with theme colours while applying a state, so the
  * per-role overrides have to be re-applied afterwards. Both calls are cheap and
  * idempotent (no font rescaling, which would compound). */
+/* Theme finish (translucent tile, hairline edge, glowing "on" state) for the
+ * effect themes. Tiles with their own look from the editor keep it, and the
+ * empty spacer tile stays invisible. */
+static void widget_apply_theme_fx(ui_widget_instance_t *instance, const ui_tile_style_t *style)
+{
+    if (theme_fx_active() == NULL || !ui_tile_style_is_empty(style) || strcmp(instance->type, "empty_tile") == 0) {
+        return;
+    }
+    theme_fx_style_tile(instance->obj, theme_fx_tile_is_on(instance->obj));
+}
+
+/* Tiles with a built-in glyph that the icon chosen in the editor replaces.
+ * (Switch and sensor tiles resolve their icon themselves.) */
+static bool widget_type_takes_custom_icon(const char *type)
+{
+    static const char *const k_types[] = {
+        "light_tile", "cover_tile", "cover", "fan", "lock", "heating_tile",
+        "binary_sensor", "presence", "scene_tile", "person_tile",
+    };
+    for (size_t i = 0; i < sizeof(k_types) / sizeof(k_types[0]); i++) {
+        if (strcmp(type, k_types[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* First codepoint of a label lies in a private-use area (LV_SYMBOL_*, MDI). */
+static bool widget_label_is_icon(lv_obj_t *label)
+{
+    const unsigned char *t = (const unsigned char *)lv_label_get_text(label);
+    if (t == NULL || t[0] == 0) {
+        return false;
+    }
+    uint32_t cp = 0;
+    if ((t[0] & 0xF8U) == 0xF0U && t[1] && t[2] && t[3]) {
+        cp = ((uint32_t)(t[0] & 0x07U) << 18) | ((uint32_t)(t[1] & 0x3FU) << 12) |
+             ((uint32_t)(t[2] & 0x3FU) << 6) | (uint32_t)(t[3] & 0x3FU);
+    } else if ((t[0] & 0xF0U) == 0xE0U && t[1] && t[2]) {
+        cp = ((uint32_t)(t[0] & 0x0FU) << 12) | ((uint32_t)(t[1] & 0x3FU) << 6) | (uint32_t)(t[2] & 0x3FU);
+    }
+    return (cp >= 0xE000U && cp <= 0xF8FFU) || cp >= 0xF0000U;
+}
+
+/* The tile's main glyph: the visible icon label with the largest font. */
+static void widget_find_main_icon(lv_obj_t *obj, lv_obj_t **best, int32_t *best_h)
+{
+    const uint32_t count = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < count; i++) {
+        lv_obj_t *child = lv_obj_get_child(obj, (int32_t)i);
+        if (child == NULL || lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+            continue;
+        }
+        if (lv_obj_has_class(child, &lv_label_class) && widget_label_is_icon(child)) {
+            const int32_t h = lv_font_get_line_height(lv_obj_get_style_text_font(child, LV_PART_MAIN));
+            if (h > *best_h) {
+                *best_h = h;
+                *best = child;
+            }
+        }
+        widget_find_main_icon(child, best, best_h);
+    }
+}
+
+/* Swaps the built-in glyph for the icon chosen in the editor, at the glyph's
+ * size. The colour stays whatever the tile set for its state. */
+static void widget_apply_custom_icon(ui_widget_instance_t *instance)
+{
+    if (instance->icon[0] == '\0' || !widget_type_takes_custom_icon(instance->type)) {
+        return;
+    }
+    lv_obj_t *label = NULL;
+    int32_t line_h = 0;
+    widget_find_main_icon(instance->obj, &label, &line_h);
+    if (label != NULL) {
+        /* Already swapped: keep that size instead of growing it to the MDI
+         * font's (taller) line height on every state update. */
+        const int32_t mdi_px = ui_mdi_icon_font_px(lv_obj_get_style_text_font(label, LV_PART_MAIN));
+        (void)ui_mdi_icon_apply(label, instance->icon, mdi_px > 0 ? mdi_px : line_h);
+    }
+}
+
 static void widget_refresh_tile_after_state(ui_widget_instance_t *instance)
 {
+    widget_apply_custom_icon(instance);
     ui_tile_style_t style;
     widget_tile_style_from_instance(instance, &style);
+    widget_apply_theme_fx(instance, &style);
     ui_tile_style_apply_bg(instance->obj, &style);
     if (widget_icon_colour_follows_state(instance)) {
         ui_tile_style_apply_state_text_colors(instance->obj, &style);
@@ -176,7 +262,9 @@ void ui_widget_factory_apply_tile_style(ui_widget_instance_t *instance)
     }
     ui_tile_style_t style;
     widget_tile_style_from_instance(instance, &style);
+    widget_apply_theme_fx(instance, &style);
     ui_tile_style_apply(instance->obj, &style);
+    widget_apply_custom_icon(instance);
     /* The tile style rewrites the opacity, so the pressed state has to be
      * recomputed from the level that just landed on the tile. */
     ui_press_feedback_attach(instance->obj, instance->type);
@@ -198,6 +286,7 @@ esp_err_t ui_widget_factory_create(const ui_widget_def_t *def, lv_obj_t *parent,
     snprintf(out_instance->slider_direction, sizeof(out_instance->slider_direction), "%s", def->slider_direction);
     snprintf(out_instance->slider_accent_color, sizeof(out_instance->slider_accent_color), "%s", def->slider_accent_color);
     snprintf(out_instance->button_accent_color, sizeof(out_instance->button_accent_color), "%s", def->button_accent_color);
+    snprintf(out_instance->icon, sizeof(out_instance->icon), "%s", def->icon);
     snprintf(out_instance->button_mode, sizeof(out_instance->button_mode), "%s", def->button_mode);
     snprintf(out_instance->graph_line_color, sizeof(out_instance->graph_line_color), "%s", def->graph_line_color);
     out_instance->graph_point_count = def->graph_point_count;

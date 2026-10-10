@@ -100,6 +100,9 @@
 /* Silence in the socket while the jitter buffer is empty: the station is gone
  * and a fresh connection is cheaper than waiting. */
 #define PR_STREAM_IDLE_MS 4000
+/* One-shot files (TTS replies): the server renders while it sends. */
+#define PR_ONCE_TIMEOUT_MS 30000
+#define PR_ONCE_IDLE_MS 15000
 /* Data keeps arriving but no frame decodes for this long: the codec changed on
  * the wire or the stream is corrupt, so a reconnect is more useful than
  * waiting. */
@@ -140,6 +143,8 @@ static bool s_task_started;
  * is seen even while the task sits in a read. */
 static volatile bool s_stop;
 static volatile uint32_t s_generation;
+/* Set by panel_radio_play_once(): finish after the file instead of reconnecting. */
+static volatile bool s_play_once;
 
 /* Guarded by s_lock. */
 static int s_cmd;
@@ -340,7 +345,9 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         esp_http_client_config_t cfg = {
             .url = current,
             .method = HTTP_METHOD_GET,
-            .timeout_ms = PR_CONNECT_TIMEOUT_MS,
+            /* A TTS reply is rendered on the first request, so the headers may
+             * take a few seconds to arrive. */
+            .timeout_ms = s_play_once ? PR_ONCE_TIMEOUT_MS : PR_CONNECT_TIMEOUT_MS,
             .buffer_size = 2048,
             .user_agent = PR_USER_AGENT,
             .keep_alive_enable = false,
@@ -354,7 +361,7 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (client == NULL) {
             ESP_LOGW(PR_TAG, "cannot init the HTTP client");
-            snprintf(msg, msg_len, "Błąd klienta HTTP");
+            snprintf(msg, msg_len, "HTTP-Client-Fehler");
             return ESP_FAIL;
         }
         /* Interleaved ICY metadata would inject bytes the decoder cannot skip. */
@@ -364,24 +371,30 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         const esp_err_t err = esp_http_client_open(client, 0);
         if (err != ESP_OK) {
             ESP_LOGW(PR_TAG, "connect to %s failed: %s", current, esp_err_to_name(err));
-            snprintf(msg, msg_len, "Nie można połączyć ze stacją");
+            snprintf(msg, msg_len, "Keine Verbindung zum Sender");
             esp_http_client_cleanup(client);
             return err;
         }
-        (void)esp_http_client_fetch_headers(client);
+        const int64_t hdr = esp_http_client_fetch_headers(client);
 
         const int status = esp_http_client_get_status_code(client);
+        if (status <= 0) {
+            ESP_LOGW(PR_TAG, "no HTTP response from %s (%lld)", current, (long long)hdr);
+            snprintf(msg, msg_len, "Keine Antwort");
+            esp_http_client_cleanup(client);
+            return ESP_ERR_TIMEOUT;
+        }
         if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
             if (headers.location[0] == '\0') {
                 ESP_LOGW(PR_TAG, "HTTP %d without a usable Location header", status);
-                snprintf(msg, msg_len, "Błędne przekierowanie stacji");
+                snprintf(msg, msg_len, "Fehlerhafte Weiterleitung des Senders");
                 esp_http_client_cleanup(client);
                 return ESP_ERR_INVALID_RESPONSE;
             }
             char next[PANEL_RADIO_URL_MAX];
             if (!pr_resolve_url(current, headers.location, next, sizeof(next))) {
                 ESP_LOGW(PR_TAG, "HTTP %d redirect to an unusable address: %s", status, headers.location);
-                snprintf(msg, msg_len, "Błędne przekierowanie stacji");
+                snprintf(msg, msg_len, "Fehlerhafte Weiterleitung des Senders");
                 esp_http_client_cleanup(client);
                 return ESP_ERR_INVALID_RESPONSE;
             }
@@ -393,7 +406,7 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         }
         if (status >= 400) {
             ESP_LOGW(PR_TAG, "stream answered HTTP %d", status);
-            snprintf(msg, msg_len, "Stacja odrzuca połączenie (HTTP %d)", status);
+            snprintf(msg, msg_len, "Sender lehnt ab (HTTP %d)", status);
             esp_http_client_cleanup(client);
             return ESP_ERR_NOT_FOUND;
         }
@@ -411,7 +424,7 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
     }
 
     ESP_LOGW(PR_TAG, "more than %d redirects for %s", PR_MAX_REDIRECTS, url);
-    snprintf(msg, msg_len, "Zbyt wiele przekierowań stacji");
+    snprintf(msg, msg_len, "Zu viele Weiterleitungen");
     return ESP_ERR_INVALID_RESPONSE;
 }
 
@@ -1178,7 +1191,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
     pr_stream_t st;
     if (!pr_alloc_buffers(&st)) {
         ESP_LOGE(PR_TAG, "no PSRAM for the stream buffers");
-        pr_publish(generation, PANEL_RADIO_ERROR, "Brak pamięci na bufor strumienia");
+        pr_publish(generation, PANEL_RADIO_ERROR, "Kein Speicher für den Stream-Puffer");
         return;
     }
     st.generation = generation;
@@ -1188,7 +1201,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
         ESP_LOGW(PR_TAG, "speaker is not available (%s)", esp_err_to_name(out_err));
         pr_free_buffers(&st);
         pr_publish(generation, PANEL_RADIO_ERROR,
-            out_err == ESP_ERR_INVALID_STATE ? "Głośnik zajęty" : "Brak dostępu do głośnika");
+            out_err == ESP_ERR_INVALID_STATE ? "Lautsprecher belegt" : "Kein Zugriff auf den Lautsprecher");
         return;
     }
     pr_lock();
@@ -1224,8 +1237,14 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
         esp_http_client_handle_t http = NULL;
 
         if (pr_http_open(url, &http, content_type, sizeof(content_type), msg, sizeof(msg)) != ESP_OK) {
+            if (s_play_once) {
+                /* A TTS link can be fetched only once: no retries. */
+                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "Keine Verbindung zum Sender");
+                s_play_once = false;
+                break;
+            }
             if (!played_ever && ++fail_streak >= PR_MAX_CONNECTS) {
-                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "Nie można połączyć ze stacją");
+                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "Keine Verbindung zum Sender");
                 break;
             }
             ESP_LOGW(PR_TAG, "%s, retry %d/%d", msg[0] != '\0' ? msg : "connect failed", fail_streak, PR_MAX_CONNECTS);
@@ -1264,7 +1283,8 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                      * station) decides whether this connection is still worth
                      * keeping. */
                     if (pr_ring_used() == 0 &&
-                        esp_timer_get_time() - last_data_us >= (int64_t)PR_STREAM_IDLE_MS * 1000) {
+                        esp_timer_get_time() - last_data_us >=
+                            (int64_t)(s_play_once ? PR_ONCE_IDLE_MS : PR_STREAM_IDLE_MS) * 1000) {
                         ESP_LOGW(PR_TAG, "no data for %d ms and nothing buffered, reconnecting", PR_STREAM_IDLE_MS);
                         break;
                     }
@@ -1290,13 +1310,13 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                 st.fmt = fmt;
                 st.hdr_rate = sniff_rate;
                 if (fmt == PR_FMT_AUTO) {
-                    pr_publish(generation, PANEL_RADIO_ERROR, "Nieobsługiwany format strumienia");
+                    pr_publish(generation, PANEL_RADIO_ERROR, "Stream-Format nicht unterstützt");
                     terminal = true;
                     break;
                 }
                 if (fmt == PR_FMT_HLS || fmt == PR_FMT_OGG || fmt == PR_FMT_OTHER) {
                     char err[PANEL_RADIO_TEXT_MAX];
-                    snprintf(err, sizeof(err), "Nieobsługiwany format (%s)", pr_fmt_name(fmt));
+                    snprintf(err, sizeof(err), "Format nicht unterstützt (%s)", pr_fmt_name(fmt));
                     pr_publish(generation, PANEL_RADIO_ERROR, err);
                     terminal = true;
                     break;
@@ -1306,7 +1326,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                 dec = pr_dec_open(fmt);
                 if (dec == NULL) {
                     char err[PANEL_RADIO_TEXT_MAX];
-                    snprintf(err, sizeof(err), "Brak dekodera %s", pr_fmt_name(fmt));
+                    snprintf(err, sizeof(err), "Kein Decoder für %s", pr_fmt_name(fmt));
                     pr_publish(generation, PANEL_RADIO_ERROR, err);
                     terminal = true;
                     break;
@@ -1352,7 +1372,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
             break;
         }
         if (s_play_failed) {
-            pr_publish(generation, PANEL_RADIO_ERROR, "Błąd zapisu do głośnika");
+            pr_publish(generation, PANEL_RADIO_ERROR, "Fehler beim Schreiben auf den Lautsprecher");
             terminal = true;
             break;
         }
@@ -1373,6 +1393,20 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
             continue;
         }
 
+        if (s_play_once) {
+            if (st.samples == 0 && !played_ever) {
+                ESP_LOGW(PR_TAG, "one-shot file delivered no audio (%u bytes)", (unsigned)st.bytes_in);
+            }
+            /* A finite file (TTS reply) is done: play out what is buffered,
+             * then stop instead of reconnecting. */
+            while (!pr_should_exit(generation) && pr_ring_used() > 0) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            vTaskDelay(pdMS_TO_TICKS(150));
+            s_play_once = false;
+            break;
+        }
+
         if (st.samples > 0) {
             played_ever = true;
             fail_streak = 0;
@@ -1380,7 +1414,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                 (unsigned)(st.samples / (s_rate != 0 ? s_rate : PR_DEFAULT_RATE)));
         } else if (!played_ever && ++fail_streak >= PR_MAX_CONNECTS) {
             pr_publish(generation, PANEL_RADIO_ERROR,
-                st.resynced > PR_RESYNC_MAX ? "Nieobsługiwany format strumienia" : "Stacja nie wysyła dźwięku");
+                st.resynced > PR_RESYNC_MAX ? "Stream-Format nicht unterstützt" : "Sender liefert keinen Ton");
             terminal = true;
             break;
         } else {
@@ -1496,7 +1530,25 @@ static esp_err_t pr_task_start(void)
 
 /* ------------------------------------------------------------------- API */
 
+static esp_err_t panel_radio_play_stream(const char *url, const char *title);
+
+esp_err_t panel_radio_play_once(const char *url, const char *title)
+{
+    s_play_once = true;
+    const esp_err_t err = panel_radio_play_stream(url, title);
+    if (err != ESP_OK) {
+        s_play_once = false;
+    }
+    return err;
+}
+
 esp_err_t panel_radio_play(const char *url, const char *title)
+{
+    s_play_once = false;
+    return panel_radio_play_stream(url, title);
+}
+
+static esp_err_t panel_radio_play_stream(const char *url, const char *title)
 {
     if (url == NULL || url[0] == '\0') {
         return ESP_ERR_INVALID_ARG;

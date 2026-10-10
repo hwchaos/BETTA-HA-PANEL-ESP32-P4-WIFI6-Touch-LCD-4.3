@@ -311,6 +311,29 @@ cJSON *runtime_settings_public_json(const runtime_settings_t *settings)
     cJSON_AddBoolToObject(display, "topbar_show_clock", settings->display_topbar_show_clock);
     cJSON_AddBoolToObject(display, "topbar_show_date", settings->display_topbar_show_date);
     cJSON_AddBoolToObject(display, "topbar_show_gear", settings->display_topbar_show_gear);
+    cJSON_AddStringToObject(display, "nav_position", settings->display_nav_left ? "left" : "bottom");
+    cJSON_AddStringToObject(display, "topbar_layout", settings->display_topbar_layout);
+    cJSON_AddStringToObject(display, "topbar_date_format", settings->display_topbar_date_format);
+
+    cJSON *alerts = cJSON_AddObjectToObject(display, "alerts");
+    if (alerts != NULL) {
+        cJSON_AddBoolToObject(alerts, "persistent", settings->display_alert_persistent);
+        cJSON *alert_entities = cJSON_AddArrayToObject(alerts, "entities");
+        for (int i = 0; alert_entities != NULL && i < RUNTIME_ALERT_ENTITIES; i++) {
+            cJSON_AddItemToArray(alert_entities, cJSON_CreateString(settings->display_alert_entities[i]));
+        }
+    }
+
+    cJSON *waste = cJSON_AddArrayToObject(display, "waste");
+    for (int i = 0; waste != NULL && i < RUNTIME_WASTE_SLOTS; i++) {
+        cJSON *slot = cJSON_CreateObject();
+        if (slot == NULL) {
+            break;
+        }
+        cJSON_AddStringToObject(slot, "entity_id", settings->display_waste[i].entity_id);
+        cJSON_AddNumberToObject(slot, "color", (double)(settings->display_waste[i].color & 0xFFFFFF));
+        cJSON_AddItemToArray(waste, slot);
+    }
     cJSON_AddBoolToObject(display, "topbar_show_status", settings->display_topbar_show_status);
     cJSON_AddBoolToObject(display, "topbar_icon_text", settings->display_topbar_icon_text);
     cJSON_AddBoolToObject(display, "topbar_custom_colors", settings->display_topbar_custom_colors);
@@ -387,6 +410,28 @@ cJSON *runtime_settings_public_json(const runtime_settings_t *settings)
         cJSON_Delete(motion_zones);
     }
 
+    cJSON *assist = cJSON_CreateObject();
+    if (assist != NULL) {
+        cJSON_AddBoolToObject(assist, "enabled", settings->assist_enabled);
+        cJSON_AddStringToObject(assist, "pipeline_id", settings->assist_pipeline_id);
+        cJSON_AddBoolToObject(assist, "reply_audio", settings->assist_reply_audio);
+        cJSON_AddNumberToObject(assist, "mic_gain", settings->assist_mic_gain);
+        cJSON_AddNumberToObject(assist, "max_listen_sec", settings->assist_max_listen_sec);
+        cJSON_AddItemToObject(root, "assist", assist);
+    }
+
+    cJSON *radar = cJSON_CreateObject();
+    if (radar != NULL) {
+        cJSON_AddBoolToObject(radar, "enabled", settings->radar_enabled);
+        cJSON_AddNumberToObject(radar, "tx_pin", settings->radar_tx_pin);
+        cJSON_AddNumberToObject(radar, "rx_pin", settings->radar_rx_pin);
+        cJSON_AddNumberToObject(radar, "baud", settings->radar_baud);
+        cJSON_AddBoolToObject(radar, "wake", settings->radar_wake);
+        cJSON_AddNumberToObject(radar, "wake_cm", settings->radar_wake_cm);
+        cJSON_AddBoolToObject(radar, "keep_awake", settings->radar_keep_awake);
+        cJSON_AddItemToObject(root, "radar", radar);
+    }
+
     return root;
 }
 
@@ -458,6 +503,8 @@ static esp_err_t parse_settings_json(
     cJSON *system = cJSON_GetObjectItemCaseSensitive(root, "system");
     cJSON *storage = cJSON_GetObjectItemCaseSensitive(root, "storage");
     cJSON *camera = cJSON_GetObjectItemCaseSensitive(root, "camera");
+    cJSON *assist = cJSON_GetObjectItemCaseSensitive(root, "assist");
+    cJSON *radar = cJSON_GetObjectItemCaseSensitive(root, "radar");
 
     if (cJSON_IsObject(wifi)) {
         json_copy_string(wifi, "ssid", out->wifi_ssid, sizeof(out->wifi_ssid));
@@ -790,6 +837,40 @@ static esp_err_t parse_settings_json(
         if (cJSON_IsBool(topbar_show_date)) {
             out->display_topbar_show_date = cJSON_IsTrue(topbar_show_date);
         }
+        cJSON *waste = cJSON_GetObjectItemCaseSensitive(display, "waste");
+        if (cJSON_IsArray(waste)) {
+            for (int i = 0; i < RUNTIME_WASTE_SLOTS; i++) {
+                cJSON *slot = cJSON_GetArrayItem(waste, i);
+                if (!cJSON_IsObject(slot)) {
+                    continue;
+                }
+                json_copy_string(slot, "entity_id", out->display_waste[i].entity_id,
+                    sizeof(out->display_waste[i].entity_id));
+                cJSON *color = cJSON_GetObjectItemCaseSensitive(slot, "color");
+                if (cJSON_IsNumber(color)) {
+                    out->display_waste[i].color = (uint32_t)color->valuedouble & 0xFFFFFF;
+                }
+            }
+        }
+        cJSON *alerts = cJSON_GetObjectItemCaseSensitive(display, "alerts");
+        if (cJSON_IsObject(alerts)) {
+            json_copy_bool(alerts, "persistent", &out->display_alert_persistent);
+            cJSON *alert_entities = cJSON_GetObjectItemCaseSensitive(alerts, "entities");
+            for (int i = 0; cJSON_IsArray(alert_entities) && i < RUNTIME_ALERT_ENTITIES; i++) {
+                cJSON *id = cJSON_GetArrayItem(alert_entities, i);
+                if (cJSON_IsString(id) && id->valuestring != NULL) {
+                    snprintf(out->display_alert_entities[i], sizeof(out->display_alert_entities[i]), "%s",
+                        id->valuestring);
+                }
+            }
+        }
+        json_copy_string(display, "topbar_layout", out->display_topbar_layout, sizeof(out->display_topbar_layout));
+        json_copy_string(display, "topbar_date_format", out->display_topbar_date_format,
+            sizeof(out->display_topbar_date_format));
+        cJSON *nav_position = cJSON_GetObjectItemCaseSensitive(display, "nav_position");
+        if (cJSON_IsString(nav_position) && nav_position->valuestring != NULL) {
+            out->display_nav_left = strcmp(nav_position->valuestring, "left") == 0;
+        }
         cJSON *topbar_show_gear = cJSON_GetObjectItemCaseSensitive(display, "topbar_show_gear");
         if (cJSON_IsBool(topbar_show_gear)) {
             out->display_topbar_show_gear = cJSON_IsTrue(topbar_show_gear);
@@ -930,6 +1011,24 @@ static esp_err_t parse_settings_json(
         if (cJSON_IsBool(sd_enabled)) {
             out->sd_enabled = cJSON_IsTrue(sd_enabled);
         }
+    }
+
+    if (cJSON_IsObject(radar)) {
+        json_copy_bool(radar, "enabled", &out->radar_enabled);
+        json_copy_int(radar, "tx_pin", &out->radar_tx_pin, -1, 63);
+        json_copy_int(radar, "rx_pin", &out->radar_rx_pin, -1, 63);
+        json_copy_int(radar, "baud", &out->radar_baud, 9600, 1000000);
+        json_copy_bool(radar, "wake", &out->radar_wake);
+        json_copy_int(radar, "wake_cm", &out->radar_wake_cm, 20, 600);
+        json_copy_bool(radar, "keep_awake", &out->radar_keep_awake);
+    }
+
+    if (cJSON_IsObject(assist)) {
+        json_copy_bool(assist, "enabled", &out->assist_enabled);
+        json_copy_string(assist, "pipeline_id", out->assist_pipeline_id, sizeof(out->assist_pipeline_id));
+        json_copy_bool(assist, "reply_audio", &out->assist_reply_audio);
+        json_copy_int(assist, "mic_gain", &out->assist_mic_gain, 0, 42);
+        json_copy_int(assist, "max_listen_sec", &out->assist_max_listen_sec, 3, 30);
     }
 
     if (cJSON_IsObject(camera)) {
@@ -1193,6 +1292,19 @@ void runtime_settings_set_defaults(runtime_settings_t *out)
     out->display_topbar_show_clock = APP_DISPLAY_TOPBAR_SHOW_CLOCK;
     out->display_topbar_show_date = APP_DISPLAY_TOPBAR_SHOW_DATE;
     out->display_topbar_show_gear = APP_DISPLAY_TOPBAR_SHOW_GEAR;
+    out->display_nav_left = false;
+    out->display_alert_persistent = true;
+    out->display_topbar_layout[0] = '\0';
+    snprintf(out->display_topbar_date_format, sizeof(out->display_topbar_date_format), "WD, DD.MM.YYYY");
+    for (int i = 0; i < RUNTIME_ALERT_ENTITIES; i++) {
+        out->display_alert_entities[i][0] = '\0';
+    }
+    /* Restmuell grey, Bio brown, Papier blue, Gelber Sack yellow. */
+    static const uint32_t waste_colors[RUNTIME_WASTE_SLOTS] = {0x9E9E9E, 0x8D6E63, 0x42A5F5, 0xFFCA28};
+    for (int i = 0; i < RUNTIME_WASTE_SLOTS; i++) {
+        out->display_waste[i].entity_id[0] = '\0';
+        out->display_waste[i].color = waste_colors[i];
+    }
     out->display_topbar_show_status = APP_DISPLAY_TOPBAR_SHOW_STATUS;
     out->display_topbar_icon_text = APP_DISPLAY_TOPBAR_ICON_TEXT;
     out->display_topbar_custom_colors = APP_DISPLAY_TOPBAR_CUSTOM_COLORS;
@@ -1228,6 +1340,26 @@ void runtime_settings_set_defaults(runtime_settings_t *out)
      * errors, so a rare screen flash or stall can be read back afterwards. */
     out->log_verbosity = APP_LOG_VERBOSITY_DEFAULT;
     out->sd_enabled = true;
+
+    out->assist_enabled = false;
+    out->assist_pipeline_id[0] = '\0';
+    out->assist_reply_audio = true;
+    out->assist_mic_gain = 30;
+    out->assist_max_listen_sec = 10;
+
+    out->radar_enabled = false;
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    /* ESP32-P4-ETH kit: LD2410 header (as in the kit's ESPHome setup). */
+    out->radar_tx_pin = 21;
+    out->radar_rx_pin = 20;
+#else
+    out->radar_tx_pin = -1;
+    out->radar_rx_pin = -1;
+#endif
+    out->radar_baud = 256000;
+    out->radar_wake = true;
+    out->radar_wake_cm = 150;
+    out->radar_keep_awake = true;
 
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
     out->camera_enabled = false;

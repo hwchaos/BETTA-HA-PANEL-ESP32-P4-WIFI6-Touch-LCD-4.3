@@ -25,6 +25,8 @@
 #include "net/wifi_mgr.h"
 #include "settings/i18n_store.h"
 #include "settings/runtime_settings.h"
+#include "assist/panel_assist.h"
+#include "radar/ld2410.h"
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
 #include "camera/local_camera.h"
 #endif
@@ -276,7 +278,13 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(wifi, "static_gateway", settings->wifi_static_gateway);
     cJSON_AddStringToObject(wifi, "static_dns", settings->wifi_static_dns);
     cJSON_AddBoolToObject(wifi, "password_set", settings->wifi_password[0] != '\0');
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    /* Ethernet kit: the network needs no setup, so the editor skips the Wi-Fi step. */
+    cJSON_AddBoolToObject(wifi, "configured", true);
+    cJSON_AddBoolToObject(wifi, "ethernet", true);
+#else
     cJSON_AddBoolToObject(wifi, "configured", runtime_settings_has_wifi(settings));
+#endif
     cJSON_AddBoolToObject(wifi, "connected", wifi_mgr_is_connected());
     cJSON_AddBoolToObject(wifi, "setup_ap_active", wifi_mgr_is_setup_ap_active());
     cJSON_AddStringToObject(wifi, "setup_ap_ssid", wifi_mgr_get_setup_ap_ssid());
@@ -357,6 +365,29 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(display, "topbar_show_clock", settings->display_topbar_show_clock);
     cJSON_AddBoolToObject(display, "topbar_show_date", settings->display_topbar_show_date);
     cJSON_AddBoolToObject(display, "topbar_show_gear", settings->display_topbar_show_gear);
+    cJSON_AddStringToObject(display, "nav_position", settings->display_nav_left ? "left" : "bottom");
+    cJSON_AddStringToObject(display, "topbar_layout", settings->display_topbar_layout);
+    cJSON_AddStringToObject(display, "topbar_date_format", settings->display_topbar_date_format);
+
+    cJSON *alerts = cJSON_AddObjectToObject(display, "alerts");
+    if (alerts != NULL) {
+        cJSON_AddBoolToObject(alerts, "persistent", settings->display_alert_persistent);
+        cJSON *alert_entities = cJSON_AddArrayToObject(alerts, "entities");
+        for (int i = 0; alert_entities != NULL && i < RUNTIME_ALERT_ENTITIES; i++) {
+            cJSON_AddItemToArray(alert_entities, cJSON_CreateString(settings->display_alert_entities[i]));
+        }
+    }
+
+    cJSON *waste = cJSON_AddArrayToObject(display, "waste");
+    for (int i = 0; waste != NULL && i < RUNTIME_WASTE_SLOTS; i++) {
+        cJSON *slot = cJSON_CreateObject();
+        if (slot == NULL) {
+            break;
+        }
+        cJSON_AddStringToObject(slot, "entity_id", settings->display_waste[i].entity_id);
+        cJSON_AddNumberToObject(slot, "color", (double)(settings->display_waste[i].color & 0xFFFFFF));
+        cJSON_AddItemToArray(waste, slot);
+    }
     cJSON_AddBoolToObject(display, "topbar_show_status", settings->display_topbar_show_status);
     cJSON_AddBoolToObject(display, "topbar_icon_text", settings->display_topbar_icon_text);
     cJSON_AddBoolToObject(display, "topbar_custom_colors", settings->display_topbar_custom_colors);
@@ -431,6 +462,27 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
         cJSON_Delete(motion_zones);
     }
     cJSON_AddItemToObject(root, "camera", camera);
+
+
+    cJSON *radar = cJSON_CreateObject();
+    if (radar != NULL) {
+        cJSON_AddBoolToObject(radar, "enabled", settings->radar_enabled);
+        cJSON_AddNumberToObject(radar, "tx_pin", settings->radar_tx_pin);
+        cJSON_AddNumberToObject(radar, "rx_pin", settings->radar_rx_pin);
+        cJSON_AddNumberToObject(radar, "baud", settings->radar_baud);
+        cJSON_AddBoolToObject(radar, "wake", settings->radar_wake);
+        cJSON_AddNumberToObject(radar, "wake_cm", settings->radar_wake_cm);
+        cJSON_AddBoolToObject(radar, "keep_awake", settings->radar_keep_awake);
+        cJSON_AddItemToObject(root, "radar", radar);
+    }
+    cJSON *assist = cJSON_AddObjectToObject(root, "assist");
+    if (assist != NULL) {
+        cJSON_AddBoolToObject(assist, "enabled", settings->assist_enabled);
+        cJSON_AddStringToObject(assist, "pipeline_id", settings->assist_pipeline_id);
+        cJSON_AddBoolToObject(assist, "reply_audio", settings->assist_reply_audio);
+        cJSON_AddNumberToObject(assist, "mic_gain", settings->assist_mic_gain);
+        cJSON_AddNumberToObject(assist, "max_listen_sec", settings->assist_max_listen_sec);
+    }
 
     cJSON_AddBoolToObject(root, "ok", true);
 
@@ -587,6 +639,8 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
     cJSON *mqtt = cJSON_GetObjectItemCaseSensitive(root, "mqtt");
     cJSON *system = cJSON_GetObjectItemCaseSensitive(root, "system");
     cJSON *camera = cJSON_GetObjectItemCaseSensitive(root, "camera");
+    cJSON *assist = cJSON_GetObjectItemCaseSensitive(root, "assist");
+    cJSON *radar_cfg = cJSON_GetObjectItemCaseSensitive(root, "radar");
     if (wifi != NULL && !cJSON_IsObject(wifi)) {
         cJSON_Delete(root);
         free(settings);
@@ -635,6 +689,7 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
 
     bool invalid_type = false;
     bool too_long = false;
+    bool nav_position_changed = false;
     if (cJSON_IsObject(wifi)) {
         (void)update_string_setting(
             wifi, "ssid", settings->wifi_ssid, sizeof(settings->wifi_ssid), &invalid_type, &too_long);
@@ -902,6 +957,46 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         (void)update_bool_setting(display, "topbar_show_clock", &settings->display_topbar_show_clock, &invalid_type);
         (void)update_bool_setting(display, "topbar_show_date", &settings->display_topbar_show_date, &invalid_type);
         (void)update_bool_setting(display, "topbar_show_gear", &settings->display_topbar_show_gear, &invalid_type);
+        cJSON *waste = cJSON_GetObjectItemCaseSensitive(display, "waste");
+        if (cJSON_IsArray(waste)) {
+            for (int i = 0; i < RUNTIME_WASTE_SLOTS; i++) {
+                cJSON *slot = cJSON_GetArrayItem(waste, i);
+                if (!cJSON_IsObject(slot)) {
+                    continue;
+                }
+                (void)update_string_setting(slot, "entity_id", settings->display_waste[i].entity_id,
+                    sizeof(settings->display_waste[i].entity_id), &invalid_type, &too_long);
+                (void)update_color_setting(slot, "color", &settings->display_waste[i].color, &invalid_type);
+            }
+        } else if (waste != NULL) {
+            invalid_type = true;
+        }
+        cJSON *alerts = cJSON_GetObjectItemCaseSensitive(display, "alerts");
+        if (cJSON_IsObject(alerts)) {
+            (void)update_bool_setting(alerts, "persistent", &settings->display_alert_persistent, &invalid_type);
+            cJSON *alert_entities = cJSON_GetObjectItemCaseSensitive(alerts, "entities");
+            for (int i = 0; cJSON_IsArray(alert_entities) && i < RUNTIME_ALERT_ENTITIES; i++) {
+                cJSON *id = cJSON_GetArrayItem(alert_entities, i);
+                if (cJSON_IsString(id) && id->valuestring != NULL) {
+                    snprintf(settings->display_alert_entities[i], sizeof(settings->display_alert_entities[i]), "%s",
+                        id->valuestring);
+                }
+            }
+        }
+        (void)update_string_setting(display, "topbar_layout", settings->display_topbar_layout,
+            sizeof(settings->display_topbar_layout), &invalid_type, &too_long);
+        (void)update_string_setting(display, "topbar_date_format", settings->display_topbar_date_format,
+            sizeof(settings->display_topbar_date_format), &invalid_type, &too_long);
+        cJSON *nav_position = cJSON_GetObjectItemCaseSensitive(display, "nav_position");
+        if (cJSON_IsString(nav_position) && nav_position->valuestring != NULL) {
+            const bool nav_left = strcmp(nav_position->valuestring, "left") == 0;
+            if (nav_left != settings->display_nav_left) {
+                settings->display_nav_left = nav_left;
+                nav_position_changed = true;
+            }
+        } else if (nav_position != NULL) {
+            invalid_type = true;
+        }
         (void)update_bool_setting(display, "topbar_show_status", &settings->display_topbar_show_status, &invalid_type);
         (void)update_bool_setting(display, "topbar_icon_text", &settings->display_topbar_icon_text, &invalid_type);
         (void)update_bool_setting(
@@ -995,6 +1090,25 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         (void)update_int_setting(system, "log_verbosity", &settings->log_verbosity, 0, 5, &invalid_type);
     }
 
+    if (cJSON_IsObject(radar_cfg)) {
+        (void)update_bool_setting(radar_cfg, "enabled", &settings->radar_enabled, &invalid_type);
+        (void)update_int_setting(radar_cfg, "tx_pin", &settings->radar_tx_pin, -1, 63, &invalid_type);
+        (void)update_int_setting(radar_cfg, "rx_pin", &settings->radar_rx_pin, -1, 63, &invalid_type);
+        (void)update_int_setting(radar_cfg, "baud", &settings->radar_baud, 9600, 1000000, &invalid_type);
+        (void)update_bool_setting(radar_cfg, "wake", &settings->radar_wake, &invalid_type);
+        (void)update_int_setting(radar_cfg, "wake_cm", &settings->radar_wake_cm, 20, 600, &invalid_type);
+        (void)update_bool_setting(radar_cfg, "keep_awake", &settings->radar_keep_awake, &invalid_type);
+    }
+
+    if (cJSON_IsObject(assist)) {
+        (void)update_bool_setting(assist, "enabled", &settings->assist_enabled, &invalid_type);
+        (void)update_string_setting(assist, "pipeline_id", settings->assist_pipeline_id,
+            sizeof(settings->assist_pipeline_id), &invalid_type, &too_long);
+        (void)update_bool_setting(assist, "reply_audio", &settings->assist_reply_audio, &invalid_type);
+        (void)update_int_setting(assist, "mic_gain", &settings->assist_mic_gain, 0, 42, &invalid_type);
+        (void)update_int_setting(assist, "max_listen_sec", &settings->assist_max_listen_sec, 3, 30, &invalid_type);
+    }
+
     if (cJSON_IsObject(camera)) {
         (void)update_bool_setting(camera, "enabled", &settings->camera_enabled, &invalid_type);
         (void)update_bool_setting(camera, "motion_wake", &settings->camera_motion_wake, &invalid_type);
@@ -1080,6 +1194,9 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
             free(settings);
             return send_json_error(req, "400 Bad Request", "reboot must be boolean");
         }
+    }
+    if (nav_position_changed) {
+        reboot = true; /* the screen geometry is set up at boot */
     }
 
     cJSON_Delete(root);
@@ -1193,6 +1310,9 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
     int camera_resolution = settings->camera_resolution;
 #endif
     if (save_err == ESP_OK && !reboot) {
+        /* Assist first: the top bar layout below shows/hides its chip. */
+        panel_assist_apply_settings(settings);
+        ld2410_apply_settings(settings);
         /* Apply display settings immediately without a reboot. */
         ui_screen_saver_apply_settings(settings);
         ui_page_transition_apply_settings(settings);

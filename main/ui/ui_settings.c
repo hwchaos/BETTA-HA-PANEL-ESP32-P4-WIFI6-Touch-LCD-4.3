@@ -28,6 +28,8 @@
 #include "ui/ui_screen_saver.h"
 #include "ui/theme/theme_default.h"
 #include "xiaozhi/xiaozhi_audio.h"
+#include "assist/panel_assist.h"
+#include "ui/ui_geometry.h"
 
 typedef enum {
     SET_CAT_SCREEN = 0,
@@ -144,6 +146,27 @@ static const struct {
     {"Odtworz test",
      "Test abspielen",
      "Play test"},
+    {"Nawigacja",
+     "Navigation",
+     "Navigation"},
+    {"Na dole\nPo lewej",
+     "Unten\nLinks",
+     "Bottom\nLeft"},
+    {"Polozenie menu (restart)",
+     "Menü-Position (Neustart)",
+     "Menu position (restart)"},
+    {"Asystent glosowy",
+     "Sprachassistent (HA Assist)",
+     "Voice assistant (HA Assist)"},
+    {"Asystent aktywny",
+     "Assist aktiv",
+     "Assist enabled"},
+    {"Odpowiedz glosowa",
+     "Antwort vorlesen",
+     "Speak the answer"},
+    {"Mikrofon w gornym pasku: przytrzymaj i mow, albo dotknij i mow do przerwy.",
+     "Mikrofon oben in der Leiste: gedrückt halten und sprechen, oder kurz tippen und sprechen, bis du eine Pause machst. Pipeline, Mikrofonpegel und Aufnahmedauer stellst du im Web-Editor unter Einstellungen ein.",
+     "Microphone in the top bar: hold and speak, or tap and speak until you pause. Pipeline, microphone level and recording time are set in the web editor settings."},
     {"Status polaczenia",
      "Verbindungsstatus",
      "Connection status"},
@@ -522,7 +545,7 @@ static void st_add_slider_block(lv_obj_t *card, const char *caption, int value, 
 
     lv_obj_t *value_label = lv_label_create(row);
     st_label(value_label, "", st_f_value(), lv_color_hex(APP_UI_COLOR_STATE_ON));
-    lv_obj_set_width(value_label, LV_PCT(30));
+    lv_obj_set_flex_grow(value_label, 1); /* 70 % + 30 % + gap overflowed */
     lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
     if (s_slider_count >= (sizeof(s_sliders) / sizeof(s_sliders[0]))) {
@@ -679,7 +702,8 @@ static lv_obj_t *st_add_dropdown_row(lv_obj_t *card, const char *caption, const 
     lv_obj_t *dropdown = lv_dropdown_create(row);
     lv_dropdown_set_options(dropdown, options);
     lv_dropdown_set_selected(dropdown, selected);
-    lv_obj_set_width(dropdown, LV_PCT(45));
+    /* Remaining width after caption + gap; a fixed 45 % overflowed the card. */
+    lv_obj_set_flex_grow(dropdown, 1);
     lv_obj_set_height(dropdown, 40);
     lv_obj_set_style_text_font(dropdown, st_f_value(), LV_PART_MAIN);
     lv_obj_set_style_text_color(dropdown, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
@@ -751,6 +775,8 @@ typedef enum {
     SET_SW_CLOCK24,
     SET_SW_SECONDS,
     SET_SW_DATE,
+    SET_SW_ASSIST,
+    SET_SW_ASSIST_REPLY,
 } ui_switch_field_t;
 
 static void st_switch_row_cb(lv_event_t *event)
@@ -773,6 +799,18 @@ static void st_switch_row_cb(lv_event_t *event)
     case SET_SW_SECONDS:
         s_cfg.display_saver_show_seconds = on;
         break;
+    case SET_SW_ASSIST:
+    case SET_SW_ASSIST_REPLY:
+        if ((ui_switch_field_t)(intptr_t)lv_event_get_user_data(event) == SET_SW_ASSIST) {
+            s_cfg.assist_enabled = on;
+        } else {
+            s_cfg.assist_reply_audio = on;
+        }
+        /* Assist is not a display setting: apply and persist right away. */
+        panel_assist_apply_settings(&s_cfg);
+        ui_pages_refresh_topbar();
+        st_cfg_save();
+        return;
     case SET_SW_DATE:
     default:
         s_cfg.display_saver_show_date = on;
@@ -824,9 +862,16 @@ static void st_clock_style_change_cb(lv_event_t *event)
 /* ------------------------------------------------------------------ */
 /* Category content builders                                           */
 /* ------------------------------------------------------------------ */
+static void st_nav_position_cb(lv_event_t *event);
+
 static void st_build_screen(lv_obj_t *parent)
 {
     st_cfg_load();
+
+    lv_obj_t *nav_card = st_make_card(parent);
+    st_card_title(nav_card, st_tr("Nawigacja"));
+    (void)st_add_dropdown_row(nav_card, st_tr("Polozenie menu (restart)"), st_tr("Na dole\nPo lewej"),
+        s_cfg.display_nav_left ? 1 : 0, st_nav_position_cb, NULL);
 
     lv_obj_t *card = st_make_card(parent);
     st_card_title(card, st_tr("Jasnosc"));
@@ -898,6 +943,16 @@ static void st_build_audio(lv_obj_t *parent)
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *beep = st_action_button(row, st_tr("Odtworz test"), lv_color_hex(APP_UI_COLOR_OK));
     lv_obj_add_event_cb(beep, st_beep_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *card3 = st_make_card(parent);
+    st_card_title(card3, st_tr("Asystent glosowy"));
+    st_add_switch_row(card3, st_tr("Asystent aktywny"), s_cfg.assist_enabled, SET_SW_ASSIST);
+    st_add_switch_row(card3, st_tr("Odpowiedz glosowa"), s_cfg.assist_reply_audio, SET_SW_ASSIST_REPLY);
+    lv_obj_t *note = lv_label_create(card3);
+    st_label(note, st_tr("Mikrofon w gornym pasku: przytrzymaj i mow, albo dotknij i mow do przerwy."),
+        st_f_note(), lv_color_hex(APP_UI_COLOR_TEXT_MUTED));
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, LV_PCT(100));
 }
 
 static void st_net_refresh_cb(lv_event_t *event)
@@ -956,6 +1011,19 @@ static void st_build_net(lv_obj_t *parent)
 static void st_restart_cb(lv_event_t *event)
 {
     LV_UNUSED(event);
+    esp_restart();
+}
+
+static void st_nav_position_cb(lv_event_t *event)
+{
+    lv_obj_t *dropdown = lv_event_get_target(event);
+    const bool left = lv_dropdown_get_selected(dropdown) == 1;
+    if (left == s_cfg.display_nav_left) {
+        return;
+    }
+    s_cfg.display_nav_left = left;
+    st_cfg_save();
+    /* The screen geometry is laid out at boot. */
     esp_restart();
 }
 
@@ -1276,7 +1344,7 @@ static void st_cam_slider_row(lv_obj_t *card, const char *caption, int value, in
 
     lv_obj_t *value_label = lv_label_create(row);
     st_label(value_label, "", st_f_value(), lv_color_hex(APP_UI_COLOR_STATE_ON));
-    lv_obj_set_width(value_label, LV_PCT(30));
+    lv_obj_set_flex_grow(value_label, 1); /* 70 % + 30 % + gap overflowed */
     lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
     lv_obj_t *slider = lv_slider_create(card);

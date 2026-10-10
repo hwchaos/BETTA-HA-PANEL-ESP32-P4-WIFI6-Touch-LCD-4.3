@@ -121,6 +121,26 @@ static esp_err_t guarded_api_entities_get(httpd_req_t *req)
     return http_guard_handle(req, api_entities_get_handler);
 }
 
+static esp_err_t guarded_api_mdi_icons_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_mdi_icons_get_handler);
+}
+
+static esp_err_t guarded_api_assist_pipelines_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_assist_pipelines_get_handler);
+}
+
+static esp_err_t guarded_api_radar_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_radar_get_handler);
+}
+
+static esp_err_t guarded_api_debug_storage_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_debug_storage_get_handler);
+}
+
 static esp_err_t guarded_api_light_entities_get(httpd_req_t *req)
 {
     return http_guard_handle(req, api_light_entities_get_handler);
@@ -387,6 +407,30 @@ esp_err_t api_routes_register(httpd_handle_t server)
         .uri = "/api/entities",
         .method = HTTP_GET,
         .handler = guarded_api_entities_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t get_mdi_icons = {
+        .uri = "/api/mdi/icons",
+        .method = HTTP_GET,
+        .handler = guarded_api_mdi_icons_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t get_radar = {
+        .uri = "/api/radar",
+        .method = HTTP_GET,
+        .handler = guarded_api_radar_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t get_debug_storage = {
+        .uri = "/api/debug/storage",
+        .method = HTTP_GET,
+        .handler = guarded_api_debug_storage_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t get_assist_pipelines = {
+        .uri = "/api/assist/pipelines",
+        .method = HTTP_GET,
+        .handler = guarded_api_assist_pipelines_get,
         .user_ctx = NULL,
     };
     httpd_uri_t get_light_entities = {
@@ -701,6 +745,12 @@ esp_err_t api_routes_register(httpd_handle_t server)
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_layout), "api_routes", "GET /api/layout");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &put_layout), "api_routes", "PUT /api/layout");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_entities), "api_routes", "GET /api/entities");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_mdi_icons), "api_routes", "GET /api/mdi/icons");
+    ESP_RETURN_ON_ERROR(
+        httpd_register_uri_handler(server, &get_assist_pipelines), "api_routes", "GET /api/assist/pipelines");
+    ESP_RETURN_ON_ERROR(
+        httpd_register_uri_handler(server, &get_debug_storage), "api_routes", "GET /api/debug/storage");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_radar), "api_routes", "GET /api/radar");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_light_entities), "api_routes", "GET /api/ha/light_entities");
     ESP_RETURN_ON_ERROR(

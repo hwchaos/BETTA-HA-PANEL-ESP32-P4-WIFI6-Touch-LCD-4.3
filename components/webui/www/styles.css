@@ -978,6 +978,26 @@ textarea {
   background: linear-gradient(135deg, transparent 50%, #ffd05e 50%);
 }
 
+.icon-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon-input-preview {
+  font-size: 24px;
+  line-height: 1;
+  width: 28px;
+  text-align: center;
+  color: var(--text);
+  opacity: 0.85;
+}
+
 .energy-page-preview {
   position: absolute;
   inset: 0;
@@ -1369,46 +1389,46 @@ textarea {
 
 .energy-preview-flow .grid,
 .energy-preview-flow .dot.grid {
-  stroke: #039bef;
-  fill: #039bef;
+  stroke: #4fa3ff;
+  fill: #4fa3ff;
 }
 
 .energy-preview-flow .solar,
 .energy-preview-flow .dot.solar,
 .energy-preview-flow .solar-return,
 .energy-preview-flow .dot.solar-return {
-  stroke: #ff9800;
-  fill: #ff9800;
+  stroke: #ffb547;
+  fill: #ffb547;
 }
 
 .energy-preview-flow .return,
 .energy-preview-flow .dot.return {
-  stroke: #e45e65;
-  fill: #e45e65;
+  stroke: #ff6b81;
+  fill: #ff6b81;
 }
 
 .energy-preview-flow .battery-in,
 .energy-preview-flow .dot.battery-in {
-  stroke: #e84393;
-  fill: #e84393;
+  stroke: #c084fc;
+  fill: #c084fc;
 }
 
 .energy-preview-flow .battery-out,
 .energy-preview-flow .dot.battery-out {
-  stroke: #26a69a;
-  fill: #26a69a;
+  stroke: #2dd4bf;
+  fill: #2dd4bf;
 }
 
 .energy-preview-flow .gas,
 .energy-preview-flow .dot.gas {
-  stroke: #b00020;
-  fill: #b00020;
+  stroke: #e09a5b;
+  fill: #e09a5b;
 }
 
 .energy-preview-flow .water,
 .energy-preview-flow .dot.water {
-  stroke: #00bcd4;
-  fill: #00bcd4;
+  stroke: #22d3ee;
+  fill: #22d3ee;
 }
 
 .energy-preview-node {
@@ -1453,22 +1473,22 @@ textarea {
 .energy-preview-node.solar {
   left: 312px;
   top: 136px;
-  border-color: #ff9800;
-  color: #ff9800;
+  border-color: #ffb547;
+  color: #ffb547;
 }
 
 .energy-preview-node.gas {
   left: 528px;
   top: 136px;
-  border-color: #b00020;
-  color: #b00020;
+  border-color: #e09a5b;
+  color: #e09a5b;
 }
 
 .energy-preview-node.grid {
   left: 96px;
   top: 346px;
-  border-color: #039bef;
-  color: #039bef;
+  border-color: #4fa3ff;
+  color: #4fa3ff;
 }
 
 .energy-preview-node.home {
@@ -1486,15 +1506,15 @@ textarea {
 .energy-preview-node.battery {
   left: 312px;
   top: 506px;
-  border-color: #e84393;
-  color: #e84393;
+  border-color: #c084fc;
+  color: #c084fc;
 }
 
 .energy-preview-node.water {
   left: 528px;
   top: 506px;
-  border-color: #00bcd4;
-  color: #00bcd4;
+  border-color: #22d3ee;
+  color: #22d3ee;
 }
 
 .energy-preview-label {
@@ -1668,6 +1688,93 @@ textarea {
 
 .energy-page-preview.compact .energy-preview-label.water {
   left: 404px;
+  top: 339px;
+}
+
+/* Wide short canvas (800x360): mirrors the firmware's wide compact energy
+ * layout (main/ui/ui_energy_page.c). */
+.energy-page-preview.compact.wide .energy-preview-flow path.flow {
+  stroke-width: 3px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node {
+  width: 118px;
+  height: 118px;
+  margin: -59px 0 0 -59px;
+  border-width: 1px;
+  border-color: rgba(255, 255, 255, 0.1);
+  outline: 5px solid currentColor;
+  outline-offset: 0;
+  box-shadow: 0 0 22px -4px currentColor;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node.solar,
+.energy-page-preview.compact.wide .energy-preview-node.low-carbon {
+  left: 400px;
+  top: 86px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node.gas {
+  left: 640px;
+  top: 86px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node.grid {
+  left: 160px;
+  top: 184px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node.home {
+  left: 640px;
+  top: 184px;
+  width: 118px;
+  height: 118px;
+  margin: -59px 0 0 -59px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node.battery {
+  left: 400px;
+  top: 271px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-node.water {
+  left: 640px;
+  top: 271px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label {
+  width: 140px;
+  margin-left: -70px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label.solar,
+.energy-page-preview.compact.wide .energy-preview-label.low-carbon {
+  left: 400px;
+  top: 0;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label.gas {
+  left: 640px;
+  top: 0;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label.grid {
+  left: 160px;
+  top: 252px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label.home {
+  left: 640px;
+  top: 252px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label.battery {
+  left: 400px;
+  top: 339px;
+}
+
+.energy-page-preview.compact.wide .energy-preview-label.water {
+  left: 640px;
   top: 339px;
 }
 
@@ -2282,3 +2389,133 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
+
+/* Waste collection chips (top bar) */
+.waste-settings {
+  margin: 10px 0;
+}
+.waste-settings-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.waste-slot-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.waste-slot-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.waste-slot-row input[type="color"] {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 32px;
+  padding: 0;
+}
+
+/* Checkbox rows: box left of its text (inputs are 100% wide by default). */
+label.row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+label.row > input[type="checkbox"],
+label.row > input[type="radio"],
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+}
+.alert-entity-list {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+/* Settings grouped into another tab (System, Home Assistant, Statusleiste). */
+.settings-subsection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #30506b;
+}
+.settings-subsection > h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+/* Top bar arrangement (Statusleiste) */
+.topbar-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 8px;
+  margin: 6px 0 10px;
+  border-radius: 8px;
+  background: #0b1624;
+  border: 1px solid #30506b;
+  overflow: hidden;
+}
+.tbp-zone {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.tbp-left { flex: 1 1 0; justify-content: flex-start; }
+.tbp-center { flex: 0 0 auto; justify-content: center; }
+.tbp-right { flex: 1 1 0; justify-content: flex-end; }
+.tbp-chip {
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: #1c3448;
+  border: 1px solid #36597a;
+  white-space: nowrap;
+}
+.tbp-chip.clock { font-size: 15px; font-weight: 600; background: transparent; border-color: transparent; }
+.topbar-arrange-list {
+  display: grid;
+  gap: 4px;
+}
+.tba-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 34px 34px;
+  gap: 6px;
+  align-items: center;
+}
+.tba-row select { padding: 4px; }
+.tba-row button { padding: 4px 0; }
+
+/* Logs toolbar: checkbox row and download button on one line */
+#settingsLogsSection > .row {
+  align-items: center;
+}
+
+/* LD2410 status */
+.radar-status {
+  padding: 10px 12px;
+  border: 1px solid #30506b;
+  border-radius: 8px;
+  background: #0f1d2b;
+  margin-bottom: 10px;
+}
+.radar-status-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.radar-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #607d8b;
+  flex: 0 0 auto;
+}
+.radar-dot.ok { background: #43a047; }
+.radar-dot.near { background: #ffb300; }
+.radar-dot.err { background: #e53935; }

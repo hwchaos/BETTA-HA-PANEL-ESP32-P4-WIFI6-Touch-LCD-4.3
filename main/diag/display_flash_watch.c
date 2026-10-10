@@ -24,7 +24,10 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH)
+/* The ESP32-P4-ETH kit dims over I2C (Nano BSP); its LEDC is never set up and
+ * every duty read would log "LEDC is not initialized". */
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH) && \
+    !defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
 #include "driver/ledc.h"
 #define FW_HAS_LEDC_DUTY 1
 #else

@@ -21,6 +21,7 @@ typedef struct {
     char slider_accent_color[APP_MAX_COLOR_STR_LEN];
     char button_accent_color[APP_MAX_COLOR_STR_LEN];
     char button_mode[APP_MAX_UI_OPTION_LEN];
+    char icon[APP_MAX_ICON_LEN]; /* "mdi:name" chosen in the editor; "" = automatic */
     char graph_line_color[APP_MAX_COLOR_STR_LEN];
     int graph_point_count;
     int graph_time_window_min;
@@ -45,6 +46,7 @@ typedef struct {
     bool clock_show_seconds;
     bool clock_show_date;
     char sensor_value_color[APP_MAX_COLOR_STR_LEN];
+    bool sensor_history_popup; /* tap opens the HA history popup */
     char tile_bg_color[APP_MAX_COLOR_STR_LEN];
     char tile_bg_grad_color[APP_MAX_COLOR_STR_LEN];
     char tile_bg_grad_dir[APP_MAX_UI_OPTION_LEN];
@@ -76,6 +78,7 @@ typedef struct {
     char slider_accent_color[APP_MAX_COLOR_STR_LEN];
     char button_accent_color[APP_MAX_COLOR_STR_LEN];
     char button_mode[APP_MAX_UI_OPTION_LEN];
+    char icon[APP_MAX_ICON_LEN];
     char graph_line_color[APP_MAX_COLOR_STR_LEN];
     int graph_point_count;
     int graph_time_window_min;

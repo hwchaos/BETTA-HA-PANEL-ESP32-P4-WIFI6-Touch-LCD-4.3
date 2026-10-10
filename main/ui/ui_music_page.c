@@ -906,7 +906,7 @@ static void mp_lib_render_result(music_ctx_t *ctx, music_lib_result_t *res)
     lv_obj_clean(ctx->lib_list);
 
     if (res == NULL || !res->ok || res->count <= 0) {
-        mp_lib_show_message(ctx, res == NULL ? "Błąd połączenia" : (res->count == 0 ? "Brak wyników" : "Błąd"));
+        mp_lib_show_message(ctx, res == NULL ? "Verbindungsfehler" : (res->count == 0 ? "Keine Treffer" : "Fehler"));
         return;
     }
 
@@ -1040,7 +1040,7 @@ static void mp_lib_load(music_ctx_t *ctx, int mode)
     const char *entity = mp_current_player(ctx);
     if (entity == NULL || ctx->unavailable) {
         lv_obj_clean(ctx->lib_list);
-        mp_lib_show_message(ctx, "Brak aktywnego odtwarzacza");
+        mp_lib_show_message(ctx, "Kein aktiver Player");
         return;
     }
 
@@ -1049,13 +1049,13 @@ static void mp_lib_load(music_ctx_t *ctx, int mode)
     ha_client_cancel_pending_responses_for_user(ctx);
     mp_lib_free_result(ctx);
     lv_obj_clean(ctx->lib_list);
-    mp_lib_show_message(ctx, "Wczytywanie...");
+    mp_lib_show_message(ctx, "Lade...");
 
     if (mode == MP_LIB_MODE_PLAYLISTS) {
         mp_lib_set_title(ctx, "Playlisty");
         (void)ui_bindings_media_browse(entity, "music_assistant", "playlists", mp_lib_response_cb, ctx);
     } else if (mode == MP_LIB_MODE_SEARCH) {
-        mp_lib_set_title(ctx, "Szukaj utworów");
+        mp_lib_set_title(ctx, "Titel suchen");
     }
 }
 
@@ -1070,7 +1070,7 @@ static void mp_lib_do_search(music_ctx_t *ctx, const char *query)
     mp_lib_free_result(ctx);
     lv_obj_clean(ctx->lib_list);
     mp_lib_set_title(ctx, "Wyniki wyszukiwania");
-    mp_lib_show_message(ctx, "Wczytywanie...");
+    mp_lib_show_message(ctx, "Lade...");
 
     (void)ui_bindings_media_search(entity, query, mp_lib_response_cb, ctx);
 }
@@ -1239,7 +1239,7 @@ static void mp_lib_create(music_ctx_t *ctx)
     lv_obj_set_style_text_align(ctx->search_textarea, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
     lv_textarea_set_one_line(ctx->search_textarea, true);
     lv_textarea_set_max_length(ctx->search_textarea, 80);
-    lv_textarea_set_placeholder_text(ctx->search_textarea, "Tytuł lub wykonawca...");
+    lv_textarea_set_placeholder_text(ctx->search_textarea, "Titel oder Interpret...");
     lv_obj_add_event_cb(ctx->search_textarea, mp_lib_search_clicked, LV_EVENT_READY, ctx);
     lv_obj_add_event_cb(ctx->search_textarea, mp_lib_textarea_clicked, LV_EVENT_CLICKED, ctx);
 

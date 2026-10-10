@@ -326,6 +326,24 @@ size_t ha_model_list_entities(
     return written;
 }
 
+bool ha_model_get_entity(const char *entity_id, ha_entity_info_t *out_entity)
+{
+    if (s_model_mutex == NULL || s_entities == NULL || entity_id == NULL || out_entity == NULL) {
+        return false;
+    }
+    bool found = false;
+    ha_model_lock();
+    for (size_t i = 0; i < s_entity_count; i++) {
+        if (strncmp(s_entities[i].id, entity_id, sizeof(s_entities[i].id)) == 0) {
+            *out_entity = s_entities[i];
+            found = true;
+            break;
+        }
+    }
+    ha_model_unlock();
+    return found;
+}
+
 size_t ha_model_list_states(ha_state_t *out_states, size_t max_out)
 {
     if (s_model_mutex == NULL || s_states == NULL || out_states == NULL || max_out == 0) {

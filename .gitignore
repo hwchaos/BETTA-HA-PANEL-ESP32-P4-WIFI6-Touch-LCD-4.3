@@ -4,9 +4,11 @@
 build/
 build_*/
 build-panel*/
+build-p4eth/
 lvgl_design/
 sdkconfig
 sdkconfig.panel*
+sdkconfig.p4eth101
 sdkconfig.old
 
 # Internal merge / porting notes - never publish.

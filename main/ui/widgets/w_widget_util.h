@@ -65,3 +65,11 @@ static inline bool w_state_is_unavailable(const char *state_text)
     }
     return strcmp(state_text, "unavailable") == 0 || strcmp(state_text, "unknown") == 0;
 }
+
+/* The web editor stores its default accent (#6fe8ff, the accent of the old
+ * Dark theme) on every new tile, whether or not a colour was picked. Treat
+ * exactly that value as "follow the active theme". */
+static inline bool w_color_is_editor_default(lv_color_t color)
+{
+    return (lv_color_to_u32(color) & 0xFFFFFFU) == 0x6FE8FFU;
+}

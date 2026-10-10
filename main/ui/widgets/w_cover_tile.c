@@ -45,7 +45,7 @@ static const char *TAG = "w_cover_tile";
 /* cover supported_features bit set by entities that accept set_cover_position. */
 #define W_COVER_FEATURE_SET_POSITION    4U
 /* Colour of the rail preview while a finger is on it, i.e. not sent yet. */
-#define W_COVER_PREVIEW_ACCENT          0x41BDF5U
+#define W_COVER_PREVIEW_ACCENT          (APP_UI_COLOR_CARD_ICON_ON)
 
 typedef enum {
     W_COVER_CMD_OPEN = 0,
@@ -90,6 +90,11 @@ typedef struct {
     bool slider_click_guard;
     bool state_opening;
     bool state_closing;
+    /* Long-press popup with a vertical position slider. */
+    lv_obj_t *popup_overlay;
+    lv_obj_t *popup_slider;
+    lv_obj_t *popup_value;
+    bool long_press_guard; /* swallow the click that ends a long press */
 } w_cover_tile_t;
 
 static const char *cover_i18n(const char *key, const char *fallback)
@@ -188,16 +193,17 @@ static const char *cover_cmd_label_fallback(w_cover_cmd_t cmd)
     }
 }
 
+/* Colours follow the active theme so the tile matches every palette. */
 static uint32_t cover_cmd_accent(w_cover_cmd_t cmd)
 {
     switch (cmd) {
     case W_COVER_CMD_OPEN:
-        return 0x2ECC9A;
+        return APP_UI_COLOR_CARD_ICON_ON;
     case W_COVER_CMD_CLOSE:
-        return 0xFFB648;
+        return APP_UI_COLOR_LIGHT_IND_ON;
     case W_COVER_CMD_STOP:
     default:
-        return 0x41BDF5;
+        return APP_UI_COLOR_TEXT_MUTED;
     }
 }
 
@@ -205,20 +211,22 @@ static uint32_t cover_cmd_accent(w_cover_cmd_t cmd)
 static void cover_state_style(const char *state, const char **out_text, uint32_t *out_accent)
 {
     if (strcmp(state, "open") == 0) {
+        /* Open paints the tile in its "on" colours: use the bright state
+         * colour so icon and value stay readable on it. */
         *out_text = cover_i18n("cover.open", "Open");
-        *out_accent = 0x2ECC9A;
+        *out_accent = APP_UI_COLOR_STATE_ON;
     } else if (strcmp(state, "closed") == 0) {
         *out_text = cover_i18n("cover.closed", "Closed");
-        *out_accent = 0x8A93A5;
+        *out_accent = APP_UI_COLOR_STATE_OFF;
     } else if (strcmp(state, "opening") == 0) {
         *out_text = cover_i18n("cover.opening", "Opening...");
-        *out_accent = 0xFFA726;
+        *out_accent = APP_UI_COLOR_LIGHT_ICON_ON;
     } else if (strcmp(state, "closing") == 0) {
         *out_text = cover_i18n("cover.closing", "Closing...");
-        *out_accent = 0xFFA726;
+        *out_accent = APP_UI_COLOR_LIGHT_ICON_ON;
     } else if (strcmp(state, "stopped") == 0) {
         *out_text = cover_i18n("cover.stopped", "Stopped");
-        *out_accent = 0x41BDF5;
+        *out_accent = APP_UI_COLOR_TEXT_SOFT;
     } else {
         *out_text = state;
         *out_accent = APP_UI_COLOR_TEXT_MUTED;
@@ -734,6 +742,216 @@ static void cover_slider_end_drag(w_cover_tile_t *ctx)
     cover_send_position(ctx, percent);
 }
 
+/* ---- Long-press popup ---------------------------------------------------- */
+
+static void cover_popup_set_value_text(w_cover_tile_t *ctx, int percent)
+{
+    if (ctx->popup_value == NULL) {
+        return;
+    }
+    char text[16];
+    snprintf(text, sizeof(text), "%d %%", percent);
+    lv_label_set_text(ctx->popup_value, text);
+}
+
+/* Keeps the popup in step with HA unless the finger is on the slider. */
+static void cover_popup_sync(w_cover_tile_t *ctx)
+{
+    if (ctx == NULL || ctx->popup_slider == NULL || !ctx->have_position) {
+        return;
+    }
+    if (lv_obj_has_state(ctx->popup_slider, LV_STATE_PRESSED)) {
+        return;
+    }
+    lv_slider_set_value(ctx->popup_slider, ctx->position, LV_ANIM_OFF);
+    cover_popup_set_value_text(ctx, ctx->position);
+}
+
+static void cover_popup_close(w_cover_tile_t *ctx)
+{
+    if (ctx != NULL && ctx->popup_overlay != NULL) {
+        lv_obj_delete(ctx->popup_overlay);
+    }
+}
+
+static void cover_popup_delete_cb(lv_event_t *event)
+{
+    w_cover_tile_t *ctx = (w_cover_tile_t *)lv_event_get_user_data(event);
+    if (ctx != NULL) {
+        ctx->popup_overlay = NULL;
+        ctx->popup_slider = NULL;
+        ctx->popup_value = NULL;
+    }
+}
+
+static void cover_popup_close_cb(lv_event_t *event)
+{
+    w_cover_tile_t *ctx = (w_cover_tile_t *)lv_event_get_user_data(event);
+    /* Taps on the dimmed area close the popup; taps inside the card do not
+     * reach the overlay (the card stops event bubbling). */
+    if (lv_event_get_target(event) == lv_event_get_current_target(event)) {
+        cover_popup_close(ctx);
+    }
+}
+
+static void cover_popup_slider_cb(lv_event_t *event)
+{
+    w_cover_tile_t *ctx = (w_cover_tile_t *)lv_event_get_user_data(event);
+    if (ctx == NULL || ctx->popup_slider == NULL) {
+        return;
+    }
+    const int value = (int)lv_slider_get_value(ctx->popup_slider);
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        cover_popup_set_value_text(ctx, value);
+    } else if (code == LV_EVENT_RELEASED) {
+        cover_send_position(ctx, value);
+    }
+}
+
+static void cover_popup_cmd_cb(lv_event_t *event)
+{
+    w_cover_tile_t *ctx = (w_cover_tile_t *)lv_event_get_user_data(event);
+    lv_obj_t *button = lv_event_get_target(event);
+    if (ctx == NULL || button == NULL || ctx->unavailable) {
+        return;
+    }
+    cover_send(ctx, (w_cover_cmd_t)(uintptr_t)lv_obj_get_user_data(button));
+}
+
+static lv_obj_t *cover_popup_button(lv_obj_t *parent, w_cover_tile_t *ctx, w_cover_cmd_t cmd, lv_coord_t w,
+    lv_coord_t h)
+{
+    lv_obj_t *button = lv_obj_create(parent);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, w, h);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(button, 14, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(button, lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_IDLE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(button, lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(button, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(button, lv_color_hex(cover_cmd_accent(cmd)), LV_PART_MAIN);
+    lv_obj_set_user_data(button, (void *)(uintptr_t)cmd);
+    lv_obj_add_event_cb(button, cover_popup_cmd_cb, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *label = lv_label_create(button);
+    lv_label_set_text(label, cover_i18n(cover_cmd_label_key(cmd), cover_cmd_label_fallback(cmd)));
+    lv_obj_set_style_text_font(label, cover_font_px(20), LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
+    lv_obj_center(label);
+    return button;
+}
+
+static void cover_popup_open(w_cover_tile_t *ctx)
+{
+    if (ctx == NULL || ctx->popup_overlay != NULL || ctx->unavailable) {
+        return;
+    }
+
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_add_event_cb(overlay, cover_popup_delete_cb, LV_EVENT_DELETE, ctx);
+    lv_obj_add_event_cb(overlay, cover_popup_close_cb, LV_EVENT_CLICKED, ctx);
+    ctx->popup_overlay = overlay;
+
+    lv_obj_update_layout(overlay);
+    const lv_coord_t screen_h = lv_obj_get_height(overlay);
+    const lv_coord_t card_h = LV_MIN(screen_h - 40, 440);
+    const lv_coord_t card_w = ctx->supports_position ? 340 : 260;
+
+    lv_obj_t *card = lv_obj_create(overlay);
+    lv_obj_set_size(card, card_w, card_h);
+    lv_obj_center(card);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_radius(card, 16, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(card, lv_color_hex(APP_UI_COLOR_CONTENT_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(card, lv_color_hex(APP_UI_COLOR_CONTENT_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
+
+    lv_obj_t *title = lv_label_create(card);
+    lv_label_set_text(title, (ctx->title_label != NULL) ? lv_label_get_text(ctx->title_label) : ctx->entity_id);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, card_w - 32 - 46);
+    lv_obj_set_style_text_font(title, cover_font_px(20), LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 4);
+
+    lv_obj_t *close = lv_obj_create(card);
+    lv_obj_remove_style_all(close);
+    lv_obj_set_size(close, 38, 38);
+    lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_radius(close, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(close, lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_IDLE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(close, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, 0, -2);
+    lv_obj_t *close_label = lv_label_create(close);
+    lv_label_set_text(close_label, "X");
+    lv_obj_set_style_text_color(close_label, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
+    lv_obj_center(close_label);
+    lv_obj_add_event_cb(close, cover_popup_close_cb, LV_EVENT_CLICKED, ctx);
+
+    const lv_coord_t body_y = 52;
+    const lv_coord_t body_h = card_h - 32 - body_y;
+    const lv_coord_t button_w = ctx->supports_position ? 128 : card_w - 32;
+    const lv_coord_t button_h = LV_MIN(64, (body_h - 2 * 12) / 3);
+
+    if (ctx->supports_position) {
+        /* Value above the slider; the slider runs bottom (closed) to top (open). */
+        ctx->popup_value = lv_label_create(card);
+        lv_obj_set_style_text_font(ctx->popup_value, cover_font_px(28), LV_PART_MAIN);
+        lv_obj_set_style_text_color(ctx->popup_value, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
+        lv_obj_set_width(ctx->popup_value, 140);
+        lv_obj_set_style_text_align(ctx->popup_value, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_align(ctx->popup_value, LV_ALIGN_TOP_LEFT, 0, body_y);
+
+        const lv_coord_t value_h = 44;
+        lv_obj_t *slider = lv_slider_create(card);
+        lv_slider_set_range(slider, 0, 100);
+        lv_obj_set_size(slider, 76, body_h - value_h - 8);
+        lv_obj_align(slider, LV_ALIGN_TOP_LEFT, (140 - 76) / 2, body_y + value_h + 4);
+        lv_obj_set_style_radius(slider, 22, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(slider, lv_color_hex(APP_UI_COLOR_CARD_BG_OFF), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_width(slider, 1, LV_PART_MAIN);
+        lv_obj_set_style_border_color(slider, lv_color_hex(APP_UI_COLOR_CARD_BORDER), LV_PART_MAIN);
+        lv_obj_set_style_radius(slider, 22, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(slider, lv_color_hex(APP_UI_COLOR_CARD_ICON_ON), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
+        /* Slim bar instead of a round knob, like a blind's bottom rail. */
+        lv_obj_set_style_radius(slider, 4, LV_PART_KNOB);
+        lv_obj_set_style_bg_color(slider, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_KNOB);
+        lv_obj_set_style_pad_hor(slider, 6, LV_PART_KNOB);
+        lv_obj_set_style_pad_ver(slider, -32, LV_PART_KNOB); /* 76 px square -> ~12 px bar */
+        lv_obj_set_ext_click_area(slider, 12);
+        lv_obj_add_event_cb(slider, cover_popup_slider_cb, LV_EVENT_VALUE_CHANGED, ctx);
+        lv_obj_add_event_cb(slider, cover_popup_slider_cb, LV_EVENT_RELEASED, ctx);
+        ctx->popup_slider = slider;
+
+        const int start = ctx->have_position ? ctx->position : (ctx->is_open ? 100 : 0);
+        lv_slider_set_value(slider, start, LV_ANIM_OFF);
+        cover_popup_set_value_text(ctx, start);
+    }
+
+    /* Open / stop / close stacked on the right (or full width). */
+    const w_cover_cmd_t order[3] = {W_COVER_CMD_OPEN, W_COVER_CMD_STOP, W_COVER_CMD_CLOSE};
+    const lv_coord_t stack_h = 3 * button_h + 2 * 12;
+    const lv_coord_t stack_y = body_y + (body_h - stack_h) / 2;
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *button = cover_popup_button(card, ctx, order[i], button_w, button_h);
+        lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, stack_y + i * (button_h + 12));
+    }
+}
+
 static void cover_card_event_cb(lv_event_t *event)
 {
     const lv_event_code_t code = lv_event_get_code(event);
@@ -752,7 +970,18 @@ static void cover_card_event_cb(lv_event_t *event)
             lv_timer_del(ctx->timer);
             ctx->timer = NULL;
         }
+        /* The popup lives on the top layer and points at ctx. */
+        cover_popup_close(ctx);
         free(ctx);
+        return;
+    }
+
+    if (code == LV_EVENT_LONG_PRESSED) {
+        /* A long press that started on the rail stays a drag. */
+        if (!ctx->dragging) {
+            ctx->long_press_guard = true;
+            cover_popup_open(ctx);
+        }
         return;
     }
 
@@ -760,6 +989,7 @@ static void cover_card_event_cb(lv_event_t *event)
         if (code == LV_EVENT_PRESSED) {
             /* A new touch always starts a fresh interaction. */
             ctx->slider_click_guard = false;
+            ctx->long_press_guard = false;
         }
         if (ctx->unavailable || !ctx->supports_position || ctx->track == NULL ||
             lv_obj_has_flag(ctx->track, LV_OBJ_FLAG_HIDDEN)) {
@@ -804,6 +1034,10 @@ static void cover_card_event_cb(lv_event_t *event)
         /* The tap that just moved the slider must not also toggle the cover. */
         if (ctx->slider_click_guard) {
             ctx->slider_click_guard = false;
+            return;
+        }
+        if (ctx->long_press_guard) {
+            ctx->long_press_guard = false;
             return;
         }
         if (lv_event_get_target(event) != ctx->card) {
@@ -950,6 +1184,7 @@ esp_err_t w_cover_tile_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_w
     lv_obj_add_event_cb(card, cover_card_event_cb, LV_EVENT_PRESS_LOST, ctx);
     lv_obj_add_event_cb(card, cover_card_event_cb, LV_EVENT_CLICKED, ctx);
     lv_obj_add_event_cb(card, cover_card_event_cb, LV_EVENT_DELETE, ctx);
+    lv_obj_add_event_cb(card, cover_card_event_cb, LV_EVENT_LONG_PRESSED, ctx);
 
     ctx->accent = APP_UI_COLOR_TEXT_MUTED;
     strlcpy(ctx->caption_text, cover_i18n("common.unavailable", "unavailable"), sizeof(ctx->caption_text));
@@ -1054,6 +1289,7 @@ void w_cover_tile_apply_state(ui_widget_instance_t *instance, const ha_state_t *
     cover_render(ctx);
     cover_update_buttons(ctx);
     cover_layout(ctx);
+    cover_popup_sync(ctx);
 }
 
 void w_cover_tile_mark_unavailable(ui_widget_instance_t *instance)

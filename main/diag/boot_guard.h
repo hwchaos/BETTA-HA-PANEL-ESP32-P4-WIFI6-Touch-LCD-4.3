@@ -46,6 +46,12 @@ void boot_guard_stage(const char *stage);
  * running image actually awaits confirmation. */
 void boot_guard_start_confirm_task(void);
 
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+/* Last boot stage of the previous run of this firmware ("" when unknown,
+ * "confirmed" when it came up fine). Kept in NVS across ESPHome fallbacks. */
+const char *boot_guard_prev_run_stage(void);
+#endif
+
 void boot_guard_get_info(boot_guard_info_t *out);
 
 /* Human-readable name for an esp_reset_reason_t value (never NULL). */

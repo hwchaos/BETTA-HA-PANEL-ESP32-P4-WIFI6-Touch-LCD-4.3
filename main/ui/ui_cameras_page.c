@@ -167,9 +167,9 @@ static void cam_cover_cb(void *user, const ha_cover_result_t *result)
         if (inst->owned_buf != NULL) {
             /* We still have the last good frame on screen; don't scare the
              * user with a hard error, just note that refresh is behind. */
-            cam_set_status(inst, ui_i18n_get("cameras.stale", "Błąd — stary obraz"));
+            cam_set_status(inst, ui_i18n_get("cameras.stale", "Fehler - altes Bild"));
         } else {
-            cam_set_status(inst, ui_i18n_get("cameras.fetch_failed", "Błąd pobierania"));
+            cam_set_status(inst, ui_i18n_get("cameras.fetch_failed", "Abruf fehlgeschlagen"));
         }
         cam_update_timer_period(inst);
         return;
@@ -259,7 +259,7 @@ static void cam_timer_cb(lv_timer_t *timer)
     }
     if (err != ESP_OK) {
         inst->fetching = false;
-        cam_set_status(inst, ui_i18n_get("cameras.queue_full", "Kolejka pełna"));
+        cam_set_status(inst, ui_i18n_get("cameras.queue_full", "Warteschlange voll"));
     }
 }
 
@@ -304,7 +304,7 @@ static void cam_build_tile(ui_camera_instance_t *inst,
     lv_obj_t *status = lv_label_create(card);
     lv_label_set_long_mode(status, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_width(status, w - 2 * CAM_GRID_GAP);
-    lv_label_set_text(status, ui_i18n_get("cameras.connecting", "Łączenie…"));
+    lv_label_set_text(status, ui_i18n_get("cameras.connecting", "Verbinde…"));
     lv_obj_set_style_text_font(status, CAM_STATUS_FONT, LV_PART_MAIN);
     cam_style_chip(status);
     lv_obj_align(status, LV_ALIGN_BOTTOM_LEFT, CAM_GRID_GAP, -CAM_GRID_GAP);

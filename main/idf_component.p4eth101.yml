@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: LicenseRef-FNCL-1.1
+#
+# Manifest for the Waveshare ESP32-P4-ETH + 10.1-DSI-TOUCH-A kit
+# (ESP32-P4-POE-ETH-KIT-B): Ethernet only, no C6 / ESP-Hosted. The board is
+# wired like the ESP32-P4-Nano (display, touch, ES8311 audio, IP101 PHY), so
+# the Nano BSP drives display, touch and audio.
+dependencies:
+  idf: ">=5.5"
+  lvgl/lvgl:
+    version: "^9"
+  waveshare/esp32_p4_nano:
+    version: "^1.2.0"
+    rules:
+      - if: "target in [esp32p4]"
+  espressif/esp_lvgl_port:
+    version: "^2.7.2"
+    rules:
+      - if: "target in [esp32p4]"
+  espressif/esp_lcd_touch:
+    version: "^1.2.0"
+    rules:
+      - if: "target in [esp32p4]"
+  espressif/esp_lcd_touch_gt911:
+    version: "1.2.0~2"
+    rules:
+      - if: "target in [esp32p4]"
+  joltwallet/littlefs:
+    version: "^1.20.2"
+  espressif/esp_websocket_client:
+    version: "*"
+  espressif/esp_audio_codec:
+    version: "~2.4.1"
+  78/esp-opus:
+    version: "1.0.*"

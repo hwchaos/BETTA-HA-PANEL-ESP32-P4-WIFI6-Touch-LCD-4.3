@@ -13,8 +13,18 @@
 #  define APP_NAME               "betta-ha-panel-10.1"
 #  define APP_SCREEN_WIDTH       1280
 #  define APP_SCREEN_HEIGHT      800
-#  define APP_CONTENT_BOX_WIDTH  1280
-#  define APP_CONTENT_BOX_HEIGHT 680
+#  define APP_CONTENT_BOX_WIDTH_BASE  1280
+#  define APP_CONTENT_BOX_HEIGHT_BASE 680
+#  define APP_CONTENT_BOX_BOTTOM_GUTTER 14
+#elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+#  define APP_NAME               "betta-ha-panel-p4eth"
+/* 800x1280 portrait DSI panel driven in landscape (software rotation). */
+#  define APP_SCREEN_WIDTH       1280
+#  define APP_SCREEN_HEIGHT      800
+#  define APP_PANEL_NATIVE_WIDTH  800
+#  define APP_PANEL_NATIVE_HEIGHT 1280
+#  define APP_CONTENT_BOX_WIDTH_BASE  1280
+#  define APP_CONTENT_BOX_HEIGHT_BASE 680
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 14
 #elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
 #  define APP_NAME               "betta-ha-panel-43"
@@ -24,29 +34,29 @@
 #  define APP_SCREEN_HEIGHT      480
 #  define APP_PANEL_NATIVE_WIDTH  480
 #  define APP_PANEL_NATIVE_HEIGHT 800
-#  define APP_CONTENT_BOX_WIDTH  800
-#  define APP_CONTENT_BOX_HEIGHT 360
+#  define APP_CONTENT_BOX_WIDTH_BASE  800
+#  define APP_CONTENT_BOX_HEIGHT_BASE 360
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 8
 #elif defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
 #  define APP_NAME               "betta-ha-panel-7b"
 #  define APP_SCREEN_WIDTH       1024
 #  define APP_SCREEN_HEIGHT      600
-#  define APP_CONTENT_BOX_WIDTH  1024
-#  define APP_CONTENT_BOX_HEIGHT 480
+#  define APP_CONTENT_BOX_WIDTH_BASE  1024
+#  define APP_CONTENT_BOX_HEIGHT_BASE 480
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 10
 #elif defined(CONFIG_APP_PANEL_VARIANT_S3_480)
 #  define APP_NAME               "betta-ha-panel-s3"
 #  define APP_SCREEN_WIDTH       480
 #  define APP_SCREEN_HEIGHT      480
-#  define APP_CONTENT_BOX_WIDTH  480
-#  define APP_CONTENT_BOX_HEIGHT 360
+#  define APP_CONTENT_BOX_WIDTH_BASE  480
+#  define APP_CONTENT_BOX_HEIGHT_BASE 360
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 8
 #else /* CONFIG_APP_PANEL_VARIANT_4INCH_720 (default) */
 #  define APP_NAME               "betta-ha-panel"
 #  define APP_SCREEN_WIDTH       720
 #  define APP_SCREEN_HEIGHT      720
-#  define APP_CONTENT_BOX_WIDTH  720
-#  define APP_CONTENT_BOX_HEIGHT 600
+#  define APP_CONTENT_BOX_WIDTH_BASE  720
+#  define APP_CONTENT_BOX_HEIGHT_BASE 600
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 12
 #endif
 /* Scan-out framebuffer geometry; differs from APP_SCREEN_* only when the UI is
@@ -58,7 +68,7 @@
 /* Small content box: use the compact widget size limits.  Must match
  * isCompactCanvas() in components/webui/www/app.js, or the editor and the
  * panel clamp tiles differently. */
-#define APP_LAYOUT_COMPACT (APP_CONTENT_BOX_WIDTH <= 480 || APP_CONTENT_BOX_HEIGHT <= 380)
+#define APP_LAYOUT_COMPACT (APP_CONTENT_BOX_WIDTH_BASE <= 480 || APP_CONTENT_BOX_HEIGHT_BASE <= 380)
 /* Breathing room between the lowest widgets and the navigation bar. The two
  * areas are directly adjacent, so a widget saved with y+h == the full content
  * box height put its own outline on the navigation bar's first row and looked
@@ -68,7 +78,23 @@
  * keep using the full APP_CONTENT_BOX_HEIGHT; the runtime only trims the drawn
  * rectangle, which is why saved layouts stay valid. */
 #define APP_CONTENT_BOX_USABLE_HEIGHT (APP_CONTENT_BOX_HEIGHT - APP_CONTENT_BOX_BOTTOM_GUTTER)
-#define APP_CONTENT_BOX_X 0
+/* Navigation bar position (display setting "nav_position", applied at boot by
+ * ui_geometry_init()): at the bottom the content box is the *_BASE size above;
+ * on the left the box starts right of the vertical bar and reaches down to the
+ * bottom edge. The values are runtime variables from here on - use the *_BASE
+ * macros in preprocessor conditions. */
+#ifndef __ASSEMBLER__
+#include <stdint.h>
+extern int16_t g_app_content_box_x;
+extern int16_t g_app_content_box_w;
+extern int16_t g_app_content_box_h;
+#endif
+#define APP_CONTENT_BOX_WIDTH ((int)g_app_content_box_w)
+#define APP_CONTENT_BOX_HEIGHT ((int)g_app_content_box_h)
+#define APP_CONTENT_BOX_X ((int)g_app_content_box_x)
+/* Bottom bar height and left bar width. */
+#define APP_NAV_BAR_HEIGHT 60
+#define APP_NAV_LEFT_WIDTH ((APP_SCREEN_WIDTH >= 1200) ? 210 : 156)
 #define APP_CONTENT_BOX_Y 60
 /* Nominal distance between two neighbouring tiles. The web editor snaps to a
  * 10 px grid, so columns usually keep exactly this gap, but tiles dropped flush
@@ -398,7 +424,7 @@
 #define APP_MQTT_PASSWORD_MAX_LEN 65
 #define APP_MQTT_DISCOVERY_PREFIX_MAX_LEN 65
 
-#define APP_UI_DEFAULT_LANGUAGE "pl"
+#define APP_UI_DEFAULT_LANGUAGE "de"
 
 #define APP_XIAOZHI_SERVER_MAX_LEN 256
 #define APP_XIAOZHI_DEVICE_MAX_LEN 64
@@ -406,7 +432,7 @@
 #define APP_XIAOZHI_OTA_URL_MAX_LEN 256
 #define APP_XIAOZHI_OTA_URL_DEFAULT "https://api.tenclass.net/xiaozhi/ota/"
 
-#define APP_UI_DEFAULT_LANGUAGE "pl"
+#define APP_UI_DEFAULT_LANGUAGE "de"
 #define APP_MQTT_ENABLED_DEFAULT 1
 #define APP_MQTT_PORT_DEFAULT 1883
 #define APP_MQTT_TLS_PORT_DEFAULT 8883

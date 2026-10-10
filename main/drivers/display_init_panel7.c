@@ -16,6 +16,11 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "nvs.h"
@@ -857,6 +862,32 @@ int64_t display_ms_since_activity(void)
     return (esp_timer_get_time() - s_last_activity_us) / 1000;
 }
 
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+/* The 4.3" ST7701 is a MIPI-DSI video-mode panel. A software restart
+ * (OTA, "save and restart") keeps it powered and in its old video state, and
+ * after re-init it can come up with only stripes on the glass while the frame
+ * buffer is fine. So: backlight off and the controller held in reset on every
+ * software restart, and a long reset pulse before the panel is initialised. */
+#define P43_LCD_RST_GPIO GPIO_NUM_27
+#define P43_LCD_BL_GPIO GPIO_NUM_26
+
+static void display_p43_hold_reset(void)
+{
+    gpio_reset_pin(P43_LCD_BL_GPIO);
+    gpio_set_direction(P43_LCD_BL_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(P43_LCD_BL_GPIO, 0);
+    gpio_reset_pin(P43_LCD_RST_GPIO);
+    gpio_set_direction(P43_LCD_RST_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(P43_LCD_RST_GPIO, 0);
+}
+
+static void display_p43_shutdown_handler(void)
+{
+    display_p43_hold_reset();
+    esp_rom_delay_us(20000);
+}
+#endif
+
 esp_err_t display_init(void)
 {
     if (s_display_ready) {
@@ -869,6 +900,12 @@ esp_err_t display_init(void)
         ESP_LOGE(TAG_DISPLAY, "lvgl_port_init failed: %s", esp_err_to_name(err));
         return err;
     }
+
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+    display_p43_hold_reset();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    (void)esp_register_shutdown_handler(display_p43_shutdown_handler);
+#endif
 
     bsp_lcd_handles_t lcd = {0};
     err = bsp_display_new_with_handles(NULL, &lcd);
@@ -920,7 +957,7 @@ esp_err_t display_init(void)
         .monochrome = false,
         .rotation = {
             .swap_xy = false,
-#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43) || defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
             .mirror_x = false,
             .mirror_y = false,
 #else
@@ -977,7 +1014,10 @@ esp_err_t display_init(void)
         lv_display_set_antialiasing(s_lv_display, APP_LVGL_ANTIALIASING != 0);
         /* Panel 7B is mounted upside-down; EK79007 MADCTL mirror has no effect
          * in DSI video mode, so rotate 180 in software (matches GT911 mirror). */
-#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+        /* 10.1-DSI-TOUCH-A: landscape the other way round than the 4.3". */
+        lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_270);
+#elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
         lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_90);
 #else
         lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_180);

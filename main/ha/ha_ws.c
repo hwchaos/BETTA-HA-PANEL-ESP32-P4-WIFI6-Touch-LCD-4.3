@@ -397,6 +397,21 @@ bool ha_ws_is_running(void)
 #endif
 }
 
+esp_err_t ha_ws_send_bin(const uint8_t *data, size_t len)
+{
+#if HA_WS_HAS_ESP_WS_CLIENT
+    if (data == NULL || len == 0 || s_ws_client == NULL || !ha_ws_is_connected()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    int written = esp_websocket_client_send_bin(s_ws_client, (const char *)data, (int)len, pdMS_TO_TICKS(150));
+    return (written > 0) ? ESP_OK : ESP_FAIL;
+#else
+    (void)data;
+    (void)len;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
 bool ha_ws_get_cached_resolved_ipv4(char *host_out, size_t host_out_sz, char *ip_out, size_t ip_out_sz)
 {
     if (host_out == NULL || host_out_sz == 0 || ip_out == NULL || ip_out_sz == 0) {

@@ -2,6 +2,7 @@
  * Copyright (c) 2026 Cpt_Kirk
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_err.h"
@@ -9,6 +10,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_littlefs.h"
+#include "esp_check.h"
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -39,6 +41,9 @@
 #include "ha/ha_model.h"
 #include "layout/layout_store.h"
 #include "mqtt/panel_mqtt.h"
+#include "assist/panel_assist.h"
+#include "radar/ld2410.h"
+#include "ui/ui_geometry.h"
 #include "net/net_health.h"
 #include "net/time_sync.h"
 #include "net/wifi_mgr.h"
@@ -52,9 +57,6 @@
 #include "ui/ui_theme_router.h"
 #include "ui/theme/theme_store.h"
 #include "util/log_tags.h"
-#include "xiaozhi/xiaozhi_activate.h"
-#include "xiaozhi/xiaozhi_client.h"
-#include "xiaozhi/xiaozhi_ui.h"
 
 #if CONFIG_IDF_TARGET_ESP32P4 && CONFIG_ESP32P4_SELECTS_REV_LESS_V3 && (CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ > 360)
 #error "ESP32-P4 rev<3 supports up to 360 MHz in this IDF; lower CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ."
@@ -188,8 +190,230 @@ static esp_err_t init_nvs(void)
     return err;
 }
 
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+/* The ESP32-P4-ETH kit keeps ESPHome's partition table (16 MB layout), which
+ * has no LittleFS partition. The module carries 32 MB, so the "storage" area
+ * is registered in the upper half at runtime. Before that, make sure the
+ * flash driver really reaches beyond 16 MB: if an address there reads back the
+ * bootloader and the partition table, accesses wrap around and writing would
+ * destroy the boot area - then refuse (the panel then reboots and the OTA
+ * rollback returns to the previous firmware). */
+#include "esp_flash.h"
+#include "esp_partition.h"
+
+#define P4ETH_STORAGE_OFFSET 0x1000000U
+#define P4ETH_STORAGE_SIZE 0x800000U
+
+static esp_err_t p4eth_register_storage(void)
+{
+    if (esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, NULL) != NULL) {
+        return ESP_OK;
+    }
+    uint32_t size = 0;
+    uint32_t physical = 0;
+    (void)esp_flash_get_size(esp_flash_default_chip, &size);
+    (void)esp_flash_get_physical_size(esp_flash_default_chip, &physical);
+    ESP_LOGI(TAG_APP, "flash: configured %u MB, physical %u MB", (unsigned)(size >> 20), (unsigned)(physical >> 20));
+    if (size < P4ETH_STORAGE_OFFSET + P4ETH_STORAGE_SIZE || physical < P4ETH_STORAGE_OFFSET + P4ETH_STORAGE_SIZE) {
+        ESP_LOGE(TAG_APP, "flash too small or not addressable beyond 16 MB - no storage");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    static const uint32_t probe_addrs[] = {0x2000U, 0x8000U}; /* bootloader, partition table */
+    uint8_t *low = malloc(512);
+    uint8_t *high = malloc(512);
+    if (low == NULL || high == NULL) {
+        free(low);
+        free(high);
+        return ESP_ERR_NO_MEM;
+    }
+    int same = 0;
+    for (size_t i = 0; i < sizeof(probe_addrs) / sizeof(probe_addrs[0]); i++) {
+        if (esp_flash_read(esp_flash_default_chip, low, probe_addrs[i], 512) != ESP_OK ||
+            esp_flash_read(esp_flash_default_chip, high, P4ETH_STORAGE_OFFSET + probe_addrs[i], 512) != ESP_OK) {
+            free(low);
+            free(high);
+            ESP_LOGE(TAG_APP, "flash read beyond 16 MB failed - no storage");
+            return ESP_FAIL;
+        }
+        if (memcmp(low, high, 512) == 0) {
+            same++;
+        }
+    }
+    free(low);
+    free(high);
+    if (same == (int)(sizeof(probe_addrs) / sizeof(probe_addrs[0]))) {
+        ESP_LOGE(TAG_APP, "flash addresses beyond 16 MB wrap around - refusing to use them");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    const esp_partition_t *part = NULL;
+    esp_err_t err = esp_partition_register_external(esp_flash_default_chip, P4ETH_STORAGE_OFFSET, P4ETH_STORAGE_SIZE,
+        "storage", ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, &part);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG_APP, "storage registered at 0x%x (%u KB)", (unsigned)P4ETH_STORAGE_OFFSET,
+            (unsigned)(P4ETH_STORAGE_SIZE / 1024));
+    } else {
+        ESP_LOGE(TAG_APP, "storage registration failed: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+#endif
+
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+/* While the new image is not confirmed yet, a line on the top layer tells
+ * what the network does and how long until the fallback to the previous
+ * firmware - readable without logs, which are unreachable without network. */
+#include "lvgl.h"
+
+#define P4ETH_FALLBACK_S (4 * 60)
+
+/* Warnings/errors at the end of the previous run's log file, captured before
+ * this run appends to it (the file lives above 16 MB, ESPHome leaves it). */
+#define P4ETH_PREV_LINES 6
+#define P4ETH_PREV_LINE_LEN 120
+static char s_prev_log[P4ETH_PREV_LINES * (P4ETH_PREV_LINE_LEN + 1) + 1];
+
+static void p4eth_capture_prev_log(void)
+{
+    s_prev_log[0] = 0;
+    FILE *f = fopen(APP_LOG_FILE, "rb");
+    if (f == NULL) {
+        return;
+    }
+    const long tail = 6144;
+    (void)fseek(f, 0, SEEK_END);
+    const long size = ftell(f);
+    (void)fseek(f, size > tail ? size - tail : 0, SEEK_SET);
+    char *buf = calloc(1, (size_t)tail + 1);
+    if (buf == NULL) {
+        fclose(f);
+        return;
+    }
+    const size_t n = fread(buf, 1, (size_t)tail, f);
+    fclose(f);
+    buf[n] = 0;
+
+    const char *picked[P4ETH_PREV_LINES] = {0};
+    size_t picked_len[P4ETH_PREV_LINES] = {0};
+    int count = 0;
+    char *line = buf;
+    while (line != NULL && *line != 0) {
+        char *next = strchr(line, '\n');
+        const size_t len = (next != NULL) ? (size_t)(next - line) : strlen(line);
+        const bool interesting = (len > 2 && (line[0] == 'E' || line[0] == 'W') && line[1] == ' ') ||
+                                 (len > 0 && (strstr(line, "CRASH") != NULL || strstr(line, "abort") != NULL));
+        if (interesting && strncmp(line, "W flashwatch", 12) != 0 && strncmp(line, "W syslog", 8) != 0 &&
+            strstr(line, "LEDC") == NULL && strstr(line, "ledc") == NULL) {
+            if (count == P4ETH_PREV_LINES) {
+                memmove(picked, picked + 1, sizeof(picked[0]) * (P4ETH_PREV_LINES - 1));
+                memmove(picked_len, picked_len + 1, sizeof(picked_len[0]) * (P4ETH_PREV_LINES - 1));
+                count--;
+            }
+            picked[count] = line;
+            picked_len[count] = len;
+            count++;
+        }
+        line = (next != NULL) ? next + 1 : NULL;
+    }
+    size_t used = 0;
+    for (int i = 0; i < count; i++) {
+        size_t len = picked_len[i] > P4ETH_PREV_LINE_LEN ? P4ETH_PREV_LINE_LEN : picked_len[i];
+        if (used + len + 2 >= sizeof(s_prev_log)) {
+            break;
+        }
+        memcpy(s_prev_log + used, picked[i], len);
+        used += len;
+        s_prev_log[used++] = '\n';
+    }
+    s_prev_log[used] = 0;
+    free(buf);
+}
+
+static void p4eth_netinfo_task(void *arg)
+{
+    (void)arg;
+    lv_obj_t *label = NULL;
+    const char *prev = boot_guard_prev_run_stage();
+    for (;;) {
+        boot_guard_info_t info;
+        boot_guard_get_info(&info);
+        const bool done = info.confirmed || !info.rollback_pending;
+        char text[1100];
+        char ip[16] = {0};
+        if (wifi_mgr_is_connected() && wifi_mgr_get_sta_ip(ip, sizeof(ip)) == ESP_OK) {
+            snprintf(text, sizeof(text), "Netzwerk OK: http://%s", ip);
+        } else if (wifi_mgr_eth_link_up()) {
+            snprintf(text, sizeof(text), "Ethernet-Link da, aber keine IP-Adresse (DHCP)");
+        } else {
+            snprintf(text, sizeof(text), "Kein Ethernet-Link (Kabel/PoE/PHY)");
+        }
+        const int left = P4ETH_FALLBACK_S - (int)(esp_timer_get_time() / 1000000);
+        if (!done && left > 0) {
+            const size_t n = strlen(text);
+            snprintf(text + n, sizeof(text) - n, "\nOhne Netz zurueck zu ESPHome in %d s", left);
+        }
+        /* "idle" is the normal running state; "confirmed" a healthy update. */
+        const bool prev_bad = prev != NULL && prev[0] != '\0' && strcmp(prev, "confirmed") != 0 &&
+                              strcmp(prev, "idle") != 0;
+        /* With network and a clean previous run there is nothing to report. */
+        if (wifi_mgr_is_connected() && !prev_bad) {
+            if (label != NULL && display_lock(200)) {
+                lv_obj_del(label);
+                label = NULL;
+                display_unlock();
+            }
+            if (done) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        if (prev_bad) {
+            const size_t n = strlen(text);
+            snprintf(text + n, sizeof(text) - n, "\nLetzter Start endete bei: %s", prev);
+            if (s_prev_log[0] != 0) {
+                const size_t m = strlen(text);
+                snprintf(text + m, sizeof(text) - m, "\nLetzte Meldungen davor:\n%s", s_prev_log);
+            }
+        }
+        if (display_lock(200)) {
+            if (label == NULL) {
+                label = lv_label_create(lv_layer_top());
+                lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
+                lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(label, LV_OPA_70, LV_PART_MAIN);
+                lv_obj_set_style_pad_all(label, 8, LV_PART_MAIN);
+                lv_obj_set_style_radius(label, 8, LV_PART_MAIN);
+                lv_obj_set_width(label, APP_SCREEN_WIDTH - 16);
+                lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+                lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 8, -8);
+            }
+            lv_label_set_text(label, text);
+            if (done && wifi_mgr_is_connected()) {
+                lv_obj_del(label);
+                label = NULL;
+                display_unlock();
+                break;
+            }
+            display_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    vTaskDelete(NULL);
+}
+
+static void p4eth_netinfo_start(void)
+{
+    (void)xTaskCreate(p4eth_netinfo_task, "p4eth_netinfo", 6144, NULL, 3, NULL);
+}
+#endif
+
 static esp_err_t init_littlefs(void)
 {
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    ESP_RETURN_ON_ERROR(p4eth_register_storage(), TAG_APP, "storage");
+#endif
     esp_vfs_littlefs_conf_t conf = {
         .base_path = "/littlefs",
         .partition_label = NULL,
@@ -382,6 +606,9 @@ void app_main(void)
 
     ESP_ERROR_CHECK(init_nvs());
     ESP_ERROR_CHECK(init_littlefs());
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    p4eth_capture_prev_log();
+#endif
     (void)system_log_init(); /* best effort: log capture must not block boot */
     (void)system_log_init();
     boot_guard_report_boot();
@@ -409,6 +636,8 @@ void app_main(void)
      * is started. */
     (void)runtime_settings_apply_motion_config(&s_runtime_settings);
 #endif
+    ui_geometry_init(s_runtime_settings.display_nav_left);
+    (void)panel_assist_init(&s_runtime_settings);
     (void)ui_i18n_init(s_runtime_settings.ui_language);
     (void)time_sync_set_timezone(s_runtime_settings.time_tz);
     /* Route LVGL's own warnings/errors into the persistent log before LVGL is
@@ -442,8 +671,13 @@ void app_main(void)
     bool has_wifi_credentials = false;
     bool wifi_ready = false;
 
-#if SOC_WIFI_SUPPORTED || CONFIG_ESP_HOSTED_ENABLED
+#if SOC_WIFI_SUPPORTED || CONFIG_ESP_HOSTED_ENABLED || CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    /* Ethernet needs no credentials: the link is always brought up. */
+    has_wifi_credentials = true;
+#else
     has_wifi_credentials = runtime_settings_has_wifi(&s_runtime_settings);
+#endif
     if (has_wifi_credentials) {
         wifi_mgr_config_t wifi_cfg = {
             .ssid = s_runtime_settings.wifi_ssid,
@@ -456,7 +690,11 @@ void app_main(void)
             .static_gateway = s_runtime_settings.wifi_static_gateway,
             .static_dns = s_runtime_settings.wifi_static_dns,
             .wait_for_ip = APP_WIFI_WAIT_FOR_IP,
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+            .connect_timeout_ms = 30000,
+#else
             .connect_timeout_ms = APP_WIFI_CONNECT_TIMEOUT_MS,
+#endif
             .max_retries = APP_WIFI_MAX_RETRIES,
         };
         esp_err_t wifi_err = wifi_mgr_init(&wifi_cfg);
@@ -510,10 +748,20 @@ void app_main(void)
             ui_boot_splash_set_status(ui_i18n_get("boot.offline_mode", "Offline mode"));
         }
     } else if (!wifi_ready) {
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+        /* No restart here: before the image is confirmed every restart means
+         * falling back to the previous firmware. The boot guard decides. */
+        ESP_LOGW(TAG_APP, "Ethernet not up at boot - waiting (boot guard decides about a fallback)");
+#else
         /* Configured panel whose link failed at boot: keep the dashboard and
          * heal in the background. */
         wifi_recovery_start();
+#endif
     }
+#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
+    boot_guard_start_confirm_task();
+    p4eth_netinfo_start();
+#endif
 #else
     ESP_LOGW(TAG_WIFI, "No Wi-Fi backend enabled for target %s", CONFIG_IDF_TARGET);
     ui_boot_splash_set_status("No Wi-Fi backend");
@@ -541,9 +789,11 @@ void app_main(void)
         ESP_LOGE(TAG_APP, "HA client pre-init failed: %s", esp_err_to_name(ha_preinit_err));
     }
     ESP_ERROR_CHECK(http_server_start());
+    /* Presence radar (UART1); independent of the network. */
+    ld2410_apply_settings(&s_runtime_settings);
     boot_guard_stage("http");
 
-#if SOC_WIFI_SUPPORTED || CONFIG_ESP_HOSTED_ENABLED
+#if SOC_WIFI_SUPPORTED || CONFIG_ESP_HOSTED_ENABLED || CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
     /* The server is listening now, so the web UI answers while the first SNTP
      * exchange settles. Re-apply the theme settings afterwards because the
      * day/night schedule depends on the clock. */
@@ -581,40 +831,6 @@ void app_main(void)
             ESP_LOGE(TAG_CAMERA, "Failed to create camera_boot task");
         }
 #endif
-
-        xiaozhi_config_t xz_cfg = {
-            .server = s_runtime_settings.xiaozhi_server,
-            .device = s_runtime_settings.xiaozhi_device,
-            .token = s_runtime_settings.xiaozhi_token,
-            .enabled = s_runtime_settings.xiaozhi_enabled,
-        };
-        esp_err_t xz_err = xz_xiaozhi_init(&xz_cfg);
-        if (xz_err != ESP_OK) {
-            ESP_LOGW(TAG_APP, "Xiaozhi init failed: %s", esp_err_to_name(xz_err));
-        }
-
-        /* Cloud activation: when Xiaozhi is enabled but the device is not yet
-         * bound to a Xiaozhi cloud account, the activation task contacts the
-         * OTA endpoint (official xiaozhi.me by default), shows the 6-digit
-         * pairing code on the Xiaozhi page and persists the WebSocket url and
-         * token once the device is bound. */
-        if (s_runtime_settings.xiaozhi_enabled) {
-            /* The cloud may keep reporting the literal "test-token" even after
-             * binding; it authorizes each connection by Device-Id, so a non-empty
-             * token is enough to treat the device as configured. */
-            const bool has_credentials = s_runtime_settings.xiaozhi_server[0] != '\0' &&
-                                         s_runtime_settings.xiaozhi_token[0] != '\0';
-            if (!has_credentials) {
-                const char *ota_url = s_runtime_settings.xiaozhi_ota_url[0] != '\0'
-                                          ? s_runtime_settings.xiaozhi_ota_url
-                                          : APP_XIAOZHI_OTA_URL_DEFAULT;
-                esp_err_t act_err = xz_activate_start(ota_url);
-                if (act_err != ESP_OK) {
-                    ESP_LOGW(TAG_APP, "Xiaozhi activation start failed: %s",
-                             esp_err_to_name(act_err));
-                }
-            }
-        }
 
         /* From here on the screensaver frame follows the microSD card: it is
          * moved onto a card that is inserted and copied back to internal flash

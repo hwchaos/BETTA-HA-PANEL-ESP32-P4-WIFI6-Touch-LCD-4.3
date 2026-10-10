@@ -14,6 +14,8 @@
 #include "ui/ui_i18n.h"
 #include "ui/ui_bindings.h"
 #include "ui/ui_memory.h"
+#include "ui/widgets/w_widget_util.h"
+#include "ui/ui_mdi_icon.h"
 
 typedef enum {
     W_BUTTON_MODE_AUTO = 0,
@@ -40,6 +42,10 @@ typedef struct {
     lv_obj_t *state_label;
     lv_obj_t *action_switch;
     lv_obj_t *action_icon;
+    lv_obj_t *entity_icon;       /* MDI icon of the entity (switch layouts) */
+    char icon_name[APP_MAX_ICON_LEN]; /* icon currently resolved for the tile */
+    char tile_icon[APP_MAX_ICON_LEN]; /* icon chosen in the editor ("" = automatic) */
+    bool action_icon_mdi;        /* action_icon shows icon_name (stateless tiles) */
     lv_color_t accent_color;
     w_button_mode_t mode;
     w_button_style_t style;
@@ -65,6 +71,7 @@ static const lv_coord_t W_BUTTON_SWITCH_HEIGHT_PX = 40;
  * ~140 px and overlapped the title at 120 px. */
 static const lv_coord_t W_BUTTON_SHORT_CARD_H = 140;
 static const lv_coord_t W_BUTTON_SHORT_SWITCH_H = 28;
+static const lv_coord_t W_BUTTON_ENTITY_ICON_PX = 30;
 
 static bool button_is_hex_digit(char c)
 {
@@ -520,10 +527,17 @@ static void button_layout_switch(lv_obj_t *card, w_button_ctx_t *ctx)
         }
         lv_obj_set_size(ctx->action_switch, switch_w, switch_h);
         lv_obj_set_pos(ctx->action_switch, content_w - switch_w, 0);
+        lv_coord_t label_x = 0;
+        if (ctx->entity_icon != NULL && !lv_obj_has_flag(ctx->entity_icon, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_update_layout(ctx->entity_icon);
+            const lv_coord_t icon_h = lv_obj_get_height(ctx->entity_icon);
+            lv_obj_set_pos(ctx->entity_icon, 0, (switch_h - icon_h) / 2);
+            label_x = lv_obj_get_width(ctx->entity_icon) + 6;
+        }
         if (ctx->state_label != NULL) {
             lv_obj_update_layout(ctx->state_label);
             const lv_coord_t label_h = lv_obj_get_height(ctx->state_label);
-            lv_obj_set_pos(ctx->state_label, 0, (switch_h - label_h) / 2);
+            lv_obj_set_pos(ctx->state_label, label_x, (switch_h - label_h) / 2);
         }
         return;
     }
@@ -589,6 +603,18 @@ static void button_layout_switch(lv_obj_t *card, w_button_ctx_t *ctx)
 
     lv_obj_set_pos(ctx->action_switch, x, y);
     lv_obj_set_size(ctx->action_switch, switch_w, switch_h);
+
+    /* Tall tile: icon in the top-left corner, status text right of it. */
+    if (ctx->entity_icon != NULL && !lv_obj_has_flag(ctx->entity_icon, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_update_layout(ctx->entity_icon);
+        lv_obj_set_pos(ctx->entity_icon, 0, 0);
+        if (ctx->state_label != NULL) {
+            lv_obj_update_layout(ctx->state_label);
+            const lv_coord_t icon_h = lv_obj_get_height(ctx->entity_icon);
+            const lv_coord_t label_h = lv_obj_get_height(ctx->state_label);
+            lv_obj_set_pos(ctx->state_label, lv_obj_get_width(ctx->entity_icon) + 6, (icon_h - label_h) / 2);
+        }
+    }
 }
 
 static void button_layout_icon(lv_obj_t *card, w_button_ctx_t *ctx)
@@ -602,6 +628,11 @@ static void button_layout_icon(lv_obj_t *card, w_button_ctx_t *ctx)
     if (ctx->stateless && lv_obj_get_height(card) < W_BUTTON_SHORT_CARD_H) {
         /* Short action tile: fixed-size glyph in the top-left corner so a title
          * that wraps onto two lines cannot squeeze it to nothing. */
+        if (ctx->action_icon_mdi && ui_mdi_icon_apply(ctx->action_icon, ctx->icon_name, W_BUTTON_ENTITY_ICON_PX)) {
+            lv_obj_set_width(ctx->action_icon, LV_SIZE_CONTENT);
+            lv_obj_set_pos(ctx->action_icon, 0, 0);
+            return;
+        }
 #if LV_FONT_MONTSERRAT_28
         lv_obj_set_style_text_font(ctx->action_icon, &lv_font_montserrat_28, LV_PART_MAIN);
 #else
@@ -638,7 +669,11 @@ static void button_layout_icon(lv_obj_t *card, w_button_ctx_t *ctx)
     if (target_icon_h < 20) {
         target_icon_h = 20;
     }
-    if (ctx->style == W_BUTTON_STYLE_STATUS_TEXT) {
+    if (ctx->action_icon_mdi) {
+        /* Any size works for the MDI font; keep it within the tile's area. */
+        const lv_coord_t px = target_icon_h > 72 ? 72 : target_icon_h;
+        (void)ui_mdi_icon_apply(ctx->action_icon, ctx->icon_name, px);
+    } else if (ctx->style == W_BUTTON_STYLE_STATUS_TEXT) {
         lv_obj_set_style_text_font(
             ctx->action_icon, button_pick_text_font(target_icon_h, lv_label_get_text(ctx->action_icon)), LV_PART_MAIN);
     } else if (ctx->style == W_BUTTON_STYLE_LAMP_ICON) {
@@ -703,6 +738,22 @@ static void button_apply_visual(lv_obj_t *card, w_button_ctx_t *ctx, bool is_on,
         lv_obj_set_style_text_color(ctx->state_label, status_color, LV_PART_MAIN);
     } else {
         lv_obj_add_flag(ctx->state_label, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Entity icon (tile icon > HA icon > default for domain/device class). */
+    snprintf(ctx->icon_name, sizeof(ctx->icon_name), "%s",
+        ui_mdi_icon_for_entity(ctx->tile_icon, ctx->entity_id, is_on && !unavailable));
+    const lv_color_t entity_icon_color = unavailable ? lv_color_hex(APP_UI_COLOR_TEXT_MUTED)
+                                                     : (is_on ? ctx->accent_color : lv_color_hex(APP_UI_COLOR_CARD_ICON_OFF));
+    if (ctx->entity_icon != NULL) {
+        const bool show = button_uses_switch_ui(ctx) &&
+                          ui_mdi_icon_apply(ctx->entity_icon, ctx->icon_name, W_BUTTON_ENTITY_ICON_PX);
+        if (show) {
+            lv_obj_set_style_text_color(ctx->entity_icon, entity_icon_color, LV_PART_MAIN);
+            lv_obj_clear_flag(ctx->entity_icon, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(ctx->entity_icon, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     if (button_uses_switch_ui(ctx)) {
@@ -780,7 +831,9 @@ static void button_apply_visual(lv_obj_t *card, w_button_ctx_t *ctx, bool is_on,
                     } else if (state_icon) {
                         icon_text = LV_SYMBOL_POWER;
                     } else if (ctx->stateless) {
-                        icon_text = LV_SYMBOL_PLAY;
+                        ctx->action_icon_mdi = ui_mdi_icon_codepoint(ctx->icon_name) != 0 &&
+                                               ui_mdi_icon_font(W_BUTTON_ENTITY_ICON_PX) != NULL;
+                        icon_text = ctx->action_icon_mdi ? NULL : LV_SYMBOL_PLAY;
                     } else {
                         icon_text = button_icon_symbol(ctx->mode, is_on && !unavailable);
                     }
@@ -792,7 +845,12 @@ static void button_apply_visual(lv_obj_t *card, w_button_ctx_t *ctx, bool is_on,
                         icon_color = ctx->accent_color;
                     }
                 }
-                lv_label_set_text(ctx->action_icon, icon_text);
+                if (icon_text != NULL) {
+                    lv_label_set_text(ctx->action_icon, icon_text);
+                } else {
+                    /* MDI glyph; button_layout_icon() sets its final size. */
+                    (void)ui_mdi_icon_apply(ctx->action_icon, ctx->icon_name, W_BUTTON_ENTITY_ICON_PX);
+                }
                 lv_obj_set_style_text_color(ctx->action_icon, icon_color, LV_PART_MAIN);
                 button_layout_icon(card, ctx);
             }
@@ -962,6 +1020,10 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     lv_label_set_text(action_icon, "");
     lv_obj_add_flag(action_icon, LV_OBJ_FLAG_HIDDEN);
 
+    lv_obj_t *entity_icon = lv_label_create(card);
+    lv_label_set_text(entity_icon, "");
+    lv_obj_add_flag(entity_icon, LV_OBJ_FLAG_HIDDEN);
+
     w_button_ctx_t *ctx = ui_calloc_prefer_psram(1, sizeof(w_button_ctx_t));
     if (ctx == NULL) {
         lv_obj_del(card);
@@ -973,6 +1035,8 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     ctx->state_label = state_label;
     ctx->action_switch = action_switch;
     ctx->action_icon = action_icon;
+    ctx->entity_icon = entity_icon;
+    snprintf(ctx->tile_icon, sizeof(ctx->tile_icon), "%s", def->icon);
     ctx->accent_color = lv_color_hex(W_BUTTON_SWITCH_ACCENT_DEFAULT_HEX);
     ctx->mode = button_mode_from_text(def->button_mode);
     ctx->style = button_style_from_text(def->style_variant);
@@ -991,7 +1055,7 @@ esp_err_t w_button_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widge
     ctx->unavailable = false;
 
     lv_color_t parsed_color = lv_color_hex(0);
-    if (button_parse_hex_color(def->button_accent_color, &parsed_color)) {
+    if (button_parse_hex_color(def->button_accent_color, &parsed_color) && !w_color_is_editor_default(parsed_color)) {
         ctx->accent_color = parsed_color;
     }
 

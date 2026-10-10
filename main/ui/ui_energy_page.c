@@ -75,9 +75,43 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_ARC_BATTERY 1
 #define ENERGY_ARC_GRID 2
 
-#if APP_LAYOUT_COMPACT
-/* Laid out for a 480 px wide content box; wider short boxes (800x360 on the
- * Waveshare 4.3" in landscape) centre the same diagram. */
+#if APP_LAYOUT_COMPACT && (APP_CONTENT_BOX_WIDTH_BASE >= 700)
+/* Wide but short content box (800x360, Waveshare 4.3" in landscape): spread
+ * the diagram over the full width; every node is 118 px plus a 5 px ring
+ * (128 px outside). Vertical budget: solar title 0..21, solar ring 22..150,
+ * home ring 120..248, battery ring 207..335, battery title 339..360. The flow
+ * bends need >= ENERGY_ARC_RADIUS of straight run (battery top 212 vs. home row
+ * 196), hence the tight radius. Must match the editor preview
+ * (renderEnergyCanvasPreview, ".energy-page-preview.compact.wide"). */
+#define ENERGY_NODE_GRID_X 160
+#define ENERGY_NODE_GRID_Y 184
+#define ENERGY_NODE_SOLAR_X 400
+#define ENERGY_NODE_SOLAR_Y 86
+#define ENERGY_NODE_HOME_X 640
+#define ENERGY_NODE_HOME_Y 184
+#define ENERGY_NODE_BATTERY_X 400
+#define ENERGY_NODE_BATTERY_Y 271
+#define ENERGY_NODE_SIZE 118
+#define ENERGY_HOME_SIZE 118
+#define ENERGY_DOT_SIZE 12
+#define ENERGY_ARC_RADIUS 16.0f
+#define ENERGY_NODE_TITLE_WIDTH 140
+#define ENERGY_NODE_TITLE_TOP_OFFSET 22
+#define ENERGY_NODE_TITLE_BOTTOM_OFFSET 4
+#define ENERGY_NODE_BORDER_WIDTH 3
+#define ENERGY_VALUE_INSET 16
+#define ENERGY_HOME_ARC_PAD 10
+#define ENERGY_HOME_ARC_WIDTH 5
+#define ENERGY_FLOW_LINE_WIDTH 3
+#define ENERGY_VALUE_FONT APP_FONT_TEXT_14
+#define ENERGY_TITLE_FONT APP_FONT_TEXT_14
+#define ENERGY_STATS_FONT APP_FONT_TEXT_14
+#define ENERGY_STATS_X 16
+#define ENERGY_STATS_WIDTH 220
+#define ENERGY_STATS_TODAY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 52)
+#define ENERGY_STATS_AUTARKY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 28)
+#elif APP_LAYOUT_COMPACT
+/* Laid out for a 480 px wide content box. */
 #define ENERGY_COMPACT_X_SHIFT ((APP_CONTENT_BOX_WIDTH - 480) / 2)
 #define ENERGY_NODE_GRID_X (76 + ENERGY_COMPACT_X_SHIFT)
 #define ENERGY_NODE_GRID_Y 205
@@ -145,14 +179,27 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_KWH_MIN_VISIBLE 0.001f
 #define ENERGY_KWH_VISUAL_SCALE 1000.0f
 
-#define ENERGY_COLOR_GRID 0x039BEF
-#define ENERGY_COLOR_RETURN 0xE45E65
-#define ENERGY_COLOR_SOLAR 0xFF9800
-#define ENERGY_COLOR_BATTERY_OUT 0x26A69A
-#define ENERGY_COLOR_BATTERY_IN 0xE84393
-#define ENERGY_COLOR_GAS      0xA0522D
-#define ENERGY_COLOR_WATER    0x00BCD4
-#define ENERGY_COLOR_LINE_IDLE 0x435566
+/* Palette tuned for dark, tinted backgrounds: saturated enough to read as
+ * "energy", soft enough not to clash next to each other. */
+#define ENERGY_COLOR_GRID 0x4FA3FF
+#define ENERGY_COLOR_RETURN 0xFF6B81
+#define ENERGY_COLOR_SOLAR 0xFFB547
+#define ENERGY_COLOR_BATTERY_OUT 0x2DD4BF
+#define ENERGY_COLOR_BATTERY_IN 0xC084FC
+#define ENERGY_COLOR_GAS      0xE09A5B
+#define ENERGY_COLOR_WATER    0x22D3EE
+#define ENERGY_COLOR_LINE_IDLE 0x3A4757
+/* Node look: dark glass fill lightly tinted with the node colour, an outer
+ * ring in the node colour (the home ring shows the consumption mix on a muted
+ * track instead) and a soft glow. */
+#define ENERGY_NODE_FILL_BASE 0x111821
+#define ENERGY_NODE_FILL_TINT 40      /* 0..255 share of the node colour */
+#define ENERGY_NODE_FILL_OPA LV_OPA_90
+#define ENERGY_RING_OPA LV_OPA_80
+#define ENERGY_HOME_TRACK_COLOR 0x263241
+#define ENERGY_GLOW_WIDTH 22
+#define ENERGY_GLOW_OPA LV_OPA_30
+#define ENERGY_TITLE_COLOR 0xC9D4DF
 
 #define ENERGY_SOURCE_HA "ha_energy"
 #define ENERGY_SOURCE_MANUAL "manual_live"
@@ -178,6 +225,7 @@ typedef struct {
 } energy_value_slot_t;
 
 typedef struct {
+    lv_obj_t *ring;       /* outer ring, same size for every node */
     lv_obj_t *circle;
     lv_obj_t *icon_label;
     lv_obj_t *value_label;
@@ -215,6 +263,7 @@ typedef struct {
 typedef struct {
     ui_energy_page_config_t config;
     lv_obj_t *root;
+    lv_obj_t *stats_panel;
     lv_obj_t *stat_today_label;
     lv_obj_t *stat_autarky_label;
     energy_node_t nodes[ENERGY_NODE_COUNT];
@@ -429,6 +478,7 @@ static void energy_set_node_hidden(energy_node_t *node, bool hidden)
     if (node == NULL) {
         return;
     }
+    energy_set_obj_hidden(node->ring, hidden);
     energy_set_obj_hidden(node->circle, hidden);
     energy_set_obj_hidden(node->title_label, hidden);
 }
@@ -448,16 +498,40 @@ static void energy_create_node(energy_page_ctx_t *ctx, int node_id, int cx, int 
     const char *icon_text, lv_color_t color)
 {
     energy_node_t *node = &ctx->nodes[node_id];
+    const bool is_home = (node_id == ENERGY_NODE_HOME);
+
+    /* Outer ring: identical geometry for every node. For the home node it is
+     * the muted track under the consumption arcs. */
+    const int ring_size = size + ENERGY_HOME_ARC_PAD;
+    lv_obj_t *ring = lv_obj_create(ctx->root);
+    lv_obj_remove_style_all(ring);
+    lv_obj_set_size(ring, ring_size, ring_size);
+    lv_obj_set_pos(ring, cx - (ring_size / 2), cy - (ring_size / 2));
+    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ring, ENERGY_HOME_ARC_WIDTH, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ring, is_home ? lv_color_hex(ENERGY_HOME_TRACK_COLOR) : color, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(ring, is_home ? LV_OPA_COVER : ENERGY_RING_OPA, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ring, ENERGY_GLOW_WIDTH, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(ring, is_home ? lv_color_hex(ENERGY_COLOR_GRID) : color, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(ring, is_home ? LV_OPA_20 : ENERGY_GLOW_OPA, LV_PART_MAIN);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+
     lv_obj_t *circle = lv_obj_create(ctx->root);
     lv_obj_remove_style_all(circle);
     lv_obj_set_size(circle, size, size);
     lv_obj_set_pos(circle, cx - (size / 2), cy - (size / 2));
     lv_obj_set_style_radius(circle, size / 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(circle, lv_color_hex(APP_UI_COLOR_CARD_BG_OFF), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(circle, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(circle, ENERGY_NODE_BORDER_WIDTH, LV_PART_MAIN);
-    lv_obj_set_style_border_color(circle, color, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(circle, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(circle,
+        is_home ? lv_color_mix(lv_color_white(), lv_color_hex(ENERGY_NODE_FILL_BASE), 14)
+                : lv_color_mix(color, lv_color_hex(ENERGY_NODE_FILL_BASE), ENERGY_NODE_FILL_TINT),
+        LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(circle, ENERGY_NODE_FILL_OPA, LV_PART_MAIN);
+    /* Hairline edge; the colour lives on the outer ring. */
+    lv_obj_set_style_border_width(circle, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(circle, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(circle, LV_OPA_10, LV_PART_MAIN);
     lv_obj_set_style_pad_all(circle, 0, LV_PART_MAIN);
     lv_obj_clear_flag(circle, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(circle, LV_OBJ_FLAG_CLICKABLE);
@@ -498,11 +572,13 @@ static void energy_create_node(energy_page_ctx_t *ctx, int node_id, int cx, int 
     lv_obj_t *title_label = lv_label_create(ctx->root);
     lv_label_set_text(title_label, title);
     lv_obj_set_width(title_label, ENERGY_NODE_TITLE_WIDTH);
-    energy_style_text(title_label, theme_default_color_text_muted(), ENERGY_TITLE_FONT, LV_TEXT_ALIGN_CENTER);
-    int title_y = (cy < ENERGY_NODE_HOME_Y) ? (cy - (size / 2) - ENERGY_NODE_TITLE_TOP_OFFSET)
-                                            : (cy + (size / 2) + ENERGY_NODE_TITLE_BOTTOM_OFFSET);
+    energy_style_text(title_label, lv_color_hex(ENERGY_TITLE_COLOR), ENERGY_TITLE_FONT, LV_TEXT_ALIGN_CENTER);
+    /* Titles sit outside the ring, not just outside the circle. */
+    int title_y = (cy < ENERGY_NODE_HOME_Y) ? (cy - (ring_size / 2) - ENERGY_NODE_TITLE_TOP_OFFSET)
+                                            : (cy + (ring_size / 2) + ENERGY_NODE_TITLE_BOTTOM_OFFSET);
     lv_obj_set_pos(title_label, cx - (ENERGY_NODE_TITLE_WIDTH / 2), title_y);
 
+    node->ring = ring;
     node->circle = circle;
     node->icon_label = icon;
     node->value_label = value;
@@ -531,12 +607,12 @@ static void energy_create_home_arc(energy_page_ctx_t *ctx, int index, lv_color_t
 
 static void energy_set_home_idle_ring(energy_page_ctx_t *ctx, bool idle)
 {
-    if (ctx == NULL || ctx->nodes[ENERGY_NODE_HOME].circle == NULL) {
+    if (ctx == NULL || ctx->nodes[ENERGY_NODE_HOME].ring == NULL) {
         return;
     }
-    lv_obj_set_style_border_width(ctx->nodes[ENERGY_NODE_HOME].circle, idle ? ENERGY_NODE_BORDER_WIDTH : 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(
-        ctx->nodes[ENERGY_NODE_HOME].circle, lv_color_hex(ENERGY_COLOR_LINE_IDLE), LV_PART_MAIN);
+    /* The track stays; it only lightens a little while nothing is consumed. */
+    lv_obj_set_style_border_color(ctx->nodes[ENERGY_NODE_HOME].ring,
+        lv_color_hex(idle ? ENERGY_COLOR_LINE_IDLE : ENERGY_HOME_TRACK_COLOR), LV_PART_MAIN);
 }
 
 static void energy_set_flow_points(energy_flow_t *flow, lv_point_precise_t p0, lv_point_precise_t p1,
@@ -674,7 +750,7 @@ static void energy_create_flow(energy_page_ctx_t *ctx, int flow_id, lv_color_t c
     lv_obj_set_style_line_width(line, ENERGY_FLOW_LINE_WIDTH, LV_PART_MAIN);
     lv_obj_set_style_line_color(line, color, LV_PART_MAIN);
     lv_obj_set_style_line_opa(line, LV_OPA_40, LV_PART_MAIN);
-    lv_obj_set_style_line_rounded(line, false, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(line, true, LV_PART_MAIN);
 
     /* Second straight segment after the arc (used only for L-flows).
      * Created as a zero-sized line widget; will be positioned/shown by
@@ -687,7 +763,7 @@ static void energy_create_flow(energy_page_ctx_t *ctx, int flow_id, lv_color_t c
     lv_obj_set_style_line_width(post_line, ENERGY_FLOW_LINE_WIDTH, LV_PART_MAIN);
     lv_obj_set_style_line_color(post_line, color, LV_PART_MAIN);
     lv_obj_set_style_line_opa(post_line, LV_OPA_40, LV_PART_MAIN);
-    lv_obj_set_style_line_rounded(post_line, false, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(post_line, true, LV_PART_MAIN);
     lv_obj_add_flag(post_line, LV_OBJ_FLAG_HIDDEN);
 
     /* Real arc widget for the corner (used only for L-flows).
@@ -720,7 +796,12 @@ static void energy_create_flow(energy_page_ctx_t *ctx, int flow_id, lv_color_t c
     lv_obj_set_style_radius(dot, ENERGY_DOT_SIZE / 2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(dot, color, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(dot, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(dot, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(dot, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(dot, 10, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(dot, color, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(dot, LV_OPA_70, LV_PART_MAIN);
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
@@ -1020,12 +1101,13 @@ static void energy_set_flow_active(energy_flow_t *flow, bool line_visible, float
     flow->color = color;
 
     bool active = flow->visible;
-    lv_opa_t line_opa = active ? LV_OPA_70 : LV_OPA_30;
+    lv_opa_t line_opa = active ? LV_OPA_80 : LV_OPA_30;
 
     energy_set_obj_hidden(flow->line, !active);
     lv_obj_set_style_line_color(flow->line, color, LV_PART_MAIN);
     lv_obj_set_style_line_opa(flow->line, line_opa, LV_PART_MAIN);
     lv_obj_set_style_bg_color(flow->dot, color, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(flow->dot, color, LV_PART_MAIN);
 
     if (flow->has_arc) {
         if (flow->arc != NULL) {
@@ -1116,8 +1198,14 @@ static void energy_update_bidir_node(energy_node_t *node,
         /* No meaningful flow: fall back to the "in" color as neutral. */
         border_hex = color_in_hex;
     }
+    if (node->ring != NULL) {
+        lv_obj_set_style_border_color(node->ring, lv_color_hex(border_hex), LV_PART_MAIN);
+        lv_obj_set_style_shadow_color(node->ring, lv_color_hex(border_hex), LV_PART_MAIN);
+    }
     if (node->circle != NULL) {
-        lv_obj_set_style_border_color(node->circle, lv_color_hex(border_hex), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(node->circle,
+            lv_color_mix(lv_color_hex(border_hex), lv_color_hex(ENERGY_NODE_FILL_BASE), ENERGY_NODE_FILL_TINT),
+            LV_PART_MAIN);
     }
 }
 
@@ -1495,16 +1583,12 @@ static void energy_page_event_cb(lv_event_t *event)
     }
 }
 
-esp_err_t ui_energy_page_create(
-    const ui_energy_page_config_t *config, lv_obj_t *parent, ui_energy_page_instance_t *out_instance)
+/* One energy flow view (HA totals or live sensors) inside `parent`. */
+static energy_page_ctx_t *energy_view_create(const ui_energy_page_config_t *config, lv_obj_t *parent)
 {
-    if (config == NULL || parent == NULL || out_instance == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
     energy_page_ctx_t *ctx = ui_calloc_prefer_psram(1, sizeof(energy_page_ctx_t));
     if (ctx == NULL) {
-        return ESP_ERR_NO_MEM;
+        return NULL;
     }
     ctx->config = *config;
 
@@ -1527,26 +1611,38 @@ esp_err_t ui_energy_page_create(
     lv_obj_set_style_border_width(root, 0, LV_PART_MAIN);
     ctx->root = root;
 
-    /* Stats area — bottom-left corner */
-    ctx->stat_today_label = lv_label_create(root);
-    lv_label_set_text(ctx->stat_today_label, "");
-    lv_obj_set_width(ctx->stat_today_label, ENERGY_STATS_WIDTH);
-    energy_style_text(ctx->stat_today_label, theme_default_color_text_muted(), ENERGY_STATS_FONT, LV_TEXT_ALIGN_LEFT);
-    lv_obj_set_pos(ctx->stat_today_label, ENERGY_STATS_X, ENERGY_STATS_TODAY_Y);
+    /* Stats area - bottom-left corner, on a small translucent card. */
+    lv_obj_t *stats = lv_obj_create(root);
+    lv_obj_remove_style_all(stats);
+    lv_obj_set_size(stats, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_pos(stats, ENERGY_STATS_X - 10, ENERGY_STATS_TODAY_Y - 8);
+    lv_obj_set_style_bg_color(stats, lv_color_hex(ENERGY_NODE_FILL_BASE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(stats, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_set_style_radius(stats, 12, LV_PART_MAIN);
+    lv_obj_set_style_border_width(stats, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(stats, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(stats, LV_OPA_10, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(stats, 10, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(stats, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(stats, 2, LV_PART_MAIN);
+    lv_obj_set_flex_flow(stats, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(stats, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(stats, LV_OBJ_FLAG_CLICKABLE);
+    ctx->stats_panel = stats;
 
-    ctx->stat_autarky_label = lv_label_create(root);
+    ctx->stat_today_label = lv_label_create(stats);
+    lv_label_set_text(ctx->stat_today_label, "");
+    lv_obj_set_width(ctx->stat_today_label, LV_SIZE_CONTENT);
+    energy_style_text(ctx->stat_today_label, lv_color_hex(ENERGY_TITLE_COLOR), ENERGY_STATS_FONT, LV_TEXT_ALIGN_LEFT);
+
+    ctx->stat_autarky_label = lv_label_create(stats);
     lv_label_set_text(ctx->stat_autarky_label, "");
-    lv_obj_set_width(ctx->stat_autarky_label, ENERGY_STATS_WIDTH);
-    energy_style_text(ctx->stat_autarky_label, theme_default_color_text_muted(), ENERGY_STATS_FONT, LV_TEXT_ALIGN_LEFT);
-    lv_obj_set_pos(ctx->stat_autarky_label, ENERGY_STATS_X, ENERGY_STATS_AUTARKY_Y);
+    lv_obj_set_width(ctx->stat_autarky_label, LV_SIZE_CONTENT);
+    energy_style_text(ctx->stat_autarky_label, lv_color_hex(ENERGY_COLOR_SOLAR), ENERGY_STATS_FONT, LV_TEXT_ALIGN_LEFT);
 
     for (int i = 0; i < ENERGY_FLOW_COUNT; i++) {
         energy_create_flow(ctx, i, lv_color_hex(ENERGY_COLOR_LINE_IDLE));
     }
-
-    energy_create_home_arc(ctx, ENERGY_ARC_SOLAR, lv_color_hex(ENERGY_COLOR_SOLAR));
-    energy_create_home_arc(ctx, ENERGY_ARC_BATTERY, lv_color_hex(ENERGY_COLOR_BATTERY_OUT));
-    energy_create_home_arc(ctx, ENERGY_ARC_GRID, lv_color_hex(ENERGY_COLOR_GRID));
 
     energy_create_node(ctx, ENERGY_NODE_GRID, ENERGY_NODE_GRID_X, ENERGY_NODE_GRID_Y, ENERGY_NODE_SIZE,
         ui_i18n_get("energy.grid", "Grid"), ENERGY_ICON_GRID, lv_color_hex(ENERGY_COLOR_GRID));
@@ -1566,27 +1662,168 @@ esp_err_t ui_energy_page_create(
         ui_i18n_get("energy.water", "Water"), ENERGY_ICON_WATER, lv_color_hex(ENERGY_COLOR_WATER));
     energy_set_node_hidden(&ctx->nodes[ENERGY_NODE_WATER], true);
 
+    /* After the nodes, so the consumption arcs are drawn over the home ring. */
+    energy_create_home_arc(ctx, ENERGY_ARC_SOLAR, lv_color_hex(ENERGY_COLOR_SOLAR));
+    energy_create_home_arc(ctx, ENERGY_ARC_BATTERY, lv_color_hex(ENERGY_COLOR_BATTERY_OUT));
+    energy_create_home_arc(ctx, ENERGY_ARC_GRID, lv_color_hex(ENERGY_COLOR_GRID));
+
     energy_apply_static_flow_paths(ctx);
     energy_mark_missing_slots(ctx);
     energy_recompute(ctx);
 
     lv_obj_add_event_cb(root, energy_page_event_cb, LV_EVENT_DELETE, ctx);
     ctx->anim_timer = lv_timer_create(energy_anim_timer_cb, 50, ctx);
+    return ctx;
+}
 
+/* ---- Pager: "today" (HA energy) and "live" (power sensors) side by side ---- */
+
+#define ENERGY_SOURCE_HA_LIVE "ha_energy_live"
+#define ENERGY_PAGER_MAX_VIEWS 2
+#define ENERGY_PAGER_DOT 9
+
+typedef struct {
+    energy_page_ctx_t *views[ENERGY_PAGER_MAX_VIEWS];
+    uint8_t count;
+    lv_obj_t *pager;
+    lv_obj_t *dots[ENERGY_PAGER_MAX_VIEWS];
+    lv_obj_t *badge;
+} energy_pager_t;
+
+static void energy_pager_update_dots(energy_pager_t *pg)
+{
+    if (pg == NULL || pg->count < 2 || pg->pager == NULL) {
+        return;
+    }
+    const lv_coord_t w = lv_obj_get_width(pg->pager);
+    const int index = (w > 0) ? (int)((lv_obj_get_scroll_x(pg->pager) + w / 2) / w) : 0;
+    for (uint8_t i = 0; i < pg->count; i++) {
+        lv_obj_set_style_bg_opa(pg->dots[i], ((int)i == index) ? LV_OPA_COVER : LV_OPA_30, LV_PART_MAIN);
+    }
+    if (pg->badge != NULL) {
+        lv_label_set_text(pg->badge, index == 0 ? ui_i18n_get("energy.view_today", "Today")
+                                                : ui_i18n_get("energy.view_live", "Live"));
+    }
+}
+
+static void energy_pager_event_cb(lv_event_t *event)
+{
+    energy_pager_t *pg = (energy_pager_t *)lv_event_get_user_data(event);
+    if (pg == NULL) {
+        return;
+    }
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_SCROLL_END || code == LV_EVENT_SCROLL) {
+        energy_pager_update_dots(pg);
+    } else if (code == LV_EVENT_DELETE) {
+        free(pg);
+    }
+}
+
+static bool energy_config_has_live_entities(const ui_energy_page_config_t *c)
+{
+    return c->home_power_entity_id[0] != '\0' || c->solar_power_entity_id[0] != '\0' ||
+           c->grid_power_entity_id[0] != '\0' || c->grid_import_power_entity_id[0] != '\0' ||
+           c->grid_export_power_entity_id[0] != '\0' || c->battery_power_entity_id[0] != '\0' ||
+           c->battery_charge_power_entity_id[0] != '\0' || c->battery_discharge_power_entity_id[0] != '\0';
+}
+
+esp_err_t ui_energy_page_create(
+    const ui_energy_page_config_t *config, lv_obj_t *parent, ui_energy_page_instance_t *out_instance)
+{
+    if (config == NULL || parent == NULL || out_instance == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    energy_pager_t *pg = calloc(1, sizeof(energy_pager_t));
+    if (pg == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const bool two_views =
+        strcmp(config->source, ENERGY_SOURCE_HA_LIVE) == 0 && energy_config_has_live_entities(config);
+
+    lv_obj_t *holder = lv_obj_create(parent);
+    lv_obj_remove_style_all(holder);
+    lv_obj_set_size(holder, APP_CONTENT_BOX_WIDTH, APP_CONTENT_BOX_HEIGHT);
+    lv_obj_set_pos(holder, 0, 0);
+    lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(holder, energy_pager_event_cb, LV_EVENT_DELETE, pg);
+
+    if (!two_views) {
+        ui_energy_page_config_t single = *config;
+        if (strcmp(single.source, ENERGY_SOURCE_HA_LIVE) == 0) {
+            snprintf(single.source, sizeof(single.source), "%s", ENERGY_SOURCE_HA);
+        }
+        pg->views[0] = energy_view_create(&single, holder);
+        pg->count = (pg->views[0] != NULL) ? 1 : 0;
+    } else {
+        lv_obj_t *pager = lv_obj_create(holder);
+        lv_obj_remove_style_all(pager);
+        lv_obj_set_size(pager, APP_CONTENT_BOX_WIDTH, APP_CONTENT_BOX_HEIGHT);
+        lv_obj_set_flex_flow(pager, LV_FLEX_FLOW_ROW);
+        lv_obj_set_scroll_dir(pager, LV_DIR_HOR);
+        lv_obj_set_scroll_snap_x(pager, LV_SCROLL_SNAP_START);
+        lv_obj_add_flag(pager, LV_OBJ_FLAG_SCROLL_ONE);
+        lv_obj_set_scrollbar_mode(pager, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_clear_flag(pager, LV_OBJ_FLAG_SCROLL_ELASTIC);
+        pg->pager = pager;
+
+        ui_energy_page_config_t today = *config;
+        snprintf(today.source, sizeof(today.source), "%s", ENERGY_SOURCE_HA);
+        ui_energy_page_config_t live = *config;
+        snprintf(live.source, sizeof(live.source), "%s", ENERGY_SOURCE_MANUAL);
+        pg->views[0] = energy_view_create(&today, pager);
+        pg->views[1] = energy_view_create(&live, pager);
+        pg->count = (pg->views[0] != NULL ? 1 : 0) + (pg->views[1] != NULL ? 1 : 0);
+        if (pg->views[0] == NULL && pg->views[1] != NULL) {
+            pg->views[0] = pg->views[1];
+            pg->views[1] = NULL;
+        }
+
+        /* Page dots (bottom centre) and a small "Today" / "Live" badge. */
+        if (pg->count == 2) {
+            const lv_coord_t gap = 8;
+            const lv_coord_t total = 2 * ENERGY_PAGER_DOT + gap;
+            for (uint8_t i = 0; i < 2; i++) {
+                lv_obj_t *dot = lv_obj_create(holder);
+                lv_obj_remove_style_all(dot);
+                lv_obj_set_size(dot, ENERGY_PAGER_DOT, ENERGY_PAGER_DOT);
+                lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+                lv_obj_set_style_bg_color(dot, lv_color_white(), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(dot, LV_OPA_30, LV_PART_MAIN);
+                lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_align(dot, LV_ALIGN_BOTTOM_MID,
+                    -total / 2 + ENERGY_PAGER_DOT / 2 + i * (ENERGY_PAGER_DOT + gap), -(APP_CONTENT_BOX_BOTTOM_GUTTER + 6));
+                pg->dots[i] = dot;
+            }
+            lv_obj_t *badge = lv_label_create(holder);
+            energy_style_text(badge, lv_color_hex(ENERGY_TITLE_COLOR), ENERGY_STATS_FONT, LV_TEXT_ALIGN_RIGHT);
+            lv_obj_set_style_bg_color(badge, lv_color_hex(ENERGY_NODE_FILL_BASE), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(badge, LV_OPA_60, LV_PART_MAIN);
+            lv_obj_set_style_radius(badge, 10, LV_PART_MAIN);
+            lv_obj_set_style_pad_hor(badge, 10, LV_PART_MAIN);
+            lv_obj_set_style_pad_ver(badge, 4, LV_PART_MAIN);
+            lv_obj_align(badge, LV_ALIGN_TOP_RIGHT, -12, 10);
+            pg->badge = badge;
+            lv_obj_add_event_cb(pager, energy_pager_event_cb, LV_EVENT_SCROLL_END, pg);
+            lv_obj_add_event_cb(pager, energy_pager_event_cb, LV_EVENT_SCROLL, pg);
+            energy_pager_update_dots(pg);
+        }
+    }
+
+    if (pg->count == 0) {
+        lv_obj_del(holder);
+        return ESP_ERR_NO_MEM;
+    }
     memset(out_instance, 0, sizeof(*out_instance));
     snprintf(out_instance->page_id, sizeof(out_instance->page_id), "%s", config->page_id);
-    out_instance->obj = root;
-    out_instance->ctx = ctx;
+    out_instance->obj = holder;
+    out_instance->ctx = pg;
     return ESP_OK;
 }
 
-bool ui_energy_page_apply_state(ui_energy_page_instance_t *instance, const ha_state_t *state)
+static bool energy_view_apply_state(energy_page_ctx_t *ctx, const ha_state_t *state)
 {
-    if (instance == NULL || instance->ctx == NULL || state == NULL) {
-        return false;
-    }
-
-    energy_page_ctx_t *ctx = (energy_page_ctx_t *)instance->ctx;
     if (strcmp(ctx->config.source, ENERGY_SOURCE_MANUAL) != 0) {
         return false;
     }
@@ -1602,13 +1839,8 @@ bool ui_energy_page_apply_state(ui_energy_page_instance_t *instance, const ha_st
     return matched;
 }
 
-void ui_energy_page_apply_all_states(ui_energy_page_instance_t *instance)
+static void energy_view_apply_all_states(energy_page_ctx_t *ctx)
 {
-    if (instance == NULL || instance->ctx == NULL) {
-        return;
-    }
-
-    energy_page_ctx_t *ctx = (energy_page_ctx_t *)instance->ctx;
     if (strcmp(ctx->config.source, ENERGY_SOURCE_MANUAL) != 0) {
         energy_recompute(ctx);
         return;
@@ -1631,4 +1863,32 @@ void ui_energy_page_apply_all_states(ui_energy_page_instance_t *instance)
         }
     }
     energy_recompute(ctx);
+}
+
+bool ui_energy_page_apply_state(ui_energy_page_instance_t *instance, const ha_state_t *state)
+{
+    if (instance == NULL || instance->ctx == NULL || state == NULL) {
+        return false;
+    }
+    energy_pager_t *pg = (energy_pager_t *)instance->ctx;
+    bool matched = false;
+    for (uint8_t i = 0; i < pg->count; i++) {
+        if (pg->views[i] != NULL && energy_view_apply_state(pg->views[i], state)) {
+            matched = true;
+        }
+    }
+    return matched;
+}
+
+void ui_energy_page_apply_all_states(ui_energy_page_instance_t *instance)
+{
+    if (instance == NULL || instance->ctx == NULL) {
+        return;
+    }
+    energy_pager_t *pg = (energy_pager_t *)instance->ctx;
+    for (uint8_t i = 0; i < pg->count; i++) {
+        if (pg->views[i] != NULL) {
+            energy_view_apply_all_states(pg->views[i]);
+        }
+    }
 }
