@@ -5,8 +5,9 @@
 > **Fork notice.** Everything below this notice comes from upstream BETTA HA Panel
 > (Copyright (c) 2026 Cpt_Kirk). The sections marked **`v0.8.2-7b`** describe the changes made in
 > **this fork** for the Waveshare 7" ESP32-P4 panel variant (`panel7`), as required by §3 of the
-> FNCL-1.1 licence. See also the "Detailed list of improvements" section of
-> [README.md](README.md) / [README.pl.md](README.pl.md).
+> FNCL-1.1 licence. See also the README of the 7B fork
+> ([kruzio1985/BETTA-HA-PANEL-7-Waveshare-7B](https://github.com/kruzio1985/BETTA-HA-PANEL-7-Waveshare-7B)).
+> The changes for the 4.3" and 10.1" boards are described in [README.md](README.md).
 
 ## v0.8.2-7b — Waveshare 7" (ESP32-P4) variant
 

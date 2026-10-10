@@ -1,4 +1,5 @@
 #include "ui/ui_topbar_waste.h"
+#include "ui/ui_i18n.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -189,11 +190,11 @@ static void waste_refresh(void)
             } else {
                 char text[12];
                 if (days == 0) {
-                    snprintf(text, sizeof(text), "heute");
+                    snprintf(text, sizeof(text), "%s", ui_i18n_get("waste.today", "today"));
                 } else if (days > 99) {
                     snprintf(text, sizeof(text), "99+");
                 } else {
-                    snprintf(text, sizeof(text), "%dT", days);
+                    snprintf(text, sizeof(text), "%d%s", days, ui_i18n_get("waste.days_suffix", "d"));
                 }
                 lv_label_set_text(slot->days, text);
                 lv_obj_clear_flag(slot->chip, LV_OBJ_FLAG_HIDDEN);

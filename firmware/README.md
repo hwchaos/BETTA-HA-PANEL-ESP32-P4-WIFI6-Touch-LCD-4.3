@@ -153,4 +153,4 @@ free. The partition table lives in [`../partitions.csv`](../partitions.csv) and 
 
 ---
 
-Back to the main documentation: [README.md](../README.md) · [README.pl.md](../README.pl.md)
+Back to the main documentation: [README.md](../README.md)

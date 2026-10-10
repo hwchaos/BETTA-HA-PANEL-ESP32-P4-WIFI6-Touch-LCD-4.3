@@ -168,7 +168,7 @@ static void ld_start(const ld_cfg_t *cfg)
 {
     s_status.error[0] = '\0';
     if (cfg->tx_pin < 0 || cfg->rx_pin < 0) {
-        snprintf(s_status.error, sizeof(s_status.error), "TX/RX-Pin nicht gesetzt");
+        snprintf(s_status.error, sizeof(s_status.error), "TX/RX pin not set");
         return;
     }
     const uart_config_t uc = {
@@ -203,7 +203,7 @@ static void ld_start(const ld_cfg_t *cfg)
     s_last_frame_us = 0;
     if (/* 8 KB: waking the display runs on this task (saver, backlight, logging) */
     xTaskCreate(ld_task, "ld2410", 8192, NULL, 4, &s_task) != pdPASS) {
-        snprintf(s_status.error, sizeof(s_status.error), "Task konnte nicht starten");
+        snprintf(s_status.error, sizeof(s_status.error), "task could not be started");
         uart_driver_delete(LD_UART);
         s_status.running = false;
         return;
@@ -250,7 +250,7 @@ void ld2410_apply_settings(const runtime_settings_t *settings)
 esp_err_t ld2410_self_test(char *msg, size_t msg_len)
 {
     if (!s_status.running || !uart_is_driver_installed(LD_UART)) {
-        snprintf(msg, msg_len, "Radar ist nicht aktiv");
+        snprintf(msg, msg_len, "radar is not active");
         return ESP_ERR_INVALID_STATE;
     }
     /* basic report: moving target at 123 cm, energy 50; static 45 cm, 60 */
@@ -280,11 +280,11 @@ esp_err_t ld2410_self_test(char *msg, size_t msg_len)
     s_last_frame_us = saved_last_frame_us;
     s_selftest = false;
     if (got_frames > 0) {
-        snprintf(msg, msg_len, "OK: %u Testframes empfangen und erkannt (%u Bytes)", (unsigned)got_frames,
+        snprintf(msg, msg_len, "OK: %u test frames received and parsed (%u bytes)", (unsigned)got_frames,
             (unsigned)got_bytes);
         return ESP_OK;
     }
-    snprintf(msg, msg_len, "Fehler: %u Bytes zurück, aber kein Frame erkannt", (unsigned)got_bytes);
+    snprintf(msg, msg_len, "failed: %u bytes came back, but no frame was parsed", (unsigned)got_bytes);
     return ESP_FAIL;
 }
 

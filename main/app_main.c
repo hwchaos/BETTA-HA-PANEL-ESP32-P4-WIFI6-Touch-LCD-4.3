@@ -342,16 +342,18 @@ static void p4eth_netinfo_task(void *arg)
         char text[1100];
         char ip[16] = {0};
         if (wifi_mgr_is_connected() && wifi_mgr_get_sta_ip(ip, sizeof(ip)) == ESP_OK) {
-            snprintf(text, sizeof(text), "Netzwerk OK: http://%s", ip);
+            snprintf(text, sizeof(text), "%s http://%s", ui_i18n_get("netinfo.ok", "Network OK:"), ip);
         } else if (wifi_mgr_eth_link_up()) {
-            snprintf(text, sizeof(text), "Ethernet-Link da, aber keine IP-Adresse (DHCP)");
+            snprintf(text, sizeof(text), "%s",
+                ui_i18n_get("netinfo.no_ip", "Ethernet link up, but no IP address (DHCP)"));
         } else {
-            snprintf(text, sizeof(text), "Kein Ethernet-Link (Kabel/PoE/PHY)");
+            snprintf(text, sizeof(text), "%s", ui_i18n_get("netinfo.no_link", "No Ethernet link (cable/PoE/PHY)"));
         }
         const int left = P4ETH_FALLBACK_S - (int)(esp_timer_get_time() / 1000000);
         if (!done && left > 0) {
             const size_t n = strlen(text);
-            snprintf(text + n, sizeof(text) - n, "\nOhne Netz zurueck zu ESPHome in %d s", left);
+            snprintf(text + n, sizeof(text) - n, "\n%s %d s",
+                ui_i18n_get("netinfo.fallback", "No network: back to ESPHome in"), left);
         }
         /* "idle" is the normal running state; "confirmed" a healthy update. */
         const bool prev_bad = prev != NULL && prev[0] != '\0' && strcmp(prev, "confirmed") != 0 &&
@@ -371,10 +373,11 @@ static void p4eth_netinfo_task(void *arg)
         }
         if (prev_bad) {
             const size_t n = strlen(text);
-            snprintf(text + n, sizeof(text) - n, "\nLetzter Start endete bei: %s", prev);
+            snprintf(text + n, sizeof(text) - n, "\n%s %s", ui_i18n_get("netinfo.last_stage", "Last start ended at:"), prev);
             if (s_prev_log[0] != 0) {
                 const size_t m = strlen(text);
-                snprintf(text + m, sizeof(text) - m, "\nLetzte Meldungen davor:\n%s", s_prev_log);
+                snprintf(text + m, sizeof(text) - m, "\n%s\n%s",
+                    ui_i18n_get("netinfo.last_log", "Last messages before that:"), s_prev_log);
             }
         }
         if (display_lock(200)) {

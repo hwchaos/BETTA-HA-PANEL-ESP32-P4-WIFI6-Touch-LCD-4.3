@@ -113,7 +113,7 @@
                   <select id="energySource">
                     <option id="energySourceHaOption" value="ha_energy">Home Assistant Energy</option>
                     <option id="energySourceManualOption" value="manual_live">Manual live sensors</option>
-                    <option id="energySourceHaLiveOption" value="ha_energy_live">HA-Energie + Live (wischen)</option>
+                    <option data-en="HA Energy + live (swipe)" id="energySourceHaLiveOption" value="ha_energy_live">HA-Energie + Live (wischen)</option>
                   </select>
                 </label>
                 <div class="meta" id="energySourceHint">Uses the Energy dashboard configured in Home Assistant.</div>
@@ -259,13 +259,13 @@
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addHeatingTileBtn">Heating Tile</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addMediaPlayerBtn">Media Player</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addRoborockTileBtn">Roborock</button>
-                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverBtn">Cover (mit Tasten)</button>
+                    <button data-en="Cover (with buttons)" class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverBtn">Cover (mit Tasten)</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addLockBtn">Lock</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addFanBtn">Fan</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addSelectBtn">Select</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addNumberBtn">Number</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addAlarmTileBtn">Alarm Panel</button>
-                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverTileBtn">Cover-Kachel (mit Popup)</button>
+                    <button data-en="Cover tile (with popup)" class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverTileBtn">Cover-Kachel (mit Popup)</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addSceneTileBtn">Scene</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addPersonTileBtn">Person</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addTimerTileBtn">Timer</button>
@@ -797,27 +797,27 @@
           <div class="form">
             <label class="row">
               <input id="settingsAssistEnabled" type="checkbox" />
-              <span>Assist aktivieren (Mikrofon-Taste oben in der Leiste)</span>
+              <span data-en="Enable Assist (microphone button in the top bar)">Assist aktivieren (Mikrofon-Taste oben in der Leiste)</span>
             </label>
             <label><span>Pipeline</span>
               <select id="settingsAssistPipeline">
-                <option value="">Bevorzugte Pipeline</option>
+                <option data-en="Preferred pipeline" value="">Bevorzugte Pipeline</option>
               </select>
             </label>
             <div class="row">
-              <button id="settingsAssistReload" type="button">Pipelines neu laden</button>
+              <button data-en="Reload pipelines" id="settingsAssistReload" type="button">Pipelines neu laden</button>
             </div>
             <label class="row">
               <input id="settingsAssistReply" type="checkbox" />
-              <span>Antwort über den Lautsprecher vorlesen</span>
+              <span data-en="Read the answer aloud on the speaker">Antwort über den Lautsprecher vorlesen</span>
             </label>
-            <label><span>Mikrofonverstärkung: <b id="settingsAssistGainValue">30</b> dB</span>
+            <label><span><span data-en="Microphone gain:">Mikrofonverstärkung:</span> <b id="settingsAssistGainValue">30</b> dB</span>
               <input id="settingsAssistGain" type="range" min="0" max="42" step="3" />
             </label>
-            <label><span>Maximale Aufnahmedauer (Sekunden)</span>
+            <label><span data-en="Maximum recording time (seconds)">Maximale Aufnahmedauer (Sekunden)</span>
               <input id="settingsAssistMaxListen" type="number" min="3" max="30" step="1" />
             </label>
-            <div id="settingsAssistInfo" class="meta">Gedrückt halten und sprechen, oder kurz tippen und sprechen, bis eine Pause erkannt wird. Die Pipeline (Whisper / Speech-to-Phrase, Piper) wird in Home Assistant unter Einstellungen &rarr; Sprachassistenten eingerichtet.</div>
+            <div data-en="Hold and speak, or tap briefly and speak until a pause is detected. The pipeline (Whisper / Speech-to-Phrase, Piper) is set up in Home Assistant under Settings → Voice assistants." id="settingsAssistInfo" class="meta">Gedrückt halten und sprechen, oder kurz tippen und sprechen, bis eine Pause erkannt wird. Die Pipeline (Whisper / Speech-to-Phrase, Piper) wird in Home Assistant unter Einstellungen &rarr; Sprachassistenten eingerichtet.</div>
           </div>
         </section>
 
@@ -1075,13 +1075,13 @@
             <div id="settingsValueAnimHint" class="meta">Animates values that change by themselves (sensors, weather, power). Counting digits keeps the unit in place and works with values like "22.5 °C". 0 ms turns the effect off.</div>
             <hr />
             <div class="grid-2">
-              <label><span>Navigation (Seitenleiste)</span>
+              <label><span data-en="Navigation (page bar)">Navigation (Seitenleiste)</span>
                 <select id="settingsNavPosition">
-                  <option value="bottom">Unten (horizontal)</option>
-                  <option value="left">Links (vertikal)</option>
+                  <option data-en="Bottom (horizontal)" value="bottom">Unten (horizontal)</option>
+                  <option data-en="Left (vertical)" value="left">Links (vertikal)</option>
                 </select>
               </label>
-              <div class="meta">Eine Änderung startet das Panel neu. Die Kachelfläche wird dabei schmaler und höher &ndash; Seiten ggf. im Editor nachziehen.</div>
+              <div data-en="Changing this restarts the panel. The tile area becomes narrower and taller – adjust the pages in the editor if needed." class="meta">Eine Änderung startet das Panel neu. Die Kachelfläche wird dabei schmaler und höher &ndash; Seiten ggf. im Editor nachziehen.</div>
             </div>
             <label><span id="settingsNavHeading">Bottom bar (page tabs)</span></label>
             <div class="grid-2">
@@ -1129,24 +1129,24 @@
           <h2 id="settingsStatusbarHeading">Statusleiste</h2>
           <div class="form">
             <div class="topbar-arrange">
-              <div class="waste-settings-title">Anordnung</div>
+              <div data-en="Arrangement" class="waste-settings-title">Anordnung</div>
               <div id="topbarPreview" class="topbar-preview">
                 <div class="tbp-zone tbp-left"></div>
                 <div class="tbp-zone tbp-center"></div>
                 <div class="tbp-zone tbp-right"></div>
               </div>
               <div id="topbarArrangeList" class="topbar-arrange-list"></div>
-              <div class="meta">Jedes Element links, mittig oder rechts anordnen (oder ausblenden); die Pfeile ändern die Reihenfolge innerhalb des Bereichs. Die Mitte-Gruppe sitzt genau in der Bildschirmmitte &ndash; ein einzelnes Element dort (z.&nbsp;B. die Uhr) also exakt zentriert. Die Uhr wählt automatisch die größte passende Schrift. Kameras, Wetter, Müll, Warnung und Mikrofon erscheinen nur, wenn sie eingerichtet bzw. aktiv sind.</div>
+              <div data-en="Place each element left, centre or right (or hide it); the arrows change the order within the zone. The centre group sits exactly in the middle of the screen – a single element there (e.g. the clock) is exactly centred. The clock picks the largest font that fits. Cameras, weather, waste, alert and microphone only appear when they are set up or active." class="meta">Jedes Element links, mittig oder rechts anordnen (oder ausblenden); die Pfeile ändern die Reihenfolge innerhalb des Bereichs. Die Mitte-Gruppe sitzt genau in der Bildschirmmitte &ndash; ein einzelnes Element dort (z.&nbsp;B. die Uhr) also exakt zentriert. Die Uhr wählt automatisch die größte passende Schrift. Kameras, Wetter, Müll, Warnung und Mikrofon erscheinen nur, wenn sie eingerichtet bzw. aktiv sind.</div>
             </div>
-            <label><span>Datumsformat</span>
+            <label><span data-en="Date format">Datumsformat</span>
               <select id="settingsTopbarDateFormat">
-                <option value="DD.MM.YYYY">24.10.2026 (Tag.Monat.Jahr)</option>
-                <option value="MM/DD/YYYY">10/24/2026 (US-Format)</option>
+                <option data-en="24.10.2026 (day.month.year)" value="DD.MM.YYYY">24.10.2026 (Tag.Monat.Jahr)</option>
+                <option data-en="10/24/2026 (US format)" value="MM/DD/YYYY">10/24/2026 (US-Format)</option>
                 <option value="YYYY-MM-DD">2026-10-24 (ISO)</option>
-                <option value="DD.MM">24.10. (ohne Jahr)</option>
-                <option value="MM.DD">10.24. (Monat zuerst, ohne Jahr)</option>
-                <option value="WD, DD.MM.YYYY">Sa, 24.10.2026 (mit Wochentag)</option>
-                <option value="WD, DD.MM">Sa, 24.10. (mit Wochentag, ohne Jahr)</option>
+                <option data-en="24.10. (without year)" value="DD.MM">24.10. (ohne Jahr)</option>
+                <option data-en="10.24. (month first, without year)" value="MM.DD">10.24. (Monat zuerst, ohne Jahr)</option>
+                <option data-en="Sa, 24.10.2026 (with weekday)" value="WD, DD.MM.YYYY">Sa, 24.10.2026 (mit Wochentag)</option>
+                <option data-en="Sa, 24.10. (with weekday, without year)" value="WD, DD.MM">Sa, 24.10. (mit Wochentag, ohne Jahr)</option>
               </select>
             </label>
             <hr />
@@ -1200,43 +1200,43 @@
               </label>
             </div>
             <div class="waste-settings">
-              <div class="waste-settings-title">Müllabfuhr in der oberen Leiste (bis zu 4)</div>
+              <div data-en="Waste collection in the top bar (up to 4)" class="waste-settings-title">Müllabfuhr in der oberen Leiste (bis zu 4)</div>
                 <div class="waste-slot-row">
                   <input id="settingsWasteEntity0" type="text" list="wasteEntityOptions" placeholder="sensor.muell_rest" autocomplete="off" />
-                  <input id="settingsWasteColor0" type="color" title="Farbe des Mülleimers" />
+                  <input data-en-title="Colour of the bin" id="settingsWasteColor0" type="color" title="Farbe des Mülleimers" />
                 </div>
                 <div class="waste-slot-row">
                   <input id="settingsWasteEntity1" type="text" list="wasteEntityOptions" placeholder="sensor.muell_bio" autocomplete="off" />
-                  <input id="settingsWasteColor1" type="color" title="Farbe des Mülleimers" />
+                  <input data-en-title="Colour of the bin" id="settingsWasteColor1" type="color" title="Farbe des Mülleimers" />
                 </div>
                 <div class="waste-slot-row">
                   <input id="settingsWasteEntity2" type="text" list="wasteEntityOptions" placeholder="sensor.muell_papier" autocomplete="off" />
-                  <input id="settingsWasteColor2" type="color" title="Farbe des Mülleimers" />
+                  <input data-en-title="Colour of the bin" id="settingsWasteColor2" type="color" title="Farbe des Mülleimers" />
                 </div>
                 <div class="waste-slot-row">
                   <input id="settingsWasteEntity3" type="text" list="wasteEntityOptions" placeholder="sensor.muell_gelb" autocomplete="off" />
-                  <input id="settingsWasteColor3" type="color" title="Farbe des Mülleimers" />
+                  <input data-en-title="Colour of the bin" id="settingsWasteColor3" type="color" title="Farbe des Mülleimers" />
                 </div>
               <datalist id="wasteEntityOptions"></datalist>
-              <div class="meta">Je Tonne eine Entität und die Farbe des Mülleimer-Symbols. Am Symbol stehen die Tage bis zur Abholung (z.&nbsp;B. 5T); am Abholtag blinkt es. Verstanden werden Sensoren mit Tagen als Zustand, das Attribut daysTo (Waste Collection Schedule), ein Datum (JJJJ-MM-TT) oder Kalender-Entitäten. Leer = Symbol aus.</div>
+              <div data-en="One entity per bin and the colour of its bin icon. The icon shows the days until collection (e.g. 5d); on collection day it blinks. Understood are sensors with the days as state, the daysTo attribute (Waste Collection Schedule), a date (YYYY-MM-DD) or calendar entities. Empty = icon off." class="meta">Je Tonne eine Entität und die Farbe des Mülleimer-Symbols. Am Symbol stehen die Tage bis zur Abholung (z.&nbsp;B. 5T); am Abholtag blinkt es. Verstanden werden Sensoren mit Tagen als Zustand, das Attribut daysTo (Waste Collection Schedule), ein Datum (JJJJ-MM-TT) oder Kalender-Entitäten. Leer = Symbol aus.</div>
             </div>
             <hr />
             <div class="alert-settings">
-              <div class="waste-settings-title">Warnungen (rotes Dreieck)</div>
+              <div data-en="Alerts (red triangle)" class="waste-settings-title">Warnungen (rotes Dreieck)</div>
               <label class="row">
                 <input id="settingsAlertPersistent" type="checkbox" />
-                <span>Benachrichtigungen aus Home Assistant (persistent notifications)</span>
+                <span data-en="Notifications from Home Assistant (persistent notifications)">Benachrichtigungen aus Home Assistant (persistent notifications)</span>
               </label>
               <div class="alert-entity-list">
-                <input id="settingsAlertEntity0" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
-                <input id="settingsAlertEntity1" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
-                <input id="settingsAlertEntity2" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
-                <input id="settingsAlertEntity3" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input data-en-placeholder="e.g. sensor.weather_warning_level" id="settingsAlertEntity0" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input data-en-placeholder="e.g. sensor.weather_warning_level" id="settingsAlertEntity1" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input data-en-placeholder="e.g. sensor.weather_warning_level" id="settingsAlertEntity2" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
+                <input data-en-placeholder="e.g. sensor.weather_warning_level" id="settingsAlertEntity3" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="z. B. sensor.dwd_ort_aktuelle_warnstufe" />
               </div>
-              <div class="meta">Zusätzliche Entitäten, die als Warnung zählen, sobald sie aktiv sind (z.&nbsp;B. DWD-Wetterwarnung mit Warnstufe &gt; 0, binary_sensor an). Das Dreieck blinkt bei ungelesenen Meldungen; ein Tipp zeigt die Liste, nach &bdquo;Gelesen&ldquo; leuchtet es dauerhaft, bis die Warnung vorbei ist.</div>
+              <div data-en="Additional entities that count as an alert while they are active (e.g. a weather warning with level &gt; 0, a binary_sensor that is on). The triangle blinks for unread alerts; a tap shows the list, after “Mark read” it stays lit until the alert is over." class="meta">Zusätzliche Entitäten, die als Warnung zählen, sobald sie aktiv sind (z.&nbsp;B. DWD-Wetterwarnung mit Warnstufe &gt; 0, binary_sensor an). Das Dreieck blinkt bei ungelesenen Meldungen; ein Tipp zeigt die Liste, nach &bdquo;Gelesen&ldquo; leuchtet es dauerhaft, bis die Warnung vorbei ist.</div>
             </div>
             <div class="row">
-              <button id="applyStatusbarBtn" class="btn" type="button">Jetzt übernehmen (ohne Neustart)</button>
+              <button data-en="Apply now (no reboot)" id="applyStatusbarBtn" class="btn" type="button">Jetzt übernehmen (ohne Neustart)</button>
             </div>
           </div>
         <section id="settingsCamerasSection" class="settings-subsection">
@@ -1294,23 +1294,23 @@
           <h2 id="settingsRadarHeading">Präsenzsensor (LD2410)</h2>
           <div class="form">
             <div id="radarStatus" class="radar-status">
-              <div class="radar-status-head"><span id="radarStatusDot" class="radar-dot"></span><span id="radarStatusText">Status wird geladen…</span></div>
+              <div class="radar-status-head"><span id="radarStatusDot" class="radar-dot"></span><span data-en="Loading status…" id="radarStatusText">Status wird geladen…</span></div>
               <div id="radarStatusDetail" class="meta"></div>
             </div>
             <label class="row">
               <input id="settingsRadarEnabled" type="checkbox" />
-              <span>LD2410 aktivieren (UART)</span>
+              <span data-en="Enable LD2410 (UART)">LD2410 aktivieren (UART)</span>
             </label>
             <div class="grid-2">
-              <label><span>TX-Pin (Panel &rarr; Sensor RX)</span>
+              <label><span data-en="TX pin (panel → sensor RX)">TX-Pin (Panel &rarr; Sensor RX)</span>
                 <input id="settingsRadarTx" type="number" min="-1" max="63" step="1" />
               </label>
-              <label><span>RX-Pin (Sensor TX &rarr; Panel)</span>
+              <label><span data-en="RX pin (sensor TX → panel)">RX-Pin (Sensor TX &rarr; Panel)</span>
                 <input id="settingsRadarRx" type="number" min="-1" max="63" step="1" />
               </label>
               <label><span>Baudrate</span>
                 <select id="settingsRadarBaud">
-                  <option value="256000">256000 (Standard)</option>
+                  <option data-en="256000 (default)" value="256000">256000 (Standard)</option>
                   <option value="115200">115200</option>
                   <option value="57600">57600</option>
                   <option value="38400">38400</option>
@@ -1322,19 +1322,19 @@
             <hr />
             <label class="row">
               <input id="settingsRadarWake" type="checkbox" />
-              <span>Display bei Annäherung einschalten</span>
+              <span data-en="Turn the display on when someone approaches">Display bei Annäherung einschalten</span>
             </label>
-            <label><span>Annäherungs-Distanz: <b id="settingsRadarWakeCmValue">150</b> cm</span>
+            <label><span><span data-en="Approach distance:">Annäherungs-Distanz:</span> <b id="settingsRadarWakeCmValue">150</b> cm</span>
               <input id="settingsRadarWakeCm" type="range" min="30" max="600" step="10" />
             </label>
             <label class="row">
               <input id="settingsRadarKeepAwake" type="checkbox" />
-              <span>Display an lassen, solange jemand da ist</span>
+              <span data-en="Keep the display on while someone is there">Display an lassen, solange jemand da ist</span>
             </label>
-            <div class="meta">Ab Werk ist das Kit verdrahtet mit TX GPIO21 / RX GPIO20. -1 = nicht angeschlossen. Die Live-Werte oben zeigen, ob der Sensor Daten liefert und in welcher Entfernung er jemanden erkennt &ndash; damit lässt sich die Annäherungs-Distanz passend einstellen.</div>
+            <div data-en="On the ETH kit the header is wired as TX GPIO21 / RX GPIO20 by default. -1 = not connected. The live values above show whether the sensor delivers data and at what distance it detects someone – use them to set the approach distance." class="meta">Ab Werk ist das Kit verdrahtet mit TX GPIO21 / RX GPIO20. -1 = nicht angeschlossen. Die Live-Werte oben zeigen, ob der Sensor Daten liefert und in welcher Entfernung er jemanden erkennt &ndash; damit lässt sich die Annäherungs-Distanz passend einstellen.</div>
             <div class="row">
-              <button id="applyRadarBtn" class="btn" type="button">Speichern (ohne Neustart)</button>
-              <button id="radarSelfTestBtn" class="btn" type="button">Selbsttest</button>
+              <button data-en="Save (no reboot)" id="applyRadarBtn" class="btn" type="button">Speichern (ohne Neustart)</button>
+              <button data-en="Self-test" id="radarSelfTestBtn" class="btn" type="button">Selbsttest</button>
             </div>
             <div id="radarInfo" class="meta"></div>
           </div>

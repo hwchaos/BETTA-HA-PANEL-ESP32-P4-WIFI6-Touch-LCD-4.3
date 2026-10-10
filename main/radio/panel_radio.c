@@ -361,7 +361,7 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (client == NULL) {
             ESP_LOGW(PR_TAG, "cannot init the HTTP client");
-            snprintf(msg, msg_len, "HTTP-Client-Fehler");
+            snprintf(msg, msg_len, "HTTP client error");
             return ESP_FAIL;
         }
         /* Interleaved ICY metadata would inject bytes the decoder cannot skip. */
@@ -371,7 +371,7 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         const esp_err_t err = esp_http_client_open(client, 0);
         if (err != ESP_OK) {
             ESP_LOGW(PR_TAG, "connect to %s failed: %s", current, esp_err_to_name(err));
-            snprintf(msg, msg_len, "Keine Verbindung zum Sender");
+            snprintf(msg, msg_len, "No connection to the station");
             esp_http_client_cleanup(client);
             return err;
         }
@@ -380,21 +380,21 @@ static esp_err_t pr_http_open(const char *url, esp_http_client_handle_t *out, ch
         const int status = esp_http_client_get_status_code(client);
         if (status <= 0) {
             ESP_LOGW(PR_TAG, "no HTTP response from %s (%lld)", current, (long long)hdr);
-            snprintf(msg, msg_len, "Keine Antwort");
+            snprintf(msg, msg_len, "No answer");
             esp_http_client_cleanup(client);
             return ESP_ERR_TIMEOUT;
         }
         if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
             if (headers.location[0] == '\0') {
                 ESP_LOGW(PR_TAG, "HTTP %d without a usable Location header", status);
-                snprintf(msg, msg_len, "Fehlerhafte Weiterleitung des Senders");
+                snprintf(msg, msg_len, "Bad redirect from the station");
                 esp_http_client_cleanup(client);
                 return ESP_ERR_INVALID_RESPONSE;
             }
             char next[PANEL_RADIO_URL_MAX];
             if (!pr_resolve_url(current, headers.location, next, sizeof(next))) {
                 ESP_LOGW(PR_TAG, "HTTP %d redirect to an unusable address: %s", status, headers.location);
-                snprintf(msg, msg_len, "Fehlerhafte Weiterleitung des Senders");
+                snprintf(msg, msg_len, "Bad redirect from the station");
                 esp_http_client_cleanup(client);
                 return ESP_ERR_INVALID_RESPONSE;
             }
@@ -1191,7 +1191,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
     pr_stream_t st;
     if (!pr_alloc_buffers(&st)) {
         ESP_LOGE(PR_TAG, "no PSRAM for the stream buffers");
-        pr_publish(generation, PANEL_RADIO_ERROR, "Kein Speicher für den Stream-Puffer");
+        pr_publish(generation, PANEL_RADIO_ERROR, "No memory for the stream buffer");
         return;
     }
     st.generation = generation;
@@ -1201,7 +1201,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
         ESP_LOGW(PR_TAG, "speaker is not available (%s)", esp_err_to_name(out_err));
         pr_free_buffers(&st);
         pr_publish(generation, PANEL_RADIO_ERROR,
-            out_err == ESP_ERR_INVALID_STATE ? "Lautsprecher belegt" : "Kein Zugriff auf den Lautsprecher");
+            out_err == ESP_ERR_INVALID_STATE ? "Speaker busy" : "No access to the speaker");
         return;
     }
     pr_lock();
@@ -1239,12 +1239,12 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
         if (pr_http_open(url, &http, content_type, sizeof(content_type), msg, sizeof(msg)) != ESP_OK) {
             if (s_play_once) {
                 /* A TTS link can be fetched only once: no retries. */
-                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "Keine Verbindung zum Sender");
+                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "No connection to the station");
                 s_play_once = false;
                 break;
             }
             if (!played_ever && ++fail_streak >= PR_MAX_CONNECTS) {
-                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "Keine Verbindung zum Sender");
+                pr_publish(generation, PANEL_RADIO_ERROR, msg[0] != '\0' ? msg : "No connection to the station");
                 break;
             }
             ESP_LOGW(PR_TAG, "%s, retry %d/%d", msg[0] != '\0' ? msg : "connect failed", fail_streak, PR_MAX_CONNECTS);
@@ -1310,13 +1310,13 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                 st.fmt = fmt;
                 st.hdr_rate = sniff_rate;
                 if (fmt == PR_FMT_AUTO) {
-                    pr_publish(generation, PANEL_RADIO_ERROR, "Stream-Format nicht unterstützt");
+                    pr_publish(generation, PANEL_RADIO_ERROR, "Stream format not supported");
                     terminal = true;
                     break;
                 }
                 if (fmt == PR_FMT_HLS || fmt == PR_FMT_OGG || fmt == PR_FMT_OTHER) {
                     char err[PANEL_RADIO_TEXT_MAX];
-                    snprintf(err, sizeof(err), "Format nicht unterstützt (%s)", pr_fmt_name(fmt));
+                    snprintf(err, sizeof(err), "Format not supported (%s)", pr_fmt_name(fmt));
                     pr_publish(generation, PANEL_RADIO_ERROR, err);
                     terminal = true;
                     break;
@@ -1326,7 +1326,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                 dec = pr_dec_open(fmt);
                 if (dec == NULL) {
                     char err[PANEL_RADIO_TEXT_MAX];
-                    snprintf(err, sizeof(err), "Kein Decoder für %s", pr_fmt_name(fmt));
+                    snprintf(err, sizeof(err), "No decoder for %s", pr_fmt_name(fmt));
                     pr_publish(generation, PANEL_RADIO_ERROR, err);
                     terminal = true;
                     break;
@@ -1372,7 +1372,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
             break;
         }
         if (s_play_failed) {
-            pr_publish(generation, PANEL_RADIO_ERROR, "Fehler beim Schreiben auf den Lautsprecher");
+            pr_publish(generation, PANEL_RADIO_ERROR, "Error writing to the speaker");
             terminal = true;
             break;
         }
@@ -1414,7 +1414,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
                 (unsigned)(st.samples / (s_rate != 0 ? s_rate : PR_DEFAULT_RATE)));
         } else if (!played_ever && ++fail_streak >= PR_MAX_CONNECTS) {
             pr_publish(generation, PANEL_RADIO_ERROR,
-                st.resynced > PR_RESYNC_MAX ? "Stream-Format nicht unterstützt" : "Sender liefert keinen Ton");
+                st.resynced > PR_RESYNC_MAX ? "Stream format not supported" : "Station delivers no audio");
             terminal = true;
             break;
         } else {

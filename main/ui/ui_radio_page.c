@@ -658,15 +658,15 @@ static void radio_panel_sync(radio_ctx_t *ctx, bool force)
                 ctx->playing_index = radio_index_for_title(ctx, title);
             }
         }
-        radio_show_state(ctx, "radio.playing", "Odtwarzanie", true);
+        radio_show_state(ctx, "radio.playing", "Playing", true);
         break;
     case PANEL_RADIO_BUFFERING:
-        radio_show_state(ctx, "radio.connecting", "Verbinde...", false);
+        radio_show_state(ctx, "radio.connecting", "Connecting...", false);
         break;
     case PANEL_RADIO_ERROR:
         ctx->pending = false;
         ctx->playing_index = -1;
-        radio_show_state(ctx, "radio.error", "Senderfehler", false);
+        radio_show_state(ctx, "radio.error", "Station error", false);
         ESP_LOGW(TAG, "panel radio error: %s", ctx->panel_error);
         break;
     case PANEL_RADIO_IDLE:
@@ -676,7 +676,7 @@ static void radio_panel_sync(radio_ctx_t *ctx, bool force)
         if (ctx->pending || ctx->is_playing) {
             ctx->pending = false;
             ctx->playing_index = -1;
-            radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
+            radio_show_state(ctx, "radio.stopped", "Stopped", false);
         }
         break;
     }
@@ -735,7 +735,7 @@ static void radio_play_station(radio_ctx_t *ctx, size_t index)
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "panel radio refused '%s': %s", name, esp_err_to_name(err));
             system_log_event(TAG, "panel radio play failed (%s)", esp_err_to_name(err));
-            radio_show_state(ctx, "radio.error", "Senderfehler", false);
+            radio_show_state(ctx, "radio.error", "Station error", false);
             radio_render(ctx);
             return;
         }
@@ -743,7 +743,7 @@ static void radio_play_station(radio_ctx_t *ctx, size_t index)
         ctx->playing_index = (int)index;
         ctx->pending = true;
         ctx->is_playing = false;
-        radio_show_state(ctx, "radio.connecting", "Verbinde...", false);
+        radio_show_state(ctx, "radio.connecting", "Connecting...", false);
         radio_render(ctx);
         ESP_LOGI(TAG, "panel radio playing '%s' (%s)", name, url);
         return;
@@ -771,7 +771,7 @@ static void radio_play_station(radio_ctx_t *ctx, size_t index)
     snprintf(ctx->now_text, sizeof(ctx->now_text), "%s", name);
     ctx->playing_index = (int)index;
     ctx->pending = true;
-    radio_show_state(ctx, "radio.connecting", "Verbinde...", false);
+    radio_show_state(ctx, "radio.connecting", "Connecting...", false);
     radio_render(ctx);
     ESP_LOGI(TAG, "play_media '%s' -> %s", name, entity);
 }
@@ -787,7 +787,7 @@ static void radio_stop(radio_ctx_t *ctx)
         ctx->panel_state_known = true;
         ctx->panel_title[0] = '\0';
         ctx->panel_error[0] = '\0';
-        radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
+        radio_show_state(ctx, "radio.stopped", "Stopped", false);
         radio_render(ctx);
         if (was_active) {
             ESP_LOGI(TAG, "panel radio stopped");
@@ -809,7 +809,7 @@ static void radio_stop(radio_ctx_t *ctx)
     }
     ctx->pending = false;
     ctx->playing_index = -1;
-    radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
+    radio_show_state(ctx, "radio.stopped", "Stopped", false);
     radio_render(ctx);
 }
 
@@ -1062,7 +1062,7 @@ static void radio_pick_apply(radio_ctx_t *ctx, bool panel, const char *entity)
         snprintf(ctx->config.player_entity_id, sizeof(ctx->config.player_entity_id), "%s", entity);
     }
 
-    radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
+    radio_show_state(ctx, "radio.stopped", "Stopped", false);
     radio_prefs_save(ctx);
     radio_poll_control(ctx);
     radio_render(ctx);
@@ -1407,7 +1407,7 @@ esp_err_t ui_radio_page_create(
     ctx->panel_mode = ctx->config.use_panel_speaker;
     radio_prefs_load(ctx);
     ctx->volume_pct = ctx->panel_mode ? radio_clamp_int(xz_audio_get_volume(), 0, 100) : 50;
-    radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
+    radio_show_state(ctx, "radio.stopped", "Stopped", false);
 
     /* Root: fills the content box exactly, no border, no padding, no scroll. */
     ctx->root = lv_obj_create(parent);
@@ -1634,13 +1634,13 @@ void ui_radio_page_apply_state(ui_radio_page_instance_t *instance, const ha_stat
     }
 
     if (playing) {
-        radio_show_state(ctx, "radio.playing", "Odtwarzanie", true);
+        radio_show_state(ctx, "radio.playing", "Playing", true);
     } else if (paused) {
-        radio_show_state(ctx, "radio.paused", "Pauza", false);
+        radio_show_state(ctx, "radio.paused", "Paused", false);
     } else if (!known) {
-        radio_show_state(ctx, "common.unavailable", "nicht verfügbar", false);
+        radio_show_state(ctx, "common.unavailable", "unavailable", false);
     } else {
-        radio_show_state(ctx, "radio.stopped", "Zatrzymane", false);
+        radio_show_state(ctx, "radio.stopped", "Stopped", false);
     }
 
     if (have_volume && !ctx->volume_dragging) {

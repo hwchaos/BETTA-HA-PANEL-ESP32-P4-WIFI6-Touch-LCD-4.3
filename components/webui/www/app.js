@@ -5912,6 +5912,32 @@ function t(key, vars = {}, fallbackText = null) {
   return templateString(raw, vars);
 }
 
+/* Texts added by this fork are written in German in the markup and carry their
+ * English version in data-en (data-en-title / data-en-placeholder for the
+ * attributes); every UI language other than German shows the English one. */
+function L(de, en) {
+  return editor.i18nLanguage === "de" ? de : en;
+}
+
+function applyBilingualLiterals() {
+  const german = editor.i18nLanguage === "de";
+  for (const node of document.querySelectorAll("[data-en]")) {
+    if (node.dataset.de === undefined) node.dataset.de = node.innerHTML;
+    if (german) node.innerHTML = node.dataset.de;
+    else node.textContent = node.dataset.en;
+  }
+  for (const [attr, enKey, deKey] of [
+    ["title", "enTitle", "deTitle"],
+    ["placeholder", "enPlaceholder", "dePlaceholder"],
+  ]) {
+    for (const node of document.querySelectorAll(`[data-en-${attr}]`)) {
+      if (node.dataset[deKey] === undefined) node.dataset[deKey] = node.getAttribute(attr) || "";
+      node.setAttribute(attr, german ? node.dataset[deKey] : node.dataset[enKey]);
+    }
+  }
+  renderTopbarArrangement();
+}
+
 function storageGet(key) {
   try {
     return window.localStorage?.getItem(key) || "";
@@ -6228,6 +6254,7 @@ async function loadI18nLanguage(language, refreshCatalog = false) {
   document.documentElement.lang = lang;
 
   applyWebTranslations();
+  applyBilingualLiterals();
   renderLanguageOptions();
   if (editor.layout) {
     renderCanvas();
@@ -10197,32 +10224,42 @@ async function refreshRadarStatus() {
   try {
     const st = await apiGet("/api/radar");
     dot.className = "radar-dot";
-    const targetNames = { none: "niemand", moving: "Bewegung", static: "steht still", both: "Bewegung + still" };
+    const targetNames = {
+      none: L("niemand", "nobody"),
+      moving: L("Bewegung", "moving"),
+      static: L("steht still", "stationary"),
+      both: L("Bewegung + still", "moving + stationary"),
+    };
     if (!st.enabled) {
-      text.textContent = "Ausgeschaltet";
+      text.textContent = L("Ausgeschaltet", "Off");
       if (detail) detail.textContent = "";
       return;
     }
     if (st.error) {
       dot.classList.add("err");
-      text.textContent = `Fehler: ${st.error}`;
+      text.textContent = `${L("Fehler", "Error")}: ${st.error}`;
     } else if (!st.detected) {
       dot.classList.add("err");
-      text.textContent = st.frames > 0 ? "Keine Daten mehr vom Sensor" : "Kein LD2410 erkannt (keine Daten auf RX)";
+      text.textContent =
+        st.frames > 0
+          ? L("Keine Daten mehr vom Sensor", "No more data from the sensor")
+          : L("Kein LD2410 erkannt (keine Daten auf RX)", "No LD2410 detected (no data on RX)");
     } else {
       dot.classList.add(st.near ? "near" : "ok");
-      text.textContent = `LD2410 erkannt – ${targetNames[st.target] || st.target}${st.near ? " (in Annäherungs-Distanz)" : ""}`;
+      text.textContent = `${L("LD2410 erkannt", "LD2410 detected")} – ${targetNames[st.target] || st.target}${
+        st.near ? L(" (in Annäherungs-Distanz)", " (within approach distance)") : ""
+      }`;
     }
     if (detail) {
       detail.textContent = [
-        `Bewegung: ${st.moving_cm} cm (Signal ${st.moving_energy})`,
-        `still: ${st.static_cm} cm (Signal ${st.static_energy})`,
-        `Frames: ${st.frames}${st.bad_frames ? `, fehlerhaft: ${st.bad_frames}` : ""}`,
+        `${L("Bewegung", "Moving")}: ${st.moving_cm} cm (${L("Signal", "signal")} ${st.moving_energy})`,
+        `${L("still", "stationary")}: ${st.static_cm} cm (${L("Signal", "signal")} ${st.static_energy})`,
+        `Frames: ${st.frames}${st.bad_frames ? `, ${L("fehlerhaft", "bad")}: ${st.bad_frames}` : ""}`,
       ].join(" · ");
     }
   } catch (err) {
     dot.className = "radar-dot err";
-    text.textContent = `Status nicht abrufbar: ${err.message}`;
+    text.textContent = `${L("Status nicht abrufbar", "Status not available")}: ${err.message}`;
   }
 }
 
@@ -10250,11 +10287,15 @@ document.addEventListener("DOMContentLoaded", () => {
     selftest.addEventListener("click", async () => {
       const info = document.getElementById("radarInfo");
       try {
-        if (info) info.textContent = "Selbsttest läuft…";
+        if (info) info.textContent = L("Selbsttest läuft…", "Self-test running…");
         const st = await apiGet("/api/radar?selftest=1");
-        if (info) info.textContent = `Selbsttest (UART intern, ohne Sensor): ${st.selftest || "-"}`;
+        if (info) {
+          info.textContent = `${L("Selbsttest (UART intern, ohne Sensor)", "Self-test (internal UART loopback, no sensor)")}: ${
+            st.selftest || "-"
+          }`;
+        }
       } catch (err) {
-        if (info) info.textContent = `Selbsttest fehlgeschlagen: ${err.message}`;
+        if (info) info.textContent = `${L("Selbsttest fehlgeschlagen", "Self-test failed")}: ${err.message}`;
       }
     });
   }
@@ -10263,13 +10304,13 @@ document.addEventListener("DOMContentLoaded", () => {
     apply.addEventListener("click", async () => {
       const info = document.getElementById("radarInfo");
       try {
-        if (info) info.textContent = "Speichere…";
+        if (info) info.textContent = L("Speichere…", "Saving…");
         await putSettings({ radar: collectRadarPayload(), reboot: false });
         await loadSettings(true);
-        if (info) info.textContent = "Gespeichert.";
+        if (info) info.textContent = L("Gespeichert.", "Saved.");
         void refreshRadarStatus();
       } catch (err) {
-        if (info) info.textContent = `Fehler: ${err.message}`;
+        if (info) info.textContent = `${L("Fehler", "Error")}: ${err.message}`;
       }
     });
   }
@@ -10277,22 +10318,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /* ---- Top bar arrangement ---- */
 const TOPBAR_ITEMS = [
-  { id: "date", label: "Datum", zone: "L" },
-  { id: "cameras", label: "Kameras", zone: "L" },
-  { id: "weather", label: "Wetter", zone: "L" },
-  { id: "waste", label: "Müll", zone: "L" },
-  { id: "clock", label: "Uhrzeit", zone: "C" },
-  { id: "alert", label: "Warnung", zone: "R" },
-  { id: "assist", label: "Mikrofon", zone: "R" },
-  { id: "gear", label: "Einstellungen", zone: "R" },
-  { id: "ha", label: "Home Assistant", zone: "R" },
-  { id: "network", label: "Netzwerk", zone: "R" },
+  { id: "date", label: ["Datum", "Date"], zone: "L" },
+  { id: "cameras", label: ["Kameras", "Cameras"], zone: "L" },
+  { id: "weather", label: ["Wetter", "Weather"], zone: "L" },
+  { id: "waste", label: ["Müll", "Waste"], zone: "L" },
+  { id: "clock", label: ["Uhrzeit", "Clock"], zone: "C" },
+  { id: "alert", label: ["Warnung", "Alert"], zone: "R" },
+  { id: "assist", label: ["Mikrofon", "Microphone"], zone: "R" },
+  { id: "gear", label: ["Einstellungen", "Settings"], zone: "R" },
+  { id: "ha", label: ["Home Assistant", "Home Assistant"], zone: "R" },
+  { id: "network", label: ["Netzwerk", "Network"], zone: "R" },
 ];
+/* [zone, German, English] */
 const TOPBAR_ZONES = [
-  ["L", "Links"],
-  ["C", "Mitte"],
-  ["R", "Rechts"],
-  ["H", "Aus"],
+  ["L", "Links", "Left"],
+  ["C", "Mitte", "Centre"],
+  ["R", "Rechts", "Right"],
+  ["H", "Aus", "Hidden"],
 ];
 let topbarArrangement = TOPBAR_ITEMS.map((it) => ({ id: it.id, zone: it.zone }));
 
@@ -10305,7 +10347,8 @@ function formatTopbarDatePreview() {
 }
 
 function topbarItemLabel(id) {
-  return TOPBAR_ITEMS.find((it) => it.id === id)?.label || id;
+  const label = TOPBAR_ITEMS.find((it) => it.id === id)?.label;
+  return label ? L(label[0], label[1]) : id;
 }
 
 function applyTopbarArrangement(spec) {
@@ -10361,10 +10404,10 @@ function renderTopbarArrangement() {
     const name = document.createElement("span");
     name.textContent = topbarItemLabel(it.id);
     const select = document.createElement("select");
-    for (const [value, text] of TOPBAR_ZONES) {
+    for (const [value, de, en] of TOPBAR_ZONES) {
       const opt = document.createElement("option");
       opt.value = value;
-      opt.textContent = text;
+      opt.textContent = L(de, en);
       select.appendChild(opt);
     }
     select.value = it.zone;
@@ -10532,7 +10575,8 @@ function setAssistPipelineOptions(pipelines, preferred, selected) {
   const def = document.createElement("option");
   def.value = "";
   const preferredEntry = pipelines.find((p) => p.id === preferred);
-  def.textContent = preferredEntry ? `Bevorzugte Pipeline (${preferredEntry.name})` : "Bevorzugte Pipeline";
+  const preferredLabel = L("Bevorzugte Pipeline", "Preferred pipeline");
+  def.textContent = preferredEntry ? `${preferredLabel} (${preferredEntry.name})` : preferredLabel;
   select.appendChild(def);
   for (const p of pipelines) {
     const option = document.createElement("option");
@@ -10544,7 +10588,7 @@ function setAssistPipelineOptions(pipelines, preferred, selected) {
   if (selected && !pipelines.some((p) => p.id === selected)) {
     const option = document.createElement("option");
     option.value = selected;
-    option.textContent = pipelines.length ? `${selected} (nicht gefunden)` : selected;
+    option.textContent = pipelines.length ? `${selected} (${L("nicht gefunden", "not found")})` : selected;
     select.appendChild(option);
   }
   select.value = selected || "";
@@ -12295,7 +12339,10 @@ function updateEnergySourceUi(source) {
   }
   if (el.energySourceHint) {
     el.energySourceHint.textContent = isHaLive
-      ? "Seite 1: Tageswerte aus dem HA-Energie-Dashboard. Seite 2 (wischen): aktuelle Leistung aus den Sensoren unten (W/kW, Netz positiv = Bezug)."
+      ? L(
+          "Seite 1: Tageswerte aus dem HA-Energie-Dashboard. Seite 2 (wischen): aktuelle Leistung aus den Sensoren unten (W/kW, Netz positiv = Bezug).",
+          "Page 1: today's totals from the HA Energy dashboard. Page 2 (swipe): current power from the sensors below (W/kW, grid positive = import).",
+        )
       : t(isManual ? "layout.energy.source_hint_manual" : "layout.energy.source_hint_ha");
   }
 }

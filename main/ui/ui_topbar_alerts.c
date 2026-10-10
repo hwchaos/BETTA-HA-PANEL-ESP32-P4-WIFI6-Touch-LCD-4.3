@@ -1,4 +1,5 @@
 #include "ui/ui_topbar_alerts.h"
+#include "ui/ui_i18n.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -346,7 +347,8 @@ static void alert_popup_open(void)
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE); /* taps on the card do not close */
 
     lv_obj_t *title = lv_label_create(card);
-    lv_label_set_text(title, s_entry_count > 0 ? "Meldungen" : "Keine Meldungen");
+    lv_label_set_text(title, s_entry_count > 0 ? ui_i18n_get("alerts.title", "Notifications")
+                                            : ui_i18n_get("alerts.none", "No notifications"));
     lv_obj_set_style_text_font(title, APP_FONT_TEXT_22, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(ALERT_COLOR), LV_PART_MAIN);
 
@@ -383,9 +385,9 @@ static void alert_popup_open(void)
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, 12, LV_PART_MAIN);
-    (void)alert_button(row, "Schließen", 0x455A64, alert_close_cb);
+    (void)alert_button(row, ui_i18n_get("alerts.close", "Close"), 0x455A64, alert_close_cb);
     if (s_entry_count > 0) {
-        (void)alert_button(row, "Gelesen", ALERT_COLOR, alert_read_cb);
+        (void)alert_button(row, ui_i18n_get("alerts.read", "Mark read"), ALERT_COLOR, alert_read_cb);
     }
 }
 
