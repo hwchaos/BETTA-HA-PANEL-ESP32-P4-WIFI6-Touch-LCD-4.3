@@ -43,3 +43,8 @@ main/idf_component.yml
 panic_monitor.log
 poppins_backup/
 probe_body*.json
+
+# Component manager lock: shared by all variants and rewritten on every
+# build (with absolute local paths). Versions are pinned in
+# main/idf_component.<variant>.yml instead.
+dependencies.lock

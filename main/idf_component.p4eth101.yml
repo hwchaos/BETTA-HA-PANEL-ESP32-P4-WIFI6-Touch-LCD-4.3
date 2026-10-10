@@ -5,19 +5,22 @@
 # wired like the ESP32-P4-Nano (display, touch, ES8311 audio, IP101 PHY), so
 # the Nano BSP drives display, touch and audio.
 dependencies:
+  # Exact versions: dependencies.lock is not tracked (it is shared by all
+  # variants and rewritten on every build), so a fresh build resolves from
+  # here. patches/ is written against these versions - bump them together.
   idf: ">=5.5"
   lvgl/lvgl:
-    version: "^9"
+    version: "9.6.0~1"
   waveshare/esp32_p4_nano:
-    version: "^1.2.0"
+    version: "1.2.4"
     rules:
       - if: "target in [esp32p4]"
   espressif/esp_lvgl_port:
-    version: "^2.7.2"
+    version: "2.9.0"
     rules:
       - if: "target in [esp32p4]"
   espressif/esp_lcd_touch:
-    version: "^1.2.0"
+    version: "1.2.1"
     rules:
       - if: "target in [esp32p4]"
   espressif/esp_lcd_touch_gt911:
@@ -25,10 +28,29 @@ dependencies:
     rules:
       - if: "target in [esp32p4]"
   joltwallet/littlefs:
-    version: "^1.20.2"
+    version: "1.21.1"
   espressif/esp_websocket_client:
-    version: "*"
+    version: "1.7.0"
   espressif/esp_audio_codec:
-    version: "~2.4.1"
+    version: "2.4.1"
   78/esp-opus:
-    version: "1.0.*"
+    version: "1.0.5"
+  # Pulled in by the components above; pinned so a fresh build matches.
+  espressif/cmake_utilities:
+    version: "0.5.3"
+  espressif/esp_codec_dev:
+    version: "1.5.11"
+  espressif/esp_h264:
+    version: "1.0.4"
+  espressif/i2c_bus:
+    version: "1.5.2"
+  espressif/usb_host_uvc:
+    version: "2.4.2"
+  waveshare/esp_lcd_dsi:
+    version: "2.0.0"
+  waveshare/esp_lcd_hx8394:
+    version: "1.0.3"
+  waveshare/esp_lcd_ili9881c:
+    version: "2.0.0"
+  waveshare/esp_lcd_jd9365:
+    version: "2.0.0"
