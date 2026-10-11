@@ -50,7 +50,7 @@ extern const lv_image_dsc_t SMART86OS_Betta;
 
 /* Compact metrics for short screens: the full-size stack (emblem, progress,
  * title, five status lines) needs ~550 px and is cut off at 480 px. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480) || (APP_SCREEN_HEIGHT <= 480)
+#if (APP_SCREEN_HEIGHT <= 480)
 #define SPLASH_COMPACT 1
 #else
 #define SPLASH_COMPACT 0

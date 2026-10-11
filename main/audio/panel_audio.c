@@ -1,19 +1,19 @@
 // ============================================================
-// Xiaozhi Audio Backend
+// Panel audio backend
 // ============================================================
 //
-// Ported from ForgeUI 30_Audio.c (fg_audio_* -> xz_audio_*) for
+// Ported from ForgeUI 30_Audio.c (fg_audio_* -> panel_audio_*) for
 // the BETTA-HA-PANEL firmware.
 //
 // Current Hardware Path:
 //
-// Waveshare ESP32-P4-WIFI6-Touch-LCD-7B
+// Waveshare board BSP (4.3" or ETH kit)
 // BSP audio init
 // ESP codec device speaker output (ES8311)
 //
 // ============================================================
 
-#include "xiaozhi_audio.h"
+#include "audio/panel_audio.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "nvs_flash.h"
@@ -31,35 +31,36 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-static const char *TAG = "XZ_AUDIO";
+static const char *TAG = "audio";
 
 /* Default speaker volume. The ES8311 volume register is 0.5 dB/step and the
  * BSP adds ~+3.6 dB of hw-gain compensation, so volume 85 lands around
  * register 0xB7 (~ -3.9 dB), just below the clean 0 dB point (0xBF). That is
  * a clearly louder but still distortion-free default vs. the old 70 (~0xA8).
  * The value is persisted so a reboot no longer drops the volume back down. */
-#define XZ_VOLUME_DEFAULT  85
-#define XZ_AUDIO_NVS_NS    "xz_audio"
-#define XZ_AUDIO_NVS_VOL   "volume"
+#define AUDIO_VOLUME_DEFAULT  85
+/* Namespace kept from the original module name: it holds the saved volume. */
+#define AUDIO_NVS_NS       "xz_audio"
+#define AUDIO_NVS_VOL   "volume"
 
 static esp_codec_dev_handle_t g_speaker = NULL;
 static esp_codec_dev_handle_t g_mic = NULL;
 static bool g_ready = false;
 static bool g_mic_open = false;
 static bool g_busy  = false;
-static int  g_volume = XZ_VOLUME_DEFAULT;
+static int  g_volume = AUDIO_VOLUME_DEFAULT;
 
-#define XZ_AUDIO_SAMPLE_RATE 16000
-#define XZ_AUDIO_CHANNELS    1
-#define XZ_AUDIO_BITS        16
+#define AUDIO_SAMPLE_RATE 16000
+#define AUDIO_CHANNELS    1
+#define AUDIO_BITS        16
 #define DURATION_MS 150
 #define FREQ        1000
 
 /* Hand-over window when the microphone takes the codec back from a running
  * radio stream: the stream sees the stop flag at its next read timeout. */
-#define XZ_OUTPUT_HANDOVER_MS 1500
+#define AUDIO_OUTPUT_HANDOVER_MS 1500
 
-static int16_t g_beep_buffer[XZ_AUDIO_SAMPLE_RATE * DURATION_MS / 1000];
+static int16_t g_beep_buffer[AUDIO_SAMPLE_RATE * DURATION_MS / 1000];
 
 /* The speaker is a single resource: the voice path opens it at 16 kHz mono,
  * the radio stream borrows it at the stream's own rate. A mutex serialises
@@ -69,9 +70,9 @@ static StaticSemaphore_t g_lock_storage;
 static SemaphoreHandle_t g_lock = NULL;
 static portMUX_TYPE g_lock_mux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool g_output_exclusive = false;
-static uint32_t g_output_rate = XZ_AUDIO_SAMPLE_RATE;
+static uint32_t g_output_rate = AUDIO_SAMPLE_RATE;
 
-static void xz_audio_lock_init(void)
+static void panel_audio_lock_init(void)
 {
     if (g_lock != NULL) {
         return;
@@ -83,13 +84,13 @@ static void xz_audio_lock_init(void)
     portEXIT_CRITICAL(&g_lock_mux);
 }
 
-static void xz_audio_lock(void)
+static void panel_audio_lock(void)
 {
-    xz_audio_lock_init();
+    panel_audio_lock_init();
     xSemaphoreTake(g_lock, portMAX_DELAY);
 }
 
-static void xz_audio_unlock(void)
+static void panel_audio_unlock(void)
 {
     if (g_lock != NULL) {
         xSemaphoreGive(g_lock);
@@ -97,14 +98,14 @@ static void xz_audio_unlock(void)
 }
 
 /*
- * The BSP's internal default is 22050 Hz mono/16-bit. Xiaozhi (and Opus)
+ * The BSP's internal default is 22050 Hz mono/16-bit. Voice (and Opus)
  * work best at 16 kHz, so we pass an explicit I2S config. GPIOs come from the
  * BSP header so this stays in sync with the board definition.
  */
-static i2s_std_config_t xz_audio_build_i2s_config(void)
+static i2s_std_config_t panel_audio_build_i2s_config(void)
 {
     i2s_std_config_t cfg = {
-        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(XZ_AUDIO_SAMPLE_RATE),
+        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE),
         .slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
                                                        I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
@@ -123,13 +124,13 @@ static i2s_std_config_t xz_audio_build_i2s_config(void)
     return cfg;
 }
 
-esp_codec_dev_sample_info_t xz_audio_sample_info(void)
+esp_codec_dev_sample_info_t panel_audio_sample_info(void)
 {
     esp_codec_dev_sample_info_t fs = {
-        .bits_per_sample = XZ_AUDIO_BITS,
-        .channel = XZ_AUDIO_CHANNELS,
+        .bits_per_sample = AUDIO_BITS,
+        .channel = AUDIO_CHANNELS,
         .channel_mask = 0,
-        .sample_rate = XZ_AUDIO_SAMPLE_RATE,
+        .sample_rate = AUDIO_SAMPLE_RATE,
         .mclk_multiple = 0,
     };
     return fs;
@@ -137,51 +138,51 @@ esp_codec_dev_sample_info_t xz_audio_sample_info(void)
 
 /* Mic capture runs in stereo so both physical ES7210 mics (one per I2S
  * slot) are read; the voice client downmixes to mono. */
-esp_codec_dev_sample_info_t xz_audio_mic_sample_info(void)
+esp_codec_dev_sample_info_t panel_audio_mic_sample_info(void)
 {
     esp_codec_dev_sample_info_t fs = {
-        .bits_per_sample = XZ_AUDIO_BITS,
-        .channel = XZ_MIC_CHANNELS,
+        .bits_per_sample = AUDIO_BITS,
+        .channel = PANEL_AUDIO_MIC_CHANNELS,
         .channel_mask = 0,
-        .sample_rate = XZ_AUDIO_SAMPLE_RATE,
+        .sample_rate = AUDIO_SAMPLE_RATE,
         .mclk_multiple = 0,
     };
     return fs;
 }
 
-static void xz_audio_save_volume(void)
+static void panel_audio_save_volume(void)
 {
     nvs_handle_t h;
-    if (nvs_open(XZ_AUDIO_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    if (nvs_open(AUDIO_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
         return;
     }
-    nvs_set_i32(h, XZ_AUDIO_NVS_VOL, (int32_t)g_volume);
+    nvs_set_i32(h, AUDIO_NVS_VOL, (int32_t)g_volume);
     nvs_commit(h);
     nvs_close(h);
 }
 
-static void xz_audio_load_volume(void)
+static void panel_audio_load_volume(void)
 {
     nvs_handle_t h;
-    if (nvs_open(XZ_AUDIO_NVS_NS, NVS_READONLY, &h) != ESP_OK) {
+    if (nvs_open(AUDIO_NVS_NS, NVS_READONLY, &h) != ESP_OK) {
         return;
     }
     int32_t v = -1;
-    if (nvs_get_i32(h, XZ_AUDIO_NVS_VOL, &v) == ESP_OK && v >= 0 && v <= 100) {
+    if (nvs_get_i32(h, AUDIO_NVS_VOL, &v) == ESP_OK && v >= 0 && v <= 100) {
         g_volume = (int)v;
     }
     nvs_close(h);
 }
 
-static esp_err_t xz_audio_init_locked(void)
+static esp_err_t panel_audio_init_locked(void)
 {
     if (g_ready) return ESP_OK;
 
     ESP_LOGI(TAG, "Init audio...");
 
-    xz_audio_load_volume();
+    panel_audio_load_volume();
 
-    i2s_std_config_t i2s_cfg = xz_audio_build_i2s_config();
+    i2s_std_config_t i2s_cfg = panel_audio_build_i2s_config();
     esp_err_t err = bsp_audio_init(&i2s_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "bsp_audio_init failed: %s", esp_err_to_name(err));
@@ -200,7 +201,7 @@ static esp_err_t xz_audio_init_locked(void)
         return ESP_FAIL;
     }
 
-    esp_codec_dev_sample_info_t fs = xz_audio_sample_info();
+    esp_codec_dev_sample_info_t fs = panel_audio_sample_info();
     fs.sample_rate = g_output_rate;
 
     err = esp_codec_dev_open(g_speaker, &fs);
@@ -215,16 +216,16 @@ static esp_err_t xz_audio_init_locked(void)
     }
 
     g_ready = true;
-    ESP_LOGI(TAG, "Audio ready (duplex %d Hz / mono / 16-bit)", XZ_AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "Audio ready (duplex %d Hz / mono / 16-bit)", AUDIO_SAMPLE_RATE);
 
     return ESP_OK;
 }
 
-esp_err_t xz_audio_init(void)
+esp_err_t panel_audio_init(void)
 {
-    xz_audio_lock();
-    const esp_err_t err = xz_audio_init_locked();
-    xz_audio_unlock();
+    panel_audio_lock();
+    const esp_err_t err = panel_audio_init_locked();
+    panel_audio_unlock();
     return err;
 }
 
@@ -233,9 +234,9 @@ esp_err_t xz_audio_init(void)
 /* Open the speaker at `rate` (mono / 16-bit) and re-apply the volume.
  * esp_codec_dev_open() is a no-op on an already open device, so the speaker is
  * always closed first to let the new sample rate reach the I2S clock. */
-static esp_err_t xz_audio_reopen_output(uint32_t rate)
+static esp_err_t panel_audio_reopen_output(uint32_t rate)
 {
-    esp_err_t err = xz_audio_init_locked();
+    esp_err_t err = panel_audio_init_locked();
     if (err != ESP_OK) {
         return err;
     }
@@ -244,7 +245,7 @@ static esp_err_t xz_audio_reopen_output(uint32_t rate)
     }
 
     esp_codec_dev_close(g_speaker);
-    esp_codec_dev_sample_info_t fs = xz_audio_sample_info();
+    esp_codec_dev_sample_info_t fs = panel_audio_sample_info();
     fs.sample_rate = rate;
     err = esp_codec_dev_open(g_speaker, &fs);
     if (err != ESP_OK) {
@@ -256,13 +257,13 @@ static esp_err_t xz_audio_reopen_output(uint32_t rate)
     return ESP_OK;
 }
 
-esp_err_t xz_audio_acquire_output(uint32_t rate)
+esp_err_t panel_audio_acquire_output(uint32_t rate)
 {
     if (rate == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    xz_audio_lock();
+    panel_audio_lock();
     esp_err_t err;
     if (g_output_exclusive) {
         err = ESP_ERR_INVALID_STATE;
@@ -271,86 +272,86 @@ esp_err_t xz_audio_acquire_output(uint32_t rate)
          * session holds the mic the output format must not change. */
         err = ESP_ERR_INVALID_STATE;
     } else {
-        err = xz_audio_reopen_output(rate);
+        err = panel_audio_reopen_output(rate);
         if (err == ESP_OK) {
             g_output_exclusive = true;
             ESP_LOGI(TAG, "output taken by the radio at %u Hz", (unsigned)rate);
         }
     }
-    xz_audio_unlock();
+    panel_audio_unlock();
     return err;
 }
 
-esp_err_t xz_audio_release_output(void)
+esp_err_t panel_audio_release_output(void)
 {
-    xz_audio_lock();
+    panel_audio_lock();
     esp_err_t err = ESP_OK;
     if (g_output_exclusive) {
         g_output_exclusive = false;
         if (!g_mic_open) {
-            err = xz_audio_reopen_output(XZ_AUDIO_SAMPLE_RATE);
+            err = panel_audio_reopen_output(AUDIO_SAMPLE_RATE);
         } else {
-            g_output_rate = XZ_AUDIO_SAMPLE_RATE;
+            g_output_rate = AUDIO_SAMPLE_RATE;
         }
         ESP_LOGI(TAG, "output released back to the voice path");
     }
-    xz_audio_unlock();
+    panel_audio_unlock();
     return err;
 }
 
-esp_err_t xz_audio_set_output_rate(uint32_t rate)
+esp_err_t panel_audio_set_output_rate(uint32_t rate)
 {
     if (rate == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    xz_audio_lock();
+    panel_audio_lock();
     esp_err_t err = ESP_OK;
     if (g_output_rate != rate) {
-        err = xz_audio_reopen_output(rate);
+        err = panel_audio_reopen_output(rate);
     }
-    xz_audio_unlock();
+    panel_audio_unlock();
     return err;
 }
 
-uint32_t xz_audio_get_output_rate(void)
+uint32_t panel_audio_get_output_rate(void)
 {
     return g_output_rate;
 }
 
-bool xz_audio_output_is_exclusive(void)
+bool panel_audio_output_is_exclusive(void)
 {
     return g_output_exclusive;
 }
 
-esp_err_t xz_audio_set_volume(int volume)
+esp_err_t panel_audio_set_volume(int volume)
 {
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
 
     g_volume = volume;
 
-    xz_audio_lock();
-    esp_err_t err = xz_audio_init_locked();
+    panel_audio_lock();
+    esp_err_t err = panel_audio_init_locked();
     if (err == ESP_OK) {
         err = esp_codec_dev_set_out_vol(g_speaker, g_volume);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Volume set failed: %s", esp_err_to_name(err));
         } else {
             ESP_LOGI(TAG, "Volume set: %d%%", g_volume);
-            xz_audio_save_volume();
+            panel_audio_save_volume();
         }
     }
-    xz_audio_unlock();
+    panel_audio_unlock();
 
     return err;
 }
 
-int xz_audio_get_volume(void)
+int panel_audio_get_volume(void)
 {
     return g_volume;
 }
 
-esp_err_t xz_audio_test_beep(void)
+esp_err_t panel_audio_test_beep(void)
 {
     if (g_busy) {
         ESP_LOGW(TAG, "Beep already running");
@@ -363,25 +364,25 @@ esp_err_t xz_audio_test_beep(void)
 
     g_busy = true;
 
-    xz_audio_lock();
-    esp_err_t err = xz_audio_init_locked();
+    panel_audio_lock();
+    esp_err_t err = panel_audio_init_locked();
     if (err != ESP_OK) {
-        xz_audio_unlock();
+        panel_audio_unlock();
         g_busy = false;
         return err;
     }
 
     esp_codec_dev_set_out_vol(g_speaker, g_volume);
 
-    const int samples = XZ_AUDIO_SAMPLE_RATE * DURATION_MS / 1000;
+    const int samples = AUDIO_SAMPLE_RATE * DURATION_MS / 1000;
 
     for (int i = 0; i < samples; i++) {
-        float t = (float)i / XZ_AUDIO_SAMPLE_RATE;
+        float t = (float)i / AUDIO_SAMPLE_RATE;
         g_beep_buffer[i] = (int16_t)(sinf(2.0f * (float)M_PI * FREQ * t) * 10000);
     }
 
     err = esp_codec_dev_write(g_speaker, g_beep_buffer, samples * sizeof(int16_t));
-    xz_audio_unlock();
+    panel_audio_unlock();
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Write failed: %s", esp_err_to_name(err));
@@ -393,38 +394,38 @@ esp_err_t xz_audio_test_beep(void)
     return err;
 }
 
-esp_err_t xz_audio_open_mic(void)
+esp_err_t panel_audio_open_mic(void)
 {
     /* A running radio stream owns the codec: ask it to stop and give it a
      * moment to hand the speaker back before the mic format is set up. */
     if (g_output_exclusive) {
         ESP_LOGI(TAG, "stopping the radio to open the microphone");
         panel_radio_stop();
-        for (int waited = 0; g_output_exclusive && waited < XZ_OUTPUT_HANDOVER_MS; waited += 25) {
+        for (int waited = 0; g_output_exclusive && waited < AUDIO_OUTPUT_HANDOVER_MS; waited += 25) {
             vTaskDelay(pdMS_TO_TICKS(25));
         }
         if (g_output_exclusive) {
-            ESP_LOGW(TAG, "radio did not release the speaker in %d ms", XZ_OUTPUT_HANDOVER_MS);
+            ESP_LOGW(TAG, "radio did not release the speaker in %d ms", AUDIO_OUTPUT_HANDOVER_MS);
         }
     }
 
-    xz_audio_lock();
-    esp_err_t err = xz_audio_init_locked();
+    panel_audio_lock();
+    esp_err_t err = panel_audio_init_locked();
     if (err == ESP_OK && !g_mic_open) {
-        esp_codec_dev_sample_info_t fs = xz_audio_mic_sample_info();
+        esp_codec_dev_sample_info_t fs = panel_audio_mic_sample_info();
         if (esp_codec_dev_open(g_mic, &fs) != ESP_CODEC_DEV_OK) {
             ESP_LOGE(TAG, "Failed to open mic device");
             err = ESP_FAIL;
         } else {
             g_mic_open = true;
-            ESP_LOGI(TAG, "Mic opened: stereo %d ch, %d Hz", XZ_MIC_CHANNELS, XZ_AUDIO_SAMPLE_RATE);
+            ESP_LOGI(TAG, "Mic opened: stereo %d ch, %d Hz", PANEL_AUDIO_MIC_CHANNELS, AUDIO_SAMPLE_RATE);
         }
     }
-    xz_audio_unlock();
+    panel_audio_unlock();
     return err;
 }
 
-esp_err_t xz_audio_close_mic(void)
+esp_err_t panel_audio_close_mic(void)
 {
     if (g_mic == NULL || !g_mic_open) {
         return ESP_OK;
@@ -434,7 +435,7 @@ esp_err_t xz_audio_close_mic(void)
     return ESP_OK;
 }
 
-esp_err_t xz_audio_set_mic_gain(float db)
+esp_err_t panel_audio_set_mic_gain(float db)
 {
     if (g_mic == NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -447,7 +448,7 @@ esp_err_t xz_audio_set_mic_gain(float db)
     return ESP_OK;
 }
 
-esp_err_t xz_audio_play(const int16_t *pcm, int sample_count)
+esp_err_t panel_audio_play(const int16_t *pcm, int sample_count)
 {
     if (pcm == NULL || sample_count <= 0) {
         return ESP_ERR_INVALID_ARG;
@@ -459,21 +460,21 @@ esp_err_t xz_audio_play(const int16_t *pcm, int sample_count)
         return ESP_ERR_INVALID_STATE;
     }
 
-    xz_audio_lock();
-    esp_err_t err = xz_audio_init_locked();
+    panel_audio_lock();
+    esp_err_t err = panel_audio_init_locked();
     if (err == ESP_OK) {
-        int bytes = sample_count * sizeof(int16_t) * XZ_AUDIO_CHANNELS;
+        int bytes = sample_count * sizeof(int16_t) * AUDIO_CHANNELS;
         int w = esp_codec_dev_write(g_speaker, (void *)pcm, bytes);
         if (w < 0) {
             ESP_LOGW(TAG, "Speaker write failed: %d", w);
             err = ESP_FAIL;
         }
     }
-    xz_audio_unlock();
+    panel_audio_unlock();
     return err;
 }
 
-int xz_audio_read(int16_t *pcm, int max_frames)
+int panel_audio_read(int16_t *pcm, int max_frames)
 {
     if (g_mic == NULL || !g_mic_open || pcm == NULL || max_frames <= 0) {
         return -1;
@@ -481,7 +482,7 @@ int xz_audio_read(int16_t *pcm, int max_frames)
     /* esp_codec_dev_read returns an error code (0 = OK), not a byte count;
      * on success the requested buffer has been filled (interleaved stereo,
      * one frame = one sample per mic). */
-    int bytes = max_frames * sizeof(int16_t) * XZ_MIC_CHANNELS;
+    int bytes = max_frames * sizeof(int16_t) * PANEL_AUDIO_MIC_CHANNELS;
     int r = esp_codec_dev_read(g_mic, pcm, bytes);
     if (r < 0) {
         return -1;
@@ -489,12 +490,12 @@ int xz_audio_read(int16_t *pcm, int max_frames)
     return max_frames;
 }
 
-esp_codec_dev_handle_t xz_audio_get_speaker(void)
+esp_codec_dev_handle_t panel_audio_get_speaker(void)
 {
     return g_speaker;
 }
 
-esp_codec_dev_handle_t xz_audio_get_mic(void)
+esp_codec_dev_handle_t panel_audio_get_mic(void)
 {
     return g_mic;
 }

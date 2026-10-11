@@ -24,8 +24,9 @@ This repository is a fork of a fork:
    diagnostics, backup/restore and MQTT discovery.
 3. **This repository** adds two more ESP32-P4 boards and the features listed below.
 
-Everything from the 7B fork still works here. The 7B and the other original variants still
-build from this source tree, but only the two boards below were tested.
+The features of the 7B fork carry over. This repository supports **only** the two boards
+below: the original variants (4" 720x720, 7B, ESP32-P4 Nano 10.1" and the ESP32-S3 4848S040)
+and the Xiaozhi voice assistant have been removed.
 
 ## Supported boards
 
@@ -35,7 +36,7 @@ build from this source tree, but only the two boards below were tested.
 | Display | 4.3" 480×800 MIPI-DSI (ST7701), used in landscape (800×480) | 10.1" 800×1280 MIPI-DSI, used in landscape (1280×800) |
 | Touch | GT911 | GT911 |
 | Network | Wi-Fi 6 through the on-board ESP32-C6 (ESP-Hosted) | Ethernet (IP101), PoE. There is no Wi-Fi on this kit |
-| Flash | 32 MB | 32 MB, with the first 16 MB laid out like ESPHome |
+| Flash | 32 MB | 32 MB |
 | sdkconfig | `sdkconfig.defaults;sdkconfig.defaults.panel43` | `sdkconfig.defaults;sdkconfig.defaults.p4eth101` |
 
 Both boards need an ESP32-P4 chip revision 1.x and ESP-IDF **5.5**.
@@ -79,6 +80,12 @@ Both boards need an ESP32-P4 chip revision 1.x and ESP-IDF **5.5**.
   - Remaining Polish texts translated.
   - Every text added by this fork exists in **English and German**, chosen by the UI language
     setting.
+- **Removed:**
+  - Support for the original boards (4", 7B, P4 Nano 10.1", ESP32-S3).
+  - The Xiaozhi voice assistant (HA Assist replaces it); its audio backend lives on as
+    `main/audio/panel_audio.c`.
+  - The editor's automatic update URL, which pointed at firmware for the upstream boards.
+  - Prebuilt upstream release images.
 - **Robustness:**
   - The layout is validated against the largest canvas.
   - A rejected layout is kept as `layout.json.bad` instead of being lost.
@@ -96,18 +103,19 @@ Both boards need an ESP32-P4 chip revision 1.x and ESP-IDF **5.5**.
   dark.
 - Compact action and cover tiles, and a domain filter in the entity picker.
 - Clean display reset on restart, so the panel does not show stripes after saving.
+- Flash runs in quad I/O mode (QIO), which gives smoother animations. The first switch needs a
+  USB flash because the bootloader changes; OTA updates keep it afterwards.
 
 ### `p4eth101`: Waveshare 10.1" PoE/Ethernet kit
 
 - Ethernet network manager (IP101 PHY). The status bar shows an Ethernet icon, and the Wi-Fi and
   setup-AP settings are hidden.
 - Optional **vertical page navigation on the left** instead of the bottom bar.
-- An **ESPHome-compatible partition layout** (`partitions.esphome16.csv`). A kit that runs
-  ESPHome can install this firmware as an ordinary ESPHome OTA update, with no USB cable needed.
-  The panel's file storage lives above 16 MB.
+- Own partition table over the full 32 MB (`partitions.p4eth101.csv`) with a crash-dump
+  partition. Flash in quad I/O mode (QIO), as on the 4.3" board.
 - **Rollback guard:** the firmware marks itself as good only once the network is up. Without
   network for four minutes, or after a crash during start-up, the kit falls back to the previous
-  firmware (for example ESPHome).
+  firmware - it has no USB access once mounted, so this is the safety net for updates.
 
 ## Building
 
@@ -125,26 +133,31 @@ idf.py -B build-p4eth -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaul
 idf.py -B build-p4eth build
 ```
 
-The top-level `CMakeLists.txt` picks the matching component manifest
-(`main/idf_component.<variant>.yml`). The build rewrites `dependencies.lock` for the board you
-are building. That change is local and should not be committed.
+`CMakePresets.json` contains the same two configurations (`panel43`, `p4eth101`). The top-level
+`CMakeLists.txt` picks the matching component manifest (`main/idf_component.<variant>.yml`),
+which pins every component to the version the board was tested with. `dependencies.lock` is
+generated locally and not tracked.
 
 ## Flashing
 
 - **USB:** `idf.py -B <build-dir> -p <port> flash`.
 - **Updates later on:** in the web editor (Settings → Firmware Update), or with
   `curl -X POST --data-binary @build-panel43/betta-ha-panel-43.bin http://<panel-ip>/api/ota/upload`.
-- **10.1" kit that runs ESPHome:** upload the app image with ESPHome's own tool, for example
-  `esphome upload <your-config>.yaml --device <panel-ip> --file build-p4eth/betta-ha-panel-p4eth.bin`.
-  This uses your ESPHome OTA password or key, which never needs to go into this repository. After
-  the reboot the panel gets an address by DHCP and shows the web editor's address on screen. If
-  it cannot reach the network, it returns to ESPHome by itself.
+- **First install** needs USB on both boards (bootloader and partition table). On the 10.1"
+  kit use the USB port with the UART chip.
+- **Rollback:** both boards run an update as "pending" first and confirm it once the network is
+  up; a restart before that boots the previous firmware again.
+- With the optional web password set, add `-u admin:<password>` to the curl calls.
 
 After the first start, open `http://<panel-ip>/` and enter your Home Assistant URL and a
 long-lived access token. All personal settings (network, tokens, entities, layout) are stored on
 the panel only.
 
 ## Known limitations
+
+- OV5647 camera support (from the 7B port) is kept but off by default
+  (`CONFIG_APP_FEATURE_LOCAL_CAMERA`) and untested on these boards; the CSI/SCCB wiring may
+  need adjusting.
 
 - The LD2410 support is untested with a working sensor: both test sensors were faulty. The UART
   path itself was checked with the loopback self-test.

@@ -29,7 +29,6 @@ static void set_json_headers(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 }
 
 esp_err_t api_camera_local_snapshot_get_handler(httpd_req_t *req)
@@ -42,20 +41,17 @@ esp_err_t api_camera_local_snapshot_get_handler(httpd_req_t *req)
         if (err == ESP_ERR_INVALID_STATE) {
             httpd_resp_set_type(req, "application/json");
             httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-            httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
             httpd_resp_set_status(req, "503 Service Unavailable");
             return httpd_resp_sendstr(req, "{\"error\":\"camera_not_ready\"}");
         }
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-        httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
         httpd_resp_set_status(req, "500 Internal Server Error");
         return httpd_resp_sendstr(req, "{\"error\":\"snapshot_failed\"}");
     }
 
     httpd_resp_set_type(req, "image/jpeg");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     esp_err_t send_err = httpd_resp_send(req, (const char *)jpeg, (ssize_t)jpeg_len);
     free(jpeg);
     return send_err;

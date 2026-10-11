@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: LicenseRef-FNCL-1.1
+# Optional overlay: OV5647 camera on the MIPI-CSI connector, taken over from
+# the Waveshare 7B port and untested on these boards. Add it after the board
+# file, e.g.
+#   -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.panel43;sdkconfig.defaults.camera"
+
+# --- OV5647 sensor ---
+# On the 7B the sensor sat on the shared BSP I2C bus (SCL=GPIO8, SDA=GPIO7) which the
+# GT911 touch controller already owns; local_camera.c reuses that bus handle
+# as the SCCB interface.
+#
+# Sensor mode: 1280x960 RAW10 with 2x2 binning @45fps.  It matches the
+# 7B's 1024x600 panel far better than the OV5647 driver default (800x800 RAW8) and
+# keeps ~2.4 MB of RGB565 per frame instead of the ~4.1 MB a 1920x1080 RAW10
+# mode needs - 1080p plus the ESP-Hosted Wi-Fi stack eats the internal DMA
+# heap on this board class.  800x800 RAW8 stays available as a fallback mode:
+# switch CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS <-> ...RAW8_800X800_50FPS
+# together with the matching CONFIG_CAMERA_OV5647_MIPI_DEFAULT_FMT_* line.
+CONFIG_CAMERA_OV5647=y
+# CONFIG_CAMERA_OV5647_MIPI_RAW8_800X640_50FPS is not set
+CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y
+# CONFIG_CAMERA_OV5647_MIPI_RAW8_800X1280_50FPS is not set
+CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS=y
+# CONFIG_CAMERA_OV5647_MIPI_RAW10_1920X1080_30FPS is not set
+CONFIG_CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1280X960_BINNING_45FPS=y
+
+# --- Application feature toggles ---
+# Built-in camera: on-panel preview, /api/camera/{snapshot,status,motion,stream}
+# and motion wake.
+CONFIG_APP_FEATURE_LOCAL_CAMERA=y
+CONFIG_APP_LOCAL_CAMERA_MOTION_WAKE=y
+CONFIG_APP_LOCAL_CAMERA_JPEG_QUALITY=55
+
+# --- ESP Video framework (V4L2 MIPI-CSI stack) ---
+# The video device registers a /dev/videoX VFS node and the panel already
+# mounts several filesystems (FATFS SD, web assets, littlefs), so the default
+# 8 VFS slots are exhausted and esp_video_init fails with
+# "Failed to register video VFS dev name=video0".  Raise the limit.
+CONFIG_VFS_MAX_COUNT=16
+CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=y
+CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=y
+# The ISP pipeline controller is what binds the MIPI-CSI device to the ISP on
+# ESP32-P4: without it the RAW10 OV5647 frames are never converted to RGB565
+# and /dev/video0 delivers no frames (camera "running" but never ready).
+CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
+CONFIG_ESP_VIDEO_ENABLE_DATA_PREPROCESSING=n
+CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER=y
+CONFIG_ESP_VIDEO_ENABLE_SWAP_SHORT=n
+CONFIG_ESP_VIDEO_ENABLE_SWAP_BYTE=n

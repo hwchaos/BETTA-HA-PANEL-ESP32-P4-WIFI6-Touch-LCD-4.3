@@ -35,8 +35,8 @@ main/ui/weather_icons/**
 # so excluding them would make a fresh clone render with different typography.
 # Regeneration is described in main/ui/fonts/README.md.
 
-# Panel variant manifest is generated from main/idf_component.panel{4,7,10}.yml
-# (plus panels3) by the top-level CMakeLists.txt on every configure. Do not edit or commit.
+# The board manifest is generated from main/idf_component.{panel43,p4eth101}.yml
+# by the top-level CMakeLists.txt on every configure. Do not edit or commit.
 main/idf_component.yml
 
 # Local diagnostics / dev artifacts - never publish.

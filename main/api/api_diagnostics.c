@@ -611,7 +611,6 @@ esp_err_t api_diagnostics_get_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     esp_err_t err = httpd_resp_sendstr(req, payload);
     cJSON_free(payload);
     return err;
@@ -736,7 +735,6 @@ esp_err_t api_status_get_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     esp_err_t err = httpd_resp_sendstr(req, payload);
     cJSON_free(payload);
     return err;
@@ -790,7 +788,6 @@ esp_err_t api_crash_get_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     esp_err_t err = httpd_resp_sendstr(req, payload);
     cJSON_free(payload);
 
@@ -814,7 +811,6 @@ esp_err_t api_crash_raw_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.elf\"");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
     enum { CHUNK = 4096 };
     char *buf = malloc(CHUNK);
@@ -876,7 +872,6 @@ esp_err_t api_crash_erase_post_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     esp_err_t err = httpd_resp_sendstr(req, payload);
     cJSON_free(payload);
     return err;

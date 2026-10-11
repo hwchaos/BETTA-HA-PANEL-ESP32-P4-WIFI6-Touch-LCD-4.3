@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -15,6 +16,7 @@
 #include "freertos/semphr.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "mbedtls/base64.h"
 
 #include "app_config.h"
 #include "diag/system_log.h"
@@ -41,6 +43,10 @@ typedef struct {
     uint8_t in_flight;
     int64_t last_seen_ms;
 } http_guard_active_t;
+
+/* Web password (HTTP Basic auth). Empty = no protection. */
+static char s_password[APP_WEB_PASSWORD_MAX_LEN];
+static portMUX_TYPE s_password_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static SemaphoreHandle_t s_active_sem = NULL;
 static SemaphoreHandle_t s_guard_lock = NULL;
@@ -306,7 +312,6 @@ static esp_err_t send_busy(httpd_req_t *req, const char *status, const char *mes
 {
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "text/plain");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_set_hdr(req, "Retry-After", "1");
     return httpd_resp_sendstr(req, message);
@@ -344,10 +349,121 @@ esp_err_t http_guard_init(void)
     return ESP_OK;
 }
 
+void http_guard_set_password(const char *password)
+{
+    taskENTER_CRITICAL(&s_password_lock);
+    strlcpy(s_password, password != NULL ? password : "", sizeof(s_password));
+    taskEXIT_CRITICAL(&s_password_lock);
+}
+
+bool http_guard_password_set(void)
+{
+    taskENTER_CRITICAL(&s_password_lock);
+    const bool set = s_password[0] != '\0';
+    taskEXIT_CRITICAL(&s_password_lock);
+    return set;
+}
+
+static bool header_value(httpd_req_t *req, const char *name, char *out, size_t out_len)
+{
+    const esp_err_t err = httpd_req_get_hdr_value_str(req, name, out, out_len);
+    /* A truncated value still starts with what is checked here. */
+    return err == ESP_OK || err == ESP_ERR_HTTPD_RESULT_TRUNC;
+}
+
+/* Basic auth against the configured password; the user name is ignored. */
+static bool auth_ok(httpd_req_t *req)
+{
+    char password[APP_WEB_PASSWORD_MAX_LEN];
+    taskENTER_CRITICAL(&s_password_lock);
+    memcpy(password, s_password, sizeof(password));
+    taskEXIT_CRITICAL(&s_password_lock);
+    if (password[0] == '\0') {
+        return true;
+    }
+    bool ok = false;
+    char header[192];
+    unsigned char decoded[160];
+    size_t decoded_len = 0;
+    if (httpd_req_get_hdr_value_str(req, "Authorization", header, sizeof(header)) == ESP_OK &&
+        strncasecmp(header, "Basic ", 6) == 0 &&
+        mbedtls_base64_decode(decoded, sizeof(decoded) - 1, &decoded_len, (const unsigned char *)header + 6,
+            strlen(header + 6)) == 0) {
+        decoded[decoded_len] = '\0';
+        const char *colon = strchr((const char *)decoded, ':');
+        if (colon != NULL) {
+            const char *given = colon + 1;
+            const size_t given_len = strlen(given);
+            const size_t want_len = strlen(password);
+            /* Constant time over the stored password's length. */
+            unsigned diff = given_len != want_len;
+            for (size_t i = 0; i < want_len; i++) {
+                diff |= (unsigned)(unsigned char)password[i] ^ (unsigned)(unsigned char)(i < given_len ? given[i] : 0);
+            }
+            ok = diff == 0;
+        }
+    }
+    memset(password, 0, sizeof(password));
+    memset(header, 0, sizeof(header));
+    memset(decoded, 0, sizeof(decoded));
+    return ok;
+}
+
+/* Writes must come from the editor itself: a browser always names the page
+ * that sent a request in Origin (or Referer), so a foreign web page cannot
+ * flash firmware or change settings in the background. Clients without
+ * either header (curl, scripts) are not browsers and are let through. */
+static bool origin_ok(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET || req->method == HTTP_HEAD) {
+        return true;
+    }
+    char origin[128];
+    if (!header_value(req, "Origin", origin, sizeof(origin)) && !header_value(req, "Referer", origin, sizeof(origin))) {
+        return true;
+    }
+    char host[96];
+    if (!header_value(req, "Host", host, sizeof(host))) {
+        return false;
+    }
+    const char *authority = strstr(origin, "://");
+    if (authority == NULL) {
+        return false;
+    }
+    authority += 3;
+    const size_t len = strcspn(authority, "/");
+    return len == strlen(host) && strncasecmp(authority, host, len) == 0;
+}
+
+static esp_err_t send_unauthorized(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"BETTA Panel\", charset=\"UTF-8\"");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(req, "Authentication required");
+}
+
 esp_err_t http_guard_handle(httpd_req_t *req, http_guard_handler_t next_handler)
 {
     if (req == NULL || next_handler == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!auth_ok(req)) {
+        if (httpd_req_get_hdr_value_len(req, "Authorization") > 0) {
+            /* A wrong password (not just the browser's first try): slow
+             * down guessing. */
+            vTaskDelay(pdMS_TO_TICKS(400));
+            log_request_result(req, ESP_ERR_INVALID_STATE, 0, "wrong password");
+        }
+        return send_unauthorized(req);
+    }
+    if (!origin_ok(req)) {
+        log_request_result(req, ESP_ERR_INVALID_STATE, 0, "cross-origin write rejected");
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "Cross-origin request rejected");
     }
 
     esp_err_t init_err = http_guard_init();

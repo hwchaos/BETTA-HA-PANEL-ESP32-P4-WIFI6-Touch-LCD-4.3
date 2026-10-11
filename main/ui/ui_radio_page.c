@@ -48,7 +48,7 @@
 #include "ui/ui_radio_stations.h"
 #include "ui/ui_slider_touch.h"
 #include "util/log_tags.h"
-#include "xiaozhi/xiaozhi_audio.h"
+#include "audio/panel_audio.h"
 
 #define TAG TAG_RADIO
 
@@ -80,26 +80,6 @@
  * of the content box in spirit, not in code: the header is a fixed strip, the
  * grid takes what is left and the footer is pinned to the bottom edge.
  */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define RADIO_MARGIN 8
-#define RADIO_GAP 6
-#define RADIO_HEADER_H 44
-#define RADIO_FOOTER_H 50
-#define RADIO_TILE_H 58
-#define RADIO_TILE_RADIUS 10
-#define RADIO_HEADER_FONT APP_FONT_TEXT_16
-#define RADIO_STATE_FONT APP_FONT_TEXT_12
-#define RADIO_TILE_FONT APP_FONT_TEXT_14
-#define RADIO_BUTTON_FONT APP_FONT_TEXT_14
-#define RADIO_SLIDER_W 150
-#define RADIO_STOP_W 96
-/* Widths of the header columns, as insets from the strip width. */
-#define RADIO_NOW_W_INSET 210
-#define RADIO_STATE_X_INSET 205
-#define RADIO_STATE_W 110
-#define RADIO_ENTITY_W 96
-#define RADIO_PICK_ROW_H 40
-#else
 #define RADIO_MARGIN 10
 #define RADIO_GAP 8
 #define RADIO_HEADER_H 54
@@ -117,7 +97,6 @@
 #define RADIO_STATE_W 140
 #define RADIO_ENTITY_W 240
 #define RADIO_PICK_ROW_H 56
-#endif
 
 /* Player states that mean "nothing is playing right now". */
 #define RADIO_STATE_IDLE "idle"
@@ -820,7 +799,7 @@ static void radio_send_volume(radio_ctx_t *ctx, int pct)
     if (radio_panel_mode(ctx)) {
         /* The panel speaker volume is stored by the audio backend, so it
          * survives a reboot on its own. */
-        (void)xz_audio_set_volume(volume);
+        (void)panel_audio_set_volume(volume);
         return;
     }
 
@@ -1054,7 +1033,7 @@ static void radio_pick_apply(radio_ctx_t *ctx, bool panel, const char *entity)
 
     if (panel) {
         ctx->config.player_entity_id[0] = '\0';
-        ctx->volume_pct = radio_clamp_int(xz_audio_get_volume(), 0, 100);
+        ctx->volume_pct = radio_clamp_int(panel_audio_get_volume(), 0, 100);
     } else {
         snprintf(ctx->player, sizeof(ctx->player), "%s", entity);
         /* A tap is an explicit decision and has to survive radio_resolve_player(),
@@ -1406,7 +1385,7 @@ esp_err_t ui_radio_page_create(
      * overrides it, because the WebUI cannot know about the built-in speaker. */
     ctx->panel_mode = ctx->config.use_panel_speaker;
     radio_prefs_load(ctx);
-    ctx->volume_pct = ctx->panel_mode ? radio_clamp_int(xz_audio_get_volume(), 0, 100) : 50;
+    ctx->volume_pct = ctx->panel_mode ? radio_clamp_int(panel_audio_get_volume(), 0, 100) : 50;
     radio_show_state(ctx, "radio.stopped", "Stopped", false);
 
     /* Root: fills the content box exactly, no border, no padding, no scroll. */
@@ -1661,7 +1640,7 @@ void ui_radio_page_apply_all_states(ui_radio_page_instance_t *instance)
     if (radio_panel_mode(ctx)) {
         radio_poll_control(ctx);
         if (!ctx->volume_dragging) {
-            ctx->volume_pct = radio_clamp_int(xz_audio_get_volume(), 0, 100);
+            ctx->volume_pct = radio_clamp_int(panel_audio_get_volume(), 0, 100);
         }
         radio_panel_sync(ctx, true);
         return;

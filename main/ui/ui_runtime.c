@@ -1284,7 +1284,7 @@ static void ui_runtime_radio_config_from_json(cJSON *page_json, const char *page
     }
 }
 
-/* A full page table used to drop guaranteed app pages (Xiaozhi, cameras, radio)
+/* A full page table used to drop guaranteed app pages (cameras, radio)
  * without leaving a single trace, which made the missing top-bar radio chip
  * impossible to diagnose from the logs. Report it loudly instead. */
 static void ui_runtime_warn_page_table_full(const char *page_id)
@@ -1718,7 +1718,7 @@ static esp_err_t ui_runtime_apply_layout_locked(const char *layout_json)
         }
     }
 
-    /* Xiaozhi and cameras pages only exist when the user created them in the
+    /* Cameras pages only exist when the user created them in the
      * web editor; the bottom bar shows exactly the stored layout's pages. */
 
     /* The radio page is reached from the top-bar radio chip, so it gets no

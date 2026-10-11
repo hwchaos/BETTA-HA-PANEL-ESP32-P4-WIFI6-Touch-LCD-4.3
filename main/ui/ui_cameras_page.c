@@ -26,15 +26,9 @@
 #define CAM_CHIP_RADIUS 8
 #define CAM_CHIP_PAD 6
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define CAM_NAME_FONT APP_FONT_TEXT_14
-#define CAM_STATUS_FONT APP_FONT_TEXT_12
-#define CAM_EMPTY_FONT APP_FONT_TEXT_16
-#else
 #define CAM_NAME_FONT APP_FONT_TEXT_18
 #define CAM_STATUS_FONT APP_FONT_TEXT_16
 #define CAM_EMPTY_FONT APP_FONT_TEXT_18
-#endif
 
 typedef struct {
     bool active;

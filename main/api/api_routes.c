@@ -141,10 +141,6 @@ static esp_err_t guarded_api_debug_activity_get(httpd_req_t *req)
     return http_guard_handle(req, api_debug_activity_get_handler);
 }
 
-static esp_err_t guarded_api_debug_storage_get(httpd_req_t *req)
-{
-    return http_guard_handle(req, api_debug_storage_get_handler);
-}
 
 static esp_err_t guarded_api_light_entities_get(httpd_req_t *req)
 {
@@ -430,12 +426,6 @@ esp_err_t api_routes_register(httpd_handle_t server)
         .uri = "/api/debug/activity",
         .method = HTTP_GET,
         .handler = guarded_api_debug_activity_get,
-        .user_ctx = NULL,
-    };
-    httpd_uri_t get_debug_storage = {
-        .uri = "/api/debug/storage",
-        .method = HTTP_GET,
-        .handler = guarded_api_debug_storage_get,
         .user_ctx = NULL,
     };
     httpd_uri_t get_assist_pipelines = {
@@ -759,8 +749,6 @@ esp_err_t api_routes_register(httpd_handle_t server)
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_mdi_icons), "api_routes", "GET /api/mdi/icons");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_assist_pipelines), "api_routes", "GET /api/assist/pipelines");
-    ESP_RETURN_ON_ERROR(
-        httpd_register_uri_handler(server, &get_debug_storage), "api_routes", "GET /api/debug/storage");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_radar), "api_routes", "GET /api/radar");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_debug_activity), "api_routes", "GET /api/debug/activity");

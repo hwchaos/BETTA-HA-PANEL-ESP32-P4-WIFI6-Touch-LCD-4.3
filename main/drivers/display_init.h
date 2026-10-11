@@ -116,6 +116,7 @@ typedef struct {
     uint32_t max_pass_ms;    /* worst pass seen                                  */
     uint8_t last_dirty_pct;  /* screen area repainted by the newest pass, percent */
     uint8_t max_dirty_pct;   /* worst coverage seen                              */
+    uint64_t total_pass_us;  /* summed duration of all passes (render + flush)   */
 } display_render_stats_t;
 
 /* One notable pass (full repaint or slow pass), handed over from the LVGL

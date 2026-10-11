@@ -33,13 +33,8 @@ static char s_ws_headers[192] = {0};
 static char s_last_resolved_host[128] = {0};
 static char s_last_resolved_ip[64] = {0};
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define HA_WS_TASK_STACK 8192
-#define HA_WS_BUFFER_SIZE 8192
-#else
 #define HA_WS_TASK_STACK 12288
 #define HA_WS_BUFFER_SIZE 16384
-#endif
 #define HA_WS_CTRL_PING_INTERVAL_SEC 25
 #define HA_WS_CTRL_PINGPONG_TIMEOUT_SEC 15
 #define HA_WS_TCP_KEEPALIVE_IDLE_SEC 30

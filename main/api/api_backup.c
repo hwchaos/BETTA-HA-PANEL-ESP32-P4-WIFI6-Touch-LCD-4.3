@@ -33,7 +33,6 @@ static void set_headers(httpd_req_t *req, bool attachment)
 {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     if (attachment) {
         httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"betta-ha-panel-backup.json\"");
     }

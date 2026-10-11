@@ -1,31 +1,13 @@
 # SPDX-License-Identifier: LicenseRef-FNCL-1.1
 # Copyright (c) 2026 Cpt_Kirk
 
-# ---- Panel-variant-specific driver sources --------------------------------
-# The 4" (smart86) and 10.1" (nano) panels use different BSPs and different
-# touch controllers, so their display_init/touch_init implementations live
-# in separate source files.  Exactly one pair is compiled per build.
-if(CONFIG_APP_PANEL_VARIANT_10INCH_1280)
-    set(PANEL_DRIVER_SRCS
-        "drivers/display_init_panel10.c"
-        "drivers/touch_init_panel10.c"
-    )
-elseif(CONFIG_APP_PANEL_VARIANT_S3_480)
-    set(PANEL_DRIVER_SRCS
-        "drivers/display_init_panels3.c"
-        "drivers/touch_init_panels3.c"
-    )
-elseif(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
-    set(PANEL_DRIVER_SRCS
-        "drivers/display_init_panel7.c"
-        "drivers/touch_init_panel7.c"
-    )
-else()
-    set(PANEL_DRIVER_SRCS
-        "drivers/display_init_panel4.c"
-        "drivers/touch_init_panel4.c"
-    )
-endif()
+# ---- Display / touch drivers -----------------------------------------------
+# Both boards (4.3" and the 10.1" ETH kit) use the MIPI-DSI driver pair; the
+# board differences are #if branches inside them.
+set(PANEL_DRIVER_SRCS
+    "drivers/display_init_panel7.c"
+    "drivers/touch_init_panel7.c"
+)
 
 # Network link: Wi-Fi manager, or the Ethernet manager (same wifi_mgr.h API)
 # on the ESP32-P4-ETH kit.
@@ -35,7 +17,7 @@ else()
     set(NET_MGR_SRCS "net/wifi_mgr.c")
 endif()
 
-# Built-in MIPI-CSI camera (panel7 / Waveshare 7B only).
+# Optional OV5647 MIPI-CSI camera (CONFIG_APP_FEATURE_LOCAL_CAMERA).
 set(APP_LOCAL_CAMERA_SRCS "")
 if(CONFIG_APP_FEATURE_LOCAL_CAMERA)
     list(APPEND APP_LOCAL_CAMERA_SRCS
@@ -146,12 +128,12 @@ idf_component_register(
         "ui/theme/theme_fx.c"
         "ui/theme/theme_palette.c"
         "ui/theme/theme_store.c"
-        "camera/camera_store.c"
         ${APP_LOCAL_CAMERA_SRCS}
+        "camera/camera_store.c"
         "util/json_util.c"
         "util/ringbuf.c"
         "radio/panel_radio.c"
-        "xiaozhi/xiaozhi_audio.c"
+        "audio/panel_audio.c"
         "assist/panel_assist.c"
         "ui/ui_assist.c"
         "ui/ui_geometry.c"
@@ -173,7 +155,7 @@ idf_component_register(
         "ui"
         "ui/theme"
         "util"
-        "xiaozhi"
+        "audio"
     REQUIRES
         nvs_flash
         bootloader_support
@@ -220,31 +202,20 @@ if(CONFIG_APP_FEATURE_LOCAL_CAMERA)
     idf_component_optional_requires(PUBLIC esp_video)
 endif()
 
-# ESP-Hosted (P4 + C6 coprocessor) is only used by panel4 / panel10.
-# panels3 (ESP32-S3) has native Wi-Fi and must not pull in the hosted stack.
-if(NOT CONFIG_APP_PANEL_VARIANT_S3_480 AND NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+# ESP-Hosted (P4 + C6 coprocessor) provides Wi-Fi on the 4.3" board; the
+# ETH kit has no C6.
+if(NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
     idf_component_optional_requires(PRIVATE esp_wifi_remote esp_hosted)
 endif()
 
-# panels3 has no upstream ESP-BSP package: provide a minimal local shim of
-# `bsp/display.h` so files including it (e.g. api_settings.c, api_ota.c)
-# compile. The corresponding stub implementations live in
-# drivers/display_init_panels3.c.
-if(CONFIG_APP_PANEL_VARIANT_S3_480)
-    target_include_directories(${COMPONENT_LIB} PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/drivers/panels3_bsp_shim"
-    )
-endif()
-
-# The ESP32-P4-ETH kit builds the 7B variant on top of the Nano BSP.
+# The ESP32-P4-ETH kit uses the Nano BSP behind the driver's BSP header.
 if(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
     target_include_directories(${COMPONENT_LIB} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/drivers/p4eth_bsp_shim"
     )
 endif()
 
-# The 4.3" board builds the 7B variant; this shim redirects the 7B BSP header
-# to the 4.3" BSP.
+# The 4.3" board: this shim redirects the driver's BSP header to the 4.3" BSP.
 if(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
     target_include_directories(${COMPONENT_LIB} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/drivers/panel43_bsp_shim"
@@ -258,7 +229,7 @@ if(CONFIG_LV_USE_TINY_TTF)
 endif()
 
 set(APP_HAVE_HOSTED_C6_FW_IMAGE 0)
-if(NOT CONFIG_APP_PANEL_VARIANT_S3_480 AND NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+if(NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
 set(HOSTED_C6_FW_BIN "")
 set(HOSTED_C6_FW_EMBED_DIR "${CMAKE_CURRENT_BINARY_DIR}/hosted_c6_fw")
 set(HOSTED_C6_FW_BIN_RELEASE_GENERIC "${CMAKE_SOURCE_DIR}/release/network_adapter_esp32c6.bin")
@@ -313,7 +284,7 @@ else()
         "No ESP-Hosted C6 firmware image found in release/. "
         "Runtime C6 auto-update will be skipped until a release image is provided.")
 endif()
-endif() # NOT CONFIG_APP_PANEL_VARIANT_S3_480
+endif() # NOT CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE APP_HAVE_HOSTED_C6_FW_IMAGE=${APP_HAVE_HOSTED_C6_FW_IMAGE})
 
@@ -542,7 +513,7 @@ target_compile_definitions(
 
 set(APP_UI_WEATHER_LOTTIE_ASSETS 0)
 set(APP_UI_BETTA_LOTTIE_ASSET 0)
-if(CONFIG_LV_USE_LOTTIE AND NOT CONFIG_APP_PANEL_VARIANT_S3_480)
+if(CONFIG_LV_USE_LOTTIE)
     set(APP_UI_WEATHER_LOTTIE_ASSETS 1)
     set(WEATHER_LOTTIE_DIR "${CMAKE_CURRENT_LIST_DIR}/ui/weather_icons/fill/lottie")
     set(WEATHER_LOTTIE_EMBEDS
@@ -599,9 +570,3 @@ if(TARGET __idf_lvgl__lvgl)
     target_compile_options(__idf_lvgl__lvgl PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-type-limits>)
 endif()
 
-# Xtensa GCC can ICE in the ESP-IDF RGB LCD driver on the S3/panels3 build
-# during register allocation. Keep the workaround scoped to that upstream
-# component and this panel variant.
-if(CONFIG_APP_PANEL_VARIANT_S3_480 AND TARGET __idf_esp_lcd)
-    target_compile_options(__idf_esp_lcd PRIVATE -O1)
-endif()

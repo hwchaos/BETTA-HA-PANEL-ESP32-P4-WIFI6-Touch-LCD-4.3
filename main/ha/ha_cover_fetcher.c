@@ -53,17 +53,6 @@
 #define COVER_MIN_W 16
 #define COVER_MIN_H 16
 #define COVER_HTTP_WAIT_LOG_MS 5000
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define COVER_HTTP_MIN_INTERNAL_FREE_BYTES (12U * 1024U)
-#define COVER_HTTP_MIN_INTERNAL_LARGEST_BYTES (8U * 1024U)
-#define COVER_HTTP_PRESSURE_HOLD_MS 2000
-#define COVER_HTTP_MAX_ATTEMPTS 6
-#define COVER_HTTP_RETRY_DELAY_MS 2500
-#define COVER_HTTP_BUFFER_SIZE 512
-#define COVER_HTTP_TX_BUFFER_SIZE 768
-#define COVER_HTTP_READ_CHUNK 512
-#define COVER_SINK_INITIAL_CAP (8U * 1024U)
-#else
 #define COVER_HTTP_MIN_INTERNAL_FREE_BYTES (14U * 1024U)
 #define COVER_HTTP_MIN_INTERNAL_LARGEST_BYTES (8U * 1024U)
 #define COVER_HTTP_PRESSURE_HOLD_MS 1000
@@ -73,7 +62,6 @@
 #define COVER_HTTP_TX_BUFFER_SIZE 1024
 #define COVER_HTTP_READ_CHUNK 1024
 #define COVER_SINK_INITIAL_CAP (32U * 1024U)
-#endif
 
 typedef struct {
     char url[512];         /* proxy path or absolute URL */
@@ -1748,9 +1736,6 @@ static bool cover_decode(const uint8_t *jpg, size_t len, int target_w, int targe
     /* TJpgDec needs a scratch "pool" of ~3.5 KiB for its work tables. */
     enum { TJPGD_POOL_SZ = 3800 };
     void *pool = NULL;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480) && defined(CONFIG_SPIRAM) && CONFIG_SPIRAM
-    pool = heap_caps_malloc(TJPGD_POOL_SZ, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#endif
     if (pool == NULL) {
         pool = heap_caps_malloc(TJPGD_POOL_SZ, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     }
@@ -2099,14 +2084,8 @@ esp_err_t ha_cover_fetcher_init(void)
     /* Low priority (below HA WS RX task). Run on core 1 to keep core 0
      * for the HA WS / LVGL path. */
     BaseType_t ok;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480) && CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-    ok = xTaskCreatePinnedToCoreWithCaps(
-        cover_task, "ha_cover", APP_HA_COVER_TASK_STACK, NULL, APP_HA_COVER_TASK_PRIO, &s_task, 1,
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#else
     ok = xTaskCreatePinnedToCore(
         cover_task, "ha_cover", APP_HA_COVER_TASK_STACK, NULL, APP_HA_COVER_TASK_PRIO, &s_task, 1);
-#endif
     if (ok != pdPASS) return ESP_FAIL;
     return ESP_OK;
 }

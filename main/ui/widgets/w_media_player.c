@@ -675,9 +675,6 @@ static void mp_request_cover(w_mp_ctx_t *ctx, const char *url)
     snprintf(ctx->cover_url, sizeof(ctx->cover_url), "%s", url);
     lv_coord_t tgt = ctx->cover_img ? lv_obj_get_width(ctx->cover_img) : 96;
     if (tgt < 48) tgt = 48;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    if (tgt > 128) tgt = 128;
-#endif
     ctx->cover_request_inflight = true;
     if (ha_cover_fetcher_request(url, tgt, tgt, mp_cover_cb, ctx) != ESP_OK) {
         ctx->cover_request_inflight = false;

@@ -14,7 +14,7 @@
 
 #include "ha/ha_client.h"
 #include "radio/panel_radio.h"
-#include "xiaozhi/xiaozhi_audio.h"
+#include "audio/panel_audio.h"
 
 static const char *TAG = "assist";
 
@@ -152,7 +152,7 @@ static void assist_session(void)
     xEventGroupClearBits(s_events, EV_HANDLER | EV_STT_DONE | EV_TTS | EV_RUN_END);
     assist_set_state(PANEL_ASSIST_LISTENING);
 
-    int16_t *stereo = heap_caps_malloc(ASSIST_FRAME_SAMPLES * XZ_MIC_CHANNELS * sizeof(int16_t), MALLOC_CAP_DEFAULT);
+    int16_t *stereo = heap_caps_malloc(ASSIST_FRAME_SAMPLES * PANEL_AUDIO_MIC_CHANNELS * sizeof(int16_t), MALLOC_CAP_DEFAULT);
     int16_t *prebuf = heap_caps_malloc(ASSIST_PREBUF_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     uint8_t *frame = heap_caps_malloc(1 + ASSIST_FRAME_SAMPLES * sizeof(int16_t), MALLOC_CAP_DEFAULT);
     size_t prebuf_used = 0;
@@ -166,12 +166,12 @@ static void assist_session(void)
         assist_set_text(s_status.error, sizeof(s_status.error), "ha-offline");
         goto fail;
     }
-    if (xz_audio_open_mic() != ESP_OK) {
+    if (panel_audio_open_mic() != ESP_OK) {
         assist_set_text(s_status.error, sizeof(s_status.error), "mic");
         goto fail;
     }
     mic_open = true;
-    (void)xz_audio_set_mic_gain((float)cfg.mic_gain);
+    (void)panel_audio_set_mic_gain((float)cfg.mic_gain);
 
     /* ---- record ---- */
     const int64_t deadline = esp_timer_get_time() + (int64_t)cfg.max_listen_sec * 1000000;
@@ -186,14 +186,14 @@ static void assist_session(void)
         if ((bits & (EV_STOP | EV_STT_DONE)) || esp_timer_get_time() > deadline) {
             break;
         }
-        int frames = xz_audio_read(stereo, ASSIST_FRAME_SAMPLES);
+        int frames = panel_audio_read(stereo, ASSIST_FRAME_SAMPLES);
         if (frames <= 0) {
             vTaskDelay(pdMS_TO_TICKS(5));
             continue;
         }
         for (int i = 0; i < frames; i++) {
-            int32_t l = stereo[i * XZ_MIC_CHANNELS + 0];
-            int32_t r = stereo[i * XZ_MIC_CHANNELS + 1];
+            int32_t l = stereo[i * PANEL_AUDIO_MIC_CHANNELS + 0];
+            int32_t r = stereo[i * PANEL_AUDIO_MIC_CHANNELS + 1];
             mono[i] = (int16_t)((l + r) >> 1);
         }
         if (s_handler_id < 0) {
@@ -217,7 +217,7 @@ static void assist_session(void)
         }
         (void)assist_send_frame(frame, mono, (size_t)frames);
     }
-    xz_audio_close_mic();
+    panel_audio_close_mic();
     mic_open = false;
     if (cancelled) {
         goto cancel;
@@ -287,7 +287,7 @@ cancel:
 fail:
     ha_client_assist_detach();
     if (mic_open) {
-        xz_audio_close_mic();
+        panel_audio_close_mic();
     }
     assist_set_state(PANEL_ASSIST_ERROR);
 

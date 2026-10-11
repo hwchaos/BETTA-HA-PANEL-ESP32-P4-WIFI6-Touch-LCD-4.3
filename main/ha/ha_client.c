@@ -122,11 +122,7 @@ typedef enum {
  *       gate opens automatically (no cooldown is armed in that case,
  *       which is correct: no big payload was processed).
  */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define HA_WS_HEAVY_MIN_GAP_MS 1200
-#else
 #define HA_WS_HEAVY_MIN_GAP_MS 400
-#endif
 
 /* If a HEAVY WS request (weather forecast, energy prefs/stats, light discovery
  * registry phase, call_service return_response) stays in flight without a
@@ -382,11 +378,7 @@ static inline void ha_client_ws_send_gate_mark_heavy_done_locked(int64_t now_ms)
  * can render today's summary row plus up to 5 forecast days when the tile is
  * tall enough; shorter tiles still reduce the visible row count dynamically
  * in the widget renderer. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
 static const int HA_WEATHER_COMPACT_FORECAST_MAX_ITEMS = 6;
-#else
-static const int HA_WEATHER_COMPACT_FORECAST_MAX_ITEMS = 6;
-#endif
 static const int64_t HA_WS_RESTART_INTERVAL_MS = 12000;
 static const int64_t HA_WS_RESTART_INTERVAL_MAX_MS = 30000;
 static const int64_t HA_WS_RESTART_JITTER_MS = 1000;
@@ -431,16 +423,8 @@ static const TickType_t HA_CLIENT_TASK_DELAY_TICKS = pdMS_TO_TICKS(30);
  * todo lists push the tail of the state burst past that window and cause
  * TLS BAD_INPUT_DATA collisions with the first heavy send.  4 s gives
  * comfortable margin for typical 6-10 entity layouts. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-static const int64_t HA_WS_WEATHER_PRIORITY_GRACE_MS = 8000;
-#else
 static const int64_t HA_WS_WEATHER_PRIORITY_GRACE_MS = 4000;
-#endif
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-static const int64_t HA_WEATHER_FORECAST_LAYOUT_SETTLE_MS = 2500;
-#else
 static const int64_t HA_WEATHER_FORECAST_LAYOUT_SETTLE_MS = 0;
-#endif
 static const int HA_WS_TLS_ERR_BAD_INPUT_DATA = 0x7100;
 static const int64_t HA_WS_GET_STATES_MIN_SESSION_MS = 3000;
 static const int64_t HA_WS_GET_STATES_POST_SUBSCRIBE_DELAY_MS = 1200;
@@ -467,19 +451,9 @@ static const int64_t HA_WS_ENTITIES_SUBSCRIBE_STEP_DELAY_MS = 150;
  * a slow (but healthy) HA no longer produces a permanent false alarm in
  * the web editor. */
 static const int64_t HA_WS_ENTITIES_SUBSCRIBE_COMPLETION_TIMEOUT_MS = 12000;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-static const int64_t HA_LIGHT_DISCOVERY_WS_STABLE_DELAY_MS = 30000;
-static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_STABLE_DELAY_MS = 8000;
-/* Lowered from 1000 ms: a large domain (light: 165 entities) needs 11 template
- * pages and the page step delay dominated the total picker load time (~12 s).
- * The requests are plain HTTP on one connection and stay sequential, so ~350 ms
- * still leaves the WebSocket plenty of airtime. */
-static const int64_t HA_LIGHT_DISCOVERY_PAGE_STEP_DELAY_MS = 350;
-#else
 static const int64_t HA_LIGHT_DISCOVERY_WS_STABLE_DELAY_MS = 45000;
 static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_STABLE_DELAY_MS = 12000;
 static const int64_t HA_LIGHT_DISCOVERY_PAGE_STEP_DELAY_MS = 700;
-#endif
 static const int64_t HA_LIGHT_DISCOVERY_RETRY_DELAY_MS = 6000;
 static const int64_t HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS = 5000;
 /* The "discovery waiting" line repeats for as long as the wait lasts, which on
@@ -489,12 +463,6 @@ static const int64_t HA_LIGHT_DISCOVERY_WAIT_LOG_MAX_INTERVAL_MS = 60000;
 /* Written and read only by the ha_client task loop, so it needs no locking.
  * It is re-armed whenever the client state is reset (last_wait_log == 0). */
 static int64_t s_light_discovery_wait_log_backoff_ms = HA_LIGHT_DISCOVERY_WAIT_LOG_INTERVAL_MS;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_FREE_BYTES = (96U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_LARGEST_BYTES = (48U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_FREE_BYTES = (48U * 1024U);
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_LARGEST_BYTES = (20U * 1024U);
-#else
 static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_FREE_BYTES = (180U * 1024U);
 static const size_t HA_LIGHT_DISCOVERY_MIN_INTERNAL_LARGEST_BYTES = (80U * 1024U);
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_FREE_BYTES = (64U * 1024U);
@@ -506,20 +474,11 @@ static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_FREE_BYTES = (64U *
  * around 31 KiB: the entity picker then waited forever with
  * "reason=internal_block_priority". */
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_MIN_INTERNAL_LARGEST_BYTES = (24U * 1024U);
-#endif
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_PAYLOAD_FALLBACK_CAP = 4096U;
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_PAYLOAD_MAX_BYTES = 4096U;
-static const int HA_LIGHT_DISCOVERY_HTTP_BUFFER_SIZE = 1024;
-static const int HA_LIGHT_DISCOVERY_HTTP_TX_BUFFER_SIZE = 768;
-static const bool HA_HTTP_KEEP_ALIVE = false;
-#else
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_PAYLOAD_FALLBACK_CAP = 8192U;
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_PAYLOAD_MAX_BYTES = 16384U;
 static const int HA_LIGHT_DISCOVERY_HTTP_BUFFER_SIZE = 2048;
 static const int HA_LIGHT_DISCOVERY_HTTP_TX_BUFFER_SIZE = 1024;
 static const bool HA_HTTP_KEEP_ALIVE = true;
-#endif
 /* User-priority escalation: when the user is actively waiting for an entity picker
  * result, the standard heap thresholds above can leave the request stuck for minutes
  * because periodic background work (todo.get_items, energy sync, ping) keeps internal
@@ -527,30 +486,12 @@ static const bool HA_HTTP_KEEP_ALIVE = true;
  * the queued discovery can run. The S3 480 panel has far less internal RAM than
  * the P4 boards and can idle around 27-30 KiB internal free with a ~9 KiB largest
  * block while still having enough PSRAM for the small template-page request. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_WAIT_ESCALATE_MS = 3000;
-/* 24 KiB was unreachable while a large light discovery is cached: the panel then
- * idles around 22 KiB internal free and refreshes stalled with
- * "reason=internal_heap_priority" until unrelated background work freed memory.
- * The discovery item caches live in PSRAM; the template page itself only needs the
- * 1 KiB HTTP rx buffer, the 768 B tx buffer and a small JSON parse tree, so 18 KiB
- * of internal free space is ample. */
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_FREE_BYTES = (18U * 1024U);
-/* The S3 480 panel settles on a ~7.5 KiB largest internal block once the HA
- * WebSocket and the UI are up, which kept the template page permanently deferred
- * ("reason=internal_block_priority") and left the entity picker pending forever.
- * The template page itself only needs small internal buffers: the response body is
- * allocated from PSRAM (capped at 4 KiB) and the HTTP rx/tx buffers are 1 KiB/768 B,
- * so 6 KiB of contiguous internal heap plus the 18 KiB free floor above is enough. */
-static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_LARGEST_BYTES = (6U * 1024U);
-#else
 static const int64_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_WAIT_ESCALATE_MS = 8000;
 /* Last-resort floor once the user has been waiting for the picker: barely above
  * what the request itself allocates (2 KiB + 1 KiB HTTP buffers), so the picker
  * always finishes instead of sitting in "internal_block_priority" forever. */
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_FREE_BYTES = (40U * 1024U);
 static const size_t HA_LIGHT_DISCOVERY_TEMPLATE_USER_MIN_INTERNAL_LARGEST_BYTES = (8U * 1024U);
-#endif
 /* Internal heap on ESP32-P4 can be low in normal operation due to DMA/internal reservations.
    Tune thresholds to avoid permanent "protect" on healthy WS-only idle. */
 static const size_t HA_BG_HEAP_PRESSURE_BYTES = (12U * 1024U);
@@ -5004,11 +4945,7 @@ static esp_err_t ha_client_send_energy_prefs_ws(uint32_t *out_req_id)
     return err;
 }
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define HA_ENERGY_STATS_BATCH_SIZE 1U
-#else
 #define HA_ENERGY_STATS_BATCH_SIZE 2U
-#endif
 /* Inter-batch delay.  Purpose is to relieve pressure on the mbedTLS stack
  * on the ESP: each batch is a WSS request/response with a large JSON
  * payload, which spikes heap + the TLS record decoder.  Pausing between
@@ -5016,11 +4953,7 @@ static esp_err_t ha_client_send_energy_prefs_ws(uint32_t *out_req_id)
  * before the next roundtrip starts, avoiding -0x7100-class TLS errors.
  * 400 ms is a solid compromise vs the original 1000 ms: still gives mbedTLS
  * room to breathe while cutting ~2.4 s off a typical 4-batch sync. */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define HA_ENERGY_STATS_BATCH_DELAY_MS 800U
-#else
 #define HA_ENERGY_STATS_BATCH_DELAY_MS 400U
-#endif
 
 static int64_t s_energy_last_sync_ms;
 
@@ -8264,15 +8197,7 @@ esp_err_t ha_client_start(const ha_client_config_t *cfg)
     }
 
     BaseType_t created = pdFAIL;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480) && CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM && CONFIG_FREERTOS_NUMBER_OF_CORES > 1
-    created = xTaskCreatePinnedToCoreWithCaps(
-        ha_client_task, "ha_client", APP_HA_TASK_STACK, NULL, APP_HA_TASK_PRIO, &s_client.task_handle, 0,
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#elif defined(CONFIG_APP_PANEL_VARIANT_S3_480) && CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-    created = xTaskCreateWithCaps(
-        ha_client_task, "ha_client", APP_HA_TASK_STACK, NULL, APP_HA_TASK_PRIO, &s_client.task_handle,
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#elif CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
     created = xTaskCreatePinnedToCore(
         ha_client_task, "ha_client", APP_HA_TASK_STACK, NULL, APP_HA_TASK_PRIO, &s_client.task_handle, 0);
 #else
@@ -8315,11 +8240,7 @@ void ha_client_stop(void)
         return;
     }
     if (s_client.task_handle != NULL) {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480) && CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-        vTaskDeleteWithCaps(s_client.task_handle);
-#else
         vTaskDelete(s_client.task_handle);
-#endif
         s_client.task_handle = NULL;
     }
     ha_ws_stop();

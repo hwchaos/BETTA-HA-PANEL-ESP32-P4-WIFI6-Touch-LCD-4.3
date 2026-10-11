@@ -3,47 +3,25 @@
     "cmakeMinimumRequired": { "major": 3, "subMajor": 21, "patch": 0 },
     "configurePresets": [
         {
-            "name": "panel4",
-            "displayName": "Panel 4\" 720x720 (smart86 base)",
-            "description": "Build for the original 4-inch 720x720 round panel.",
+            "name": "panel43",
+            "displayName": "Waveshare ESP32-P4-WIFI6-Touch-LCD-4.3",
+            "description": "4.3\" 480x800 MIPI-DSI (used in landscape), Wi-Fi through the ESP32-C6.",
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build-panel4",
+            "binaryDir": "${sourceDir}/build-panel43",
             "cacheVariables": {
-                "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.defaults.panel4",
-                "SDKCONFIG": "${sourceDir}/sdkconfig.panel4"
+                "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.defaults.panel43",
+                "SDKCONFIG": "${sourceDir}/sdkconfig.panel43"
             }
         },
         {
-            "name": "panel10",
-            "displayName": "Panel 10.1\" 1280x800 (betta large)",
-            "description": "Build for the 10.1-inch 1280x800 MIPI-DSI panel.",
+            "name": "p4eth101",
+            "displayName": "Waveshare ESP32-P4-POE-ETH-KIT-B (10.1\")",
+            "description": "10.1\" 800x1280 MIPI-DSI (used in landscape), Ethernet/PoE, ESPHome-compatible flash layout.",
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build-panel10",
+            "binaryDir": "${sourceDir}/build-p4eth",
             "cacheVariables": {
-                "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.defaults.panel10",
-                "SDKCONFIG": "${sourceDir}/sdkconfig.panel10"
-            }
-        },
-        {
-            "name": "panel7",
-            "displayName": "Panel 7\" 1024x600 (Waveshare 7B)",
-            "description": "Build for the Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024x600 MIPI-DSI).",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build-panel7",
-            "cacheVariables": {
-                "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.defaults.panel7",
-                "SDKCONFIG": "${sourceDir}/sdkconfig.panel7"
-            }
-        },
-        {
-            "name": "panels3",
-            "displayName": "Panel S3 4\" 480x480 (Guition CYD 4848S040)",
-            "description": "Build for the Guition CYD ESP32-S3 4848S040 (RGB ST7701S, native Wi-Fi).",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build-panels3",
-            "cacheVariables": {
-                "SDKCONFIG_DEFAULTS": "sdkconfig.defaults.s3;sdkconfig.defaults.panels3",
-                "SDKCONFIG": "${sourceDir}/sdkconfig.panels3"
+                "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.defaults.p4eth101",
+                "SDKCONFIG": "${sourceDir}/sdkconfig.p4eth101"
             }
         }
     ]

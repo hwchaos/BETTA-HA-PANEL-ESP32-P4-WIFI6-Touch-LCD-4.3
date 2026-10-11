@@ -120,27 +120,17 @@ typedef struct {
 
 static const light_tile_layout_t LIGHT_LAYOUT_COMPACT = {
     .card_pad = 12,
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    .title_bottom = -28,
-#else
     /* Keeps the 42 px icon clear of the title in short (150 px) COMPACT cards. */
     .title_bottom = -26,
-#endif
     .top_label_y = 0,
     .slider_side_margin = 14,
     .slider_height = 12,
     .slider_bottom = -10,
     .icon_top = 10,
     .icon_gap = 4,
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    .icon_bias_y = -2,
-    .title_font = APP_FONT_TEXT_14,
-    .top_font = APP_FONT_TEXT_14,
-#else
     .icon_bias_y = 0,
     .title_font = APP_FONT_TEXT_16,
     .top_font = APP_FONT_TEXT_16,
-#endif
 };
 
 static const light_tile_layout_t LIGHT_LAYOUT_S = {
@@ -187,29 +177,14 @@ static const light_tile_layout_t LIGHT_LAYOUT_L = {
 
 static lv_coord_t light_color_button_size_for_class(light_tile_class_t tile_class)
 {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    switch (tile_class) {
-        case LIGHT_TILE_CLASS_COMPACT:
-            return 36;
-        case LIGHT_TILE_CLASS_S:
-            return 38;
-        default:
-            return 42;
-    }
-#else
     (void)tile_class;
     return 42;
-#endif
 }
 
 static lv_coord_t light_slider_min_width_for_class(light_tile_class_t tile_class)
 {
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    return (tile_class == LIGHT_TILE_CLASS_COMPACT) ? 52 : 60;
-#else
     (void)tile_class;
     return 60;
-#endif
 }
 
 static lv_coord_t light_icon_bias_x_for_button_size(lv_coord_t button_size)

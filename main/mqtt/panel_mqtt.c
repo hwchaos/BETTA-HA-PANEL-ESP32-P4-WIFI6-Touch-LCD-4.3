@@ -636,18 +636,11 @@ static void panel_mqtt_event_handler(void *handler_args, esp_event_base_t base, 
 static void panel_mqtt_fill_device(cJSON *device)
 {
     cJSON_AddStringToObject(device, "name", "BETTA Panel");
+    cJSON_AddStringToObject(device, "manufacturer", "Waveshare");
 #if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
-    cJSON_AddStringToObject(device, "manufacturer", "Waveshare");
     cJSON_AddStringToObject(device, "model", "ESP32-P4-WIFI6-Touch-LCD-4.3");
-#elif defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
-    cJSON_AddStringToObject(device, "manufacturer", "Waveshare");
-    cJSON_AddStringToObject(device, "model", "ESP32-P4-WIFI6-Touch-LCD-7B");
-#elif defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    cJSON_AddStringToObject(device, "manufacturer", "Guition");
-    cJSON_AddStringToObject(device, "model", "ESP32-S3 4848S040");
 #else
-    cJSON_AddStringToObject(device, "manufacturer", "BETTA");
-    cJSON_AddStringToObject(device, "model", APP_NAME);
+    cJSON_AddStringToObject(device, "model", "ESP32-P4-POE-ETH-KIT-B 10.1\"");
 #endif
 }
 

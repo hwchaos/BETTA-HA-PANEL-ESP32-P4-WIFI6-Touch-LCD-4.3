@@ -121,6 +121,8 @@ static bool is_supported_page_type(const char *type)
     }
     return strcmp(type, "dashboard") == 0 || strcmp(type, "energy_dashboard") == 0 ||
            strcmp(type, "music_assistant") == 0 || strcmp(type, "radio") == 0 ||
+           /* "xiaozhi": removed assistant; still accepted so an old layout
+            * loads (the runtime drops the page) instead of being rejected. */
            strcmp(type, "xiaozhi") == 0 || strcmp(type, "cameras") == 0;
 }
 

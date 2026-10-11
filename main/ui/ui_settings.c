@@ -6,10 +6,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -27,7 +29,9 @@
 #include "ui/ui_pages.h"
 #include "ui/ui_screen_saver.h"
 #include "ui/theme/theme_default.h"
-#include "xiaozhi/xiaozhi_audio.h"
+#include "api/http_guard.h"
+#include "util/log_tags.h"
+#include "audio/panel_audio.h"
 #include "assist/panel_assist.h"
 #include "ui/ui_geometry.h"
 
@@ -206,6 +210,9 @@ static const struct {
     {"Restart urzadzenia",
      "Gerät neu starten",
      "Restart device"},
+    {"Usun haslo WWW",
+     "Web-Passwort entfernen",
+     "Remove web password"},
     {"Karta SD",
      "SD-Karte",
      "SD card"},
@@ -504,7 +511,7 @@ static void st_slider_release_cb(lv_event_t *event)
 
     switch (ctx->kind) {
     case SET_SL_VOLUME:
-        (void)xz_audio_set_volume(value);
+        (void)panel_audio_set_volume(value);
         break;
     case SET_SL_ACTIVE:
         s_cfg.display_brightness = (uint8_t)value;
@@ -923,14 +930,14 @@ static void st_build_screen(lv_obj_t *parent)
 static void st_beep_cb(lv_event_t *event)
 {
     LV_UNUSED(event);
-    (void)xz_audio_test_beep();
+    (void)panel_audio_test_beep();
 }
 
 static void st_build_audio(lv_obj_t *parent)
 {
     lv_obj_t *card = st_make_card(parent);
     st_card_title(card, st_tr("Glosnosc"));
-    st_add_slider_block(card, st_tr("Poziom glosnosci"), xz_audio_get_volume(), 100, SET_SL_VOLUME);
+    st_add_slider_block(card, st_tr("Poziom glosnosci"), panel_audio_get_volume(), 100, SET_SL_VOLUME);
 
     lv_obj_t *card2 = st_make_card(parent);
     st_card_title(card2, "Test");
@@ -1037,6 +1044,26 @@ static void st_reset_display_cb(lv_event_t *event)
     st_rebuild_content();
 }
 
+/* Way back in when the web password is forgotten: whoever stands at the
+ * panel may clear it. */
+static void st_clear_web_password_cb(lv_event_t *event)
+{
+    LV_UNUSED(event);
+    runtime_settings_t *settings = calloc(1, sizeof(*settings));
+    if (settings == NULL) {
+        return;
+    }
+    if (runtime_settings_load(settings) == ESP_OK) {
+        settings->web_password[0] = '\0';
+        if (runtime_settings_save(settings) == ESP_OK) {
+            http_guard_set_password(NULL);
+            ESP_LOGW(TAG_UI, "web password removed on the panel");
+        }
+    }
+    free(settings);
+    st_rebuild_content();
+}
+
 static void st_build_system(lv_obj_t *parent)
 {
     const esp_app_desc_t *desc = esp_app_get_description();
@@ -1102,6 +1129,12 @@ static void st_build_system(lv_obj_t *parent)
 
     lv_obj_t *restart = st_action_button(btn_row, st_tr("Restart urzadzenia"), lv_color_hex(APP_UI_COLOR_ERROR));
     lv_obj_add_event_cb(restart, st_restart_cb, LV_EVENT_CLICKED, NULL);
+
+    if (http_guard_password_set()) {
+        lv_obj_t *clear_pw =
+            st_action_button(btn_row, st_tr("Usun haslo WWW"), lv_color_hex(APP_UI_COLOR_NAV_BTN_BG_ACTIVE));
+        lv_obj_add_event_cb(clear_pw, st_clear_web_password_cb, LV_EVENT_CLICKED, NULL);
+    }
 }
 
 static void st_build_sd(lv_obj_t *parent)

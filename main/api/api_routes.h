@@ -14,7 +14,6 @@ esp_err_t api_layout_put_handler(httpd_req_t *req);
 esp_err_t api_entities_get_handler(httpd_req_t *req);
 esp_err_t api_mdi_icons_get_handler(httpd_req_t *req);
 esp_err_t api_assist_pipelines_get_handler(httpd_req_t *req);
-esp_err_t api_debug_storage_get_handler(httpd_req_t *req);
 esp_err_t api_radar_get_handler(httpd_req_t *req);
 esp_err_t api_debug_activity_get_handler(httpd_req_t *req);
 esp_err_t api_light_entities_get_handler(httpd_req_t *req);

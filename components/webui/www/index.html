@@ -96,7 +96,6 @@
             <div class="legacy-hidden">
               <button id="addPageBtn" type="button">+ Page</button>
               <button id="addEnergyPageBtn" type="button">+ Energy Page</button>
-              <button id="addXiaozhiPageBtn" type="button">+ Xiaozhi Page</button>
               <button id="addCamerasPageBtn" type="button">+ Cameras Page</button>
               <button id="addMusicPageBtn" type="button">+ Music Page</button>
               <button id="addRadioPageBtn" type="button">+ Radio Page</button>
@@ -821,32 +820,6 @@
           </div>
         </section>
 
-        <!-- Xiaozhi assistant removed from the firmware; kept hidden so the
-             settings code that still references these fields keeps working. -->
-        <section class="hidden">
-          <h2 id="settingsXiaozhiHeading">Xiaozhi AI</h2>
-          <div class="form">
-            <label class="row">
-              <input id="settingsXiaozhiEnabled" type="checkbox" />
-              <span id="settingsXiaozhiEnabledLabel">Enable Xiaozhi AI voice assistant</span>
-            </label>
-            <label><span id="settingsXiaozhiServerLabel">WebSocket URL</span>
-              <input id="settingsXiaozhiServer" type="text" placeholder="wss://api.tenclass.net/xiaozhi/v1/" maxlength="255" />
-            </label>
-            <label><span id="settingsXiaozhiOtaUrlLabel">Xiaozhi Cloud OTA URL (activation)</span>
-              <input id="settingsXiaozhiOtaUrl" type="text" placeholder="https://api.tenclass.net/xiaozhi/ota/" maxlength="255" />
-            </label>
-            <label><span id="settingsXiaozhiDeviceLabel">Device ID (optional)</span>
-              <input id="settingsXiaozhiDevice" type="text" placeholder="Leave empty to use the board MAC address" maxlength="63" />
-            </label>
-            <label><span id="settingsXiaozhiTokenLabel">Access Token</span>
-              <textarea id="settingsXiaozhiToken" placeholder="Leave empty to keep the stored token" maxlength="511"></textarea>
-            </label>
-            <div id="settingsXiaozhiInfo" class="meta"></div>
-          </div>
-        </section>
-
-
         <section>
           <h2 id="settingsLocalCamHeading">Built-in camera</h2>
           <div class="form">
@@ -1414,7 +1387,7 @@
           <h2 id="settingsOtaHeading">Firmware Update</h2>
           <div class="form">
             <label><span id="settingsOtaUrlLabel">OTA URL</span>
-              <input id="settingsOtaUrl" type="url" placeholder="https://example.com/betta-ha-panel-7b.ota.bin" maxlength="511" />
+              <input id="settingsOtaUrl" type="url" placeholder="https://example.com/betta-ha-panel-43.bin" maxlength="511" />
             </label>
             <div class="row">
               <button id="startOtaUrlBtn" class="btn small" type="button">Flash URL</button>
@@ -1505,6 +1478,23 @@
               <div id="sdFileList" class="sd-file-list"></div>
               <div id="sdWallpaperStore" class="meta"></div>
               <div id="settingsSdInfo" class="meta"></div>
+            </div>
+          </section>
+          <section id="settingsAccessSection" class="settings-subsection">
+            <h2 data-en="Access protection">Zugriffsschutz</h2>
+            <div class="form">
+              <label class="row">
+                <input id="settingsWebPwEnabled" type="checkbox" />
+                <span data-en="Password for the web editor and the API">Passwort für Web-Editor und API</span>
+              </label>
+              <label><span data-en="New password (empty = keep the current one)">Neues Passwort (leer = bisheriges behalten)</span>
+                <input id="settingsWebPw" type="password" maxlength="64" autocomplete="new-password" />
+              </label>
+              <div class="meta" data-en="The browser asks for it once; any user name works (e.g. admin). For curl: -u admin:&lt;password&gt;. Forgotten? On the panel: Settings → System → Remove web password.">Der Browser fragt einmal danach; der Benutzername ist beliebig (z.&nbsp;B. admin). Für curl: -u admin:&lt;Passwort&gt;. Vergessen? Am Panel: Einstellungen &rarr; System &rarr; Web-Passwort entfernen.</div>
+              <div class="row">
+                <button id="applyWebPwBtn" class="btn" type="button" data-en="Apply (no reboot)">Übernehmen (ohne Neustart)</button>
+              </div>
+              <div id="settingsWebPwInfo" class="meta"></div>
             </div>
           </section>
           <section id="settingsBackupSection" class="settings-subsection">

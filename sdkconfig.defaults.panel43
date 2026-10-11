@@ -1,11 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FNCL-1.1
 # Waveshare ESP32-P4-WIFI6-Touch-LCD-4.3 (480x800 MIPI-DSI ST7701, GT911)
-# Sub-variant of the 7B build.
 CONFIG_IDF_TARGET="esp32p4"
-CONFIG_APP_PANEL_VARIANT_7INCH_1024=y
-# CONFIG_APP_PANEL_VARIANT_4INCH_720 is not set
 CONFIG_APP_PANEL_BOARD_WAVESHARE_43=y
-# CONFIG_APP_FEATURE_LOCAL_CAMERA is not set
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_FREERTOS_ISR_STACKSIZE=6144
@@ -57,3 +53,18 @@ CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_CHECK_BOOT=y
 CONFIG_ESP_COREDUMP_LOGS=y
 CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=24
+
+# Flash in quad I/O (GD25Q256): ~19% more animation frames than DIO. The
+# bootloader switches the chip to QIO, so the first change needs a USB flash;
+# later OTA updates keep it.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+# CONFIG_ESPTOOLPY_FLASHMODE_DIO is not set
+
+# OTA rollback: a new image runs as "pending" and confirms itself once Wi-Fi is
+# up (main/diag/boot_guard.c); a restart before that boots the previous image.
+# Needs the bootloader, so the first switch is a USB flash.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Rollback makes the bootloader outgrow its 24 KB slot before the partition
+# table; warnings-only logging keeps it in.
+# CONFIG_BOOTLOADER_LOG_LEVEL_INFO is not set
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

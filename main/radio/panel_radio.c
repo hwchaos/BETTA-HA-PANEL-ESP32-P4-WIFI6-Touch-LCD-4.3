@@ -19,8 +19,8 @@
  * request and returns, the 3xx chasing lives in esp_http_client_perform(),
  * and half of the built-in stations answer 302 to their public URL.
  *
- * The speaker is borrowed from the voice path through xz_audio_acquire_output()
- * / xz_audio_release_output(), and the engine refuses to start while the
+ * The speaker is borrowed from the voice path through panel_audio_acquire_output()
+ * / panel_audio_release_output(), and the engine refuses to start while the
  * microphone is open (a voice session owns the I2S clock at that point). The
  * speaker runs mono, so the decoders' stereo output is averaged down before it
  * reaches the jitter buffer.
@@ -46,7 +46,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "xiaozhi_audio.h"
+#include "audio/panel_audio.h"
 
 #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
 #include "esp_crt_bundle.h"
@@ -1058,7 +1058,7 @@ static bool pr_pump(pr_stream_t *st, esp_audio_dec_handle_t dec)
  * so a network stall never becomes an audible click. */
 static void pr_play_loop(uint8_t *block)
 {
-    esp_codec_dev_handle_t speaker = xz_audio_get_speaker();
+    esp_codec_dev_handle_t speaker = panel_audio_get_speaker();
     const uint32_t generation = s_play_generation;
     bool started = false;
     bool starved = false;
@@ -1075,8 +1075,8 @@ static void pr_play_loop(uint8_t *block)
         s_pending_rate = 0;
         pr_unlock();
         if (rate != 0) {
-            if (rate != xz_audio_get_output_rate()) {
-                if (xz_audio_set_output_rate(rate) == ESP_OK) {
+            if (rate != panel_audio_get_output_rate()) {
+                if (panel_audio_set_output_rate(rate) == ESP_OK) {
                     pr_lock();
                     if (s_generation == generation) {
                         s_rate = rate;
@@ -1196,7 +1196,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
     }
     st.generation = generation;
 
-    const esp_err_t out_err = xz_audio_acquire_output(PR_DEFAULT_RATE);
+    const esp_err_t out_err = panel_audio_acquire_output(PR_DEFAULT_RATE);
     if (out_err != ESP_OK) {
         ESP_LOGW(PR_TAG, "speaker is not available (%s)", esp_err_to_name(out_err));
         pr_free_buffers(&st);
@@ -1437,7 +1437,7 @@ static void pr_run_stream(const char *url, const char *title, uint32_t generatio
     if (dec != NULL) {
         esp_audio_dec_close(dec);
     }
-    xz_audio_release_output();
+    panel_audio_release_output();
     pr_free_buffers(&st);
     if (!terminal) {
         /* A stop (or a spent retry budget) returns the page to idle; a terminal

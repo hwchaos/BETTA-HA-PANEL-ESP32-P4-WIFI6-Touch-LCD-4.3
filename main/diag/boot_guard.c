@@ -62,8 +62,8 @@ static void boot_guard_take_prev_stage(void)
 }
 
 #if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
-/* The Ethernet kit falls back to ESPHome when a new image fails, which wipes
- * the RTC breadcrumbs. Keep the last stage in NVS as well, so the next attempt
+/* The Ethernet kit falls back to the previous image when a new one fails,
+ * which wipes the RTC breadcrumbs. Keep the last stage in NVS as well, so the next attempt
  * can tell where the previous one ended. */
 #define BOOT_GUARD_NVS_NS "betta_diag"
 static bool s_nvs_ready;
@@ -252,7 +252,7 @@ static void boot_guard_confirm_task(void *arg)
         /* Strict on the Ethernet kit: a new image is only confirmed with a
          * working network (and after a short settle time). Without one the
          * panel cannot be reached for another update, so return to the
-         * previous firmware (ESPHome on the first install) instead. */
+         * previous firmware instead. */
         if (!wifi_ok || uptime_ms < 20000) {
             if (uptime_ms >= P4ETH_CONFIRM_DEADLINE_MS) {
                 ESP_LOGE(TAG_APP, "no network %llds after boot - rolling back to the previous firmware",

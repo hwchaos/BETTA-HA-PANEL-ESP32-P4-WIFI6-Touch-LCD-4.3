@@ -36,16 +36,10 @@ dependencies:
   78/esp-opus:
     version: "1.0.5"
   # Pulled in by the components above; pinned so a fresh build matches.
-  espressif/cmake_utilities:
-    version: "0.5.3"
   espressif/esp_codec_dev:
     version: "1.5.11"
-  espressif/esp_h264:
-    version: "1.0.4"
   espressif/i2c_bus:
     version: "1.5.2"
-  espressif/usb_host_uvc:
-    version: "2.4.2"
   waveshare/esp_lcd_dsi:
     version: "2.0.0"
   waveshare/esp_lcd_hx8394:
@@ -54,3 +48,9 @@ dependencies:
     version: "2.0.0"
   waveshare/esp_lcd_jd9365:
     version: "2.0.0"
+  espressif/cmake_utilities:
+    version: "0.5.3"
+  espressif/esp_h264:
+    version: "1.0.4"
+  espressif/usb_host_uvc:
+    version: "2.4.2"

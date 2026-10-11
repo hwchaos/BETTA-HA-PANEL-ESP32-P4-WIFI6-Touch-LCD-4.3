@@ -1,23 +1,10 @@
 /* SPDX-License-Identifier: LicenseRef-FNCL-1.1
  * Copyright (c) 2026 Cpt_Kirk
  *
- * microSD card on the ESP32-4848S040 (panels3) and the 7" Waveshare
- * ESP32-P4-WIFI6-Touch-LCD-7B ("panel7") boards.
- *
- * On panels3 the TF socket is wired to an SPI bus (IO48 SCK, IO47 MOSI, IO41
- * MISO, IO42 CS) as documented by the manufacturer demo, and IO47/IO48 are
- * shared with the bit-banged ST7701 init sequence.  `display_init()` asks the
- * RGB panel driver to delete its IO descriptors after init
- * (enable_io_multiplex = 1), so the card can only be mounted afterwards; that
- * is why sd_card_init() is called from app_main right after display_init()
- * returned.  SPI2 is used because the panel class does not use it for
- * anything else.
- *
- * On panel7 the socket hangs off the SDMMC peripheral instead: 4-bit slot 0 on
- * the IO_MUX pins, with the slot rail enabled through on-chip LDO channel 4
- * (the same wiring the board BSP drives).  There is no pin sharing, so mount
- * order does not matter; the card is addressed through SDMMC_HOST_DEFAULT()
- * / SDMMC_SLOT_CONFIG_DEFAULT() and the rest of this file is bus agnostic.
+ * microSD card on both boards: the socket hangs off the SDMMC peripheral,
+ * 4-bit slot 0 on the IO_MUX pins, with the slot rail enabled through on-chip
+ * LDO channel 4 (the same wiring the board BSPs drive). There is no pin
+ * sharing, so mount order does not matter.
  */
 #include "sd/sd_card.h"
 
@@ -26,13 +13,8 @@
 #include <sys/stat.h>
 #include <string.h>
 
-#if !APP_SD_USE_SDMMC
-#include "driver/sdspi_host.h"
-#include "driver/spi_common.h"
-#else
 #include "driver/sdmmc_host.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
-#endif
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -47,7 +29,6 @@
 #include "settings/runtime_settings.h"
 #include "util/log_tags.h"
 
-#if APP_SD_SUPPORTED
 
 static const char *TAG = TAG_SD;
 
@@ -166,7 +147,6 @@ bool sd_card_build_path(const char *rel, char *out, size_t out_len)
     return true;
 }
 
-#if APP_SD_USE_SDMMC
 
 /* The slot rail is controlled through LDO channel 4.  The handle is created
  * once and kept for the lifetime of the panel: the hot-plug task below retries
@@ -216,36 +196,6 @@ static void bus_release(void)
      * the rail powered is what lets the next attempt probe the card again. */
 }
 
-#else /* !APP_SD_USE_SDMMC */
-
-/* The TF socket shares IO47/IO48 with the display init, so the bus is created
- * here and torn down again on every failed attempt to leave the pins idle. */
-static esp_err_t bus_acquire(void)
-{
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = APP_SD_PIN_MOSI,
-        .miso_io_num = APP_SD_PIN_MISO,
-        .sclk_io_num = APP_SD_PIN_SCK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
-    esp_err_t err = spi_bus_initialize((spi_host_device_t)APP_SD_SPI_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (err == ESP_ERR_INVALID_STATE) {
-        return ESP_OK;
-    }
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
-    }
-    return err;
-}
-
-static void bus_release(void)
-{
-    spi_bus_free((spi_host_device_t)APP_SD_SPI_HOST);
-}
-
-#endif /* APP_SD_USE_SDMMC */
 
 /* FatFS is built without exFAT/LBA64, so an exFAT volume looks exactly like an
  * unformatted card to the panel.  The OEM name of the first sector says which
@@ -283,7 +233,6 @@ static void detect_fs_label(sdmmc_card_t *card)
  * the logical sector size shown in the diagnostics. */
 static void probe_card(void)
 {
-#if APP_SD_USE_SDMMC
     if (bus_acquire() != ESP_OK) {
         return;
     }
@@ -308,39 +257,6 @@ static void probe_card(void)
         }
         free(card);
     }
-#else
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = APP_SD_SPI_HOST;
-    host.max_freq_khz = SDMMC_FREQ_PROBING / 1000;
-
-    if (bus_acquire() != ESP_OK) {
-        return;
-    }
-
-    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_cfg.gpio_cs = (gpio_num_t)APP_SD_PIN_CS;
-    slot_cfg.host_id = (spi_host_device_t)APP_SD_SPI_HOST;
-
-    sdspi_dev_handle_t handle = 0;
-    if (sdspi_host_init_device(&slot_cfg, &handle) == ESP_OK) {
-        sdmmc_card_t *card = calloc(1, sizeof(sdmmc_card_t));
-        if (card != NULL) {
-            if (sdmmc_card_init(&host, card) == ESP_OK) {
-                s_detected = true;
-                s_sector_bytes = card->csd.sector_size;
-                snprintf(s_card_name, sizeof(s_card_name), "%s", card->cid.name);
-                detect_fs_label(card);
-                ESP_LOGI(TAG, "Card present but not usable yet: %s %llu MB, %u B sectors, %s",
-                    s_card_name,
-                    (unsigned long long)((uint64_t)card->csd.capacity * card->csd.sector_size / (1024ULL * 1024ULL)),
-                    (unsigned)s_sector_bytes,
-                    s_fs_name[0] != '\0' ? s_fs_name : "no filesystem");
-            }
-            free(card);
-        }
-        sdspi_host_remove_device(handle);
-    }
-#endif
     bus_release();
 }
 
@@ -356,7 +272,6 @@ static esp_err_t do_mount(bool format_if_mount_failed)
         return err;
     }
 
-#if APP_SD_USE_SDMMC
     /* bus_acquire() has created the power handle by now, so the host can
      * reference it (the card init sequence switches the IO rail through it). */
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
@@ -365,15 +280,6 @@ static esp_err_t do_mount(bool format_if_mount_failed)
     host.pwr_ctrl_handle = s_sd_pwr;
 
     sdmmc_slot_config_t slot_cfg = slot_config();
-#else
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = APP_SD_SPI_HOST;
-    host.max_freq_khz = APP_SD_FREQ_HZ / 1000;
-
-    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_cfg.gpio_cs = (gpio_num_t)APP_SD_PIN_CS;
-    slot_cfg.host_id = (spi_host_device_t)APP_SD_SPI_HOST;
-#endif
 
     esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
         .format_if_mount_failed = format_if_mount_failed,
@@ -383,11 +289,7 @@ static esp_err_t do_mount(bool format_if_mount_failed)
         .use_one_fat = false,
     };
 
-#if APP_SD_USE_SDMMC
     err = esp_vfs_fat_sdmmc_mount(APP_SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &s_card);
-#else
-    err = esp_vfs_fat_sdspi_mount(APP_SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &s_card);
-#endif
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Card mount failed: %s", esp_err_to_name(err));
         s_mount_err = err;
@@ -450,11 +352,6 @@ esp_err_t sd_card_unmount(void)
         s_sector_bytes = 0;
         s_card_name[0] = '\0';
         s_fs_name[0] = '\0';
-#if !APP_SD_USE_SDMMC
-        if (spi_bus_free((spi_host_device_t)APP_SD_SPI_HOST) != ESP_OK) {
-            ESP_LOGD(TAG, "SPI bus already released");
-        }
-#endif
         ESP_LOGI(TAG, "Card unmounted");
     }
 
@@ -756,82 +653,3 @@ esp_err_t sd_card_init(void)
     return ESP_OK;
 }
 
-#else /* !APP_SD_SUPPORTED */
-
-esp_err_t sd_card_init(void)
-{
-    return ESP_OK;
-}
-
-esp_err_t sd_card_mount(void)
-{
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-esp_err_t sd_card_unmount(void)
-{
-    return ESP_OK;
-}
-
-esp_err_t sd_card_set_enabled(bool enabled)
-{
-    (void)enabled;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-esp_err_t sd_card_format(void)
-{
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-bool sd_card_is_mounted(void)
-{
-    return false;
-}
-
-bool sd_card_is_detected(void)
-{
-    return false;
-}
-
-void sd_card_set_event_callback(sd_card_event_cb_t cb)
-{
-    (void)cb;
-}
-
-esp_err_t sd_card_get_info(sd_card_info_t *out)
-{
-    if (out == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    memset(out, 0, sizeof(*out));
-    return ESP_OK;
-}
-
-esp_err_t sd_card_list(const char *dir, sd_dir_entry_t *entries, size_t max_entries, size_t *out_count)
-{
-    (void)dir;
-    (void)entries;
-    (void)max_entries;
-    if (out_count != NULL) {
-        *out_count = 0;
-    }
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-bool sd_card_build_path(const char *rel, char *out, size_t out_len)
-{
-    (void)rel;
-    if (out != NULL && out_len > 0) {
-        out[0] = '\0';
-    }
-    return false;
-}
-
-esp_err_t sd_card_remove(const char *rel)
-{
-    (void)rel;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-#endif /* APP_SD_SUPPORTED */

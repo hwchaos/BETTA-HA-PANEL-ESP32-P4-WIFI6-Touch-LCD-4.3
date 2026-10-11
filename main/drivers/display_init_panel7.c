@@ -222,9 +222,11 @@ static void display_render_event_cb(lv_event_t *e)
         if (dsi_bus_activity_active(DSI_BUS_RENDER)) {
             dsi_bus_activity_end(DSI_BUS_RENDER);
         }
-        uint32_t ms = (uint32_t)((esp_timer_get_time() - s_pass_start_us) / 1000);
+        const int64_t pass_us = esp_timer_get_time() - s_pass_start_us;
+        uint32_t ms = (uint32_t)(pass_us / 1000);
         uint32_t pct = s_pass_dirty_pct;
         s_render_stats.passes++;
+        s_render_stats.total_pass_us += (uint64_t)pass_us;
         s_render_stats.last_pass_ms = ms;
         if (ms > s_render_stats.max_pass_ms) {
             s_render_stats.max_pass_ms = ms;
@@ -436,8 +438,6 @@ static esp_err_t display_backlight_write(int percent)
         ESP_LOGW(TAG_DISPLAY, "backlight reg 0x96 write failed: %s", esp_err_to_name(bl_err));
     }
     return err;
-#else
-    return bsp_display_brightness_set(percent);
 #endif
 }
 
@@ -1078,13 +1078,8 @@ esp_err_t display_init(void)
         .monochrome = false,
         .rotation = {
             .swap_xy = false,
-#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43) || defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
             .mirror_x = false,
             .mirror_y = false,
-#else
-            .mirror_x = true,
-            .mirror_y = true,
-#endif
         },
 #if LV_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
@@ -1133,15 +1128,12 @@ esp_err_t display_init(void)
 
     if (lvgl_port_lock(2000)) {
         lv_display_set_antialiasing(s_lv_display, APP_LVGL_ANTIALIASING != 0);
-        /* Panel 7B is mounted upside-down; EK79007 MADCTL mirror has no effect
-         * in DSI video mode, so rotate 180 in software (matches GT911 mirror). */
+        /* Both panels are portrait and driven in landscape (software rotation). */
 #if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
         /* 10.1-DSI-TOUCH-A: landscape the other way round than the 4.3". */
         lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_270);
-#elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43)
-        lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_90);
 #else
-        lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_180);
+        lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_90);
 #endif
         if (s_trace_timer == NULL) {
             s_trace_timer = lv_timer_create(display_trace_timer_cb, APP_LVGL_TRACE_PERIOD_MS, NULL);

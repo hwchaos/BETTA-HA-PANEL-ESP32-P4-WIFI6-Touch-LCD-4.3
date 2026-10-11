@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: LicenseRef-FNCL-1.1
 # Waveshare ESP32-P4-ETH + 10.1-DSI-TOUCH-A (ESP32-P4-POE-ETH-KIT-B)
 # 1280x800 MIPI-DSI, GT911, ES8311, IP101 Ethernet (no Wi-Fi coprocessor).
-# Sub-variant of the 7B build (same display/touch/audio code paths).
+# Shares the MIPI-DSI display/touch driver with the 4.3" board.
 CONFIG_IDF_TARGET="esp32p4"
-CONFIG_APP_PANEL_VARIANT_7INCH_1024=y
-# CONFIG_APP_PANEL_VARIANT_4INCH_720 is not set
 CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101=y
-# CONFIG_APP_FEATURE_LOCAL_CAMERA is not set
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_FREERTOS_ISR_STACKSIZE=6144
@@ -36,23 +33,25 @@ CONFIG_LV_USE_FONT_COMPRESSED=y
 CONFIG_ESP_HTTP_CLIENT_ENABLE_DIGEST_AUTH=y
 CONFIG_VFS_MAX_COUNT=16
 
-# --- Flash layout compatible with ESPHome (flash_size: 16MB) ---
-# The kit arrives with ESPHome; its OTA writes this image into ESPHome's app
-# slot and keeps ESPHome's bootloader and partition table. The table below is
-# byte-identical to ESPHome's, so OTA keeps working in both directions. The
-# LittleFS "storage" area lives in the upper 16 MB of the 32 MB chip and is
-# registered at runtime (see app_main.c).
+# --- Flash: 32 MB GD25Q256, own bootloader and partition table ---
+# (partitions.p4eth101.csv; nvs and storage sit where the kit kept them.)
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.esphome16.csv"
-CONFIG_PARTITION_TABLE_FILENAME="partitions.esphome16.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.p4eth101.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.p4eth101.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
-CONFIG_SPI_FLASH_SIZE_OVERRIDE=y
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y
+# Quad I/O, as on the 4.3" board (same flash chip).
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+# CONFIG_ESPTOOLPY_FLASHMODE_DIO is not set
 
 # OTA safety net: a new image must confirm itself (network up) or the
-# bootloader falls back to the previous one (ESPHome on the first install).
+# bootloader falls back to the previous one.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Rollback + QIO make the bootloader outgrow its 24 KB slot before the
+# partition table; warnings-only logging keeps it in.
+# CONFIG_BOOTLOADER_LOG_LEVEL_INFO is not set
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 
 # Ethernet (internal EMAC + IP101 PHY)
 CONFIG_ETH_ENABLED=y
@@ -71,7 +70,13 @@ CONFIG_LV_LOG_LEVEL=2
 CONFIG_LV_LOG_USE_TIMESTAMP=y
 CONFIG_LV_LOG_USE_FILE_LINE=y
 
-# No coredump partition in ESPHome's table.
-# CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH is not set
+# Crash core dump to flash (coredump partition), as on the 4.3" board.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 # CONFIG_ESP_COREDUMP_ENABLE_TO_UART is not set
-CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
+# CONFIG_ESP_COREDUMP_ENABLE_TO_NONE is not set
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+# CONFIG_ESP_COREDUMP_CAPTURE_DRAM is not set
+CONFIG_ESP_COREDUMP_CHECK_BOOT=y
+CONFIG_ESP_COREDUMP_LOGS=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=24

@@ -29,7 +29,6 @@
 #include "sd/sd_card.h"
 #include "util/log_tags.h"
 
-#if APP_SD_SUPPORTED
 
 static const char *TAG = TAG_SD;
 
@@ -253,22 +252,3 @@ void sd_logs_start(void)
 #endif
 }
 
-#else /* !APP_SD_SUPPORTED */
-
-esp_err_t sd_logs_export(char *out_name, size_t out_name_len)
-{
-    (void)out_name;
-    (void)out_name_len;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-esp_err_t sd_logs_prune(void)
-{
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-void sd_logs_start(void)
-{
-}
-
-#endif /* APP_SD_SUPPORTED */

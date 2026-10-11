@@ -481,11 +481,7 @@ static bool button_card_is_compact(lv_obj_t *card)
         card_h = lv_obj_get_style_height(card, LV_PART_MAIN);
     }
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    return card_w <= 130 || card_h <= 130;
-#else
     return card_w <= 120 || card_h <= 120;
-#endif
 }
 
 static void button_set_switch_checked(w_button_ctx_t *ctx, bool checked)

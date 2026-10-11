@@ -52,11 +52,6 @@ typedef struct {
     char ntp_server[APP_NTP_SERVER_MAX_LEN];
     char time_tz[APP_TIME_TZ_MAX_LEN];
     char ui_language[APP_UI_LANGUAGE_MAX_LEN];
-    char xiaozhi_server[APP_XIAOZHI_SERVER_MAX_LEN];
-    char xiaozhi_device[APP_XIAOZHI_DEVICE_MAX_LEN];
-    char xiaozhi_token[APP_XIAOZHI_TOKEN_MAX_LEN];
-    char xiaozhi_ota_url[APP_XIAOZHI_OTA_URL_MAX_LEN];
-    bool xiaozhi_enabled;
     uint8_t display_brightness;
     uint8_t display_saver_brightness;
     bool display_screensaver_enabled;
@@ -121,6 +116,8 @@ typedef struct {
     uint16_t mqtt_port;
     char mqtt_username[APP_MQTT_USERNAME_MAX_LEN];
     char mqtt_password[APP_MQTT_PASSWORD_MAX_LEN];
+    /* Web editor / API password; empty = no protection. NVS only. */
+    char web_password[APP_WEB_PASSWORD_MAX_LEN];
     char mqtt_discovery_prefix[APP_MQTT_DISCOVERY_PREFIX_MAX_LEN];
     bool system_auto_restart_enabled;
     uint32_t system_auto_restart_hours;
@@ -206,4 +203,3 @@ bool runtime_settings_value_anim_from_string(const char *text, char *out, size_t
 const char *const *runtime_settings_value_anim_names(size_t *count);
 bool runtime_settings_has_wifi(const runtime_settings_t *settings);
 bool runtime_settings_has_ha(const runtime_settings_t *settings);
-bool runtime_settings_has_xiaozhi(const runtime_settings_t *settings);

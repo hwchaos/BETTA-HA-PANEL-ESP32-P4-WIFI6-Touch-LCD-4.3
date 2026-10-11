@@ -5,18 +5,9 @@
 
 #include "sdkconfig.h"
 
-/* ---- Panel-variant-dependent geometry & identity ----------------------
- * Selected via CONFIG_APP_PANEL_VARIANT_* (see main/Kconfig.projbuild).
- * Defaults fall back to the 4" 720x720 baseline so an older sdkconfig
- * (pre-variant) still builds the smart86 target unchanged. */
-#if defined(CONFIG_APP_PANEL_VARIANT_10INCH_1280)
-#  define APP_NAME               "betta-ha-panel-10.1"
-#  define APP_SCREEN_WIDTH       1280
-#  define APP_SCREEN_HEIGHT      800
-#  define APP_CONTENT_BOX_WIDTH_BASE  1280
-#  define APP_CONTENT_BOX_HEIGHT_BASE 680
-#  define APP_CONTENT_BOX_BOTTOM_GUTTER 14
-#elif defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+/* ---- Board-dependent geometry & identity --------------------------------
+ * Selected via CONFIG_APP_PANEL_BOARD_* (see main/Kconfig.projbuild). */
+#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
 #  define APP_NAME               "betta-ha-panel-p4eth"
 /* 800x1280 portrait DSI panel driven in landscape (software rotation). */
 #  define APP_SCREEN_WIDTH       1280
@@ -37,27 +28,8 @@
 #  define APP_CONTENT_BOX_WIDTH_BASE  800
 #  define APP_CONTENT_BOX_HEIGHT_BASE 360
 #  define APP_CONTENT_BOX_BOTTOM_GUTTER 8
-#elif defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
-#  define APP_NAME               "betta-ha-panel-7b"
-#  define APP_SCREEN_WIDTH       1024
-#  define APP_SCREEN_HEIGHT      600
-#  define APP_CONTENT_BOX_WIDTH_BASE  1024
-#  define APP_CONTENT_BOX_HEIGHT_BASE 480
-#  define APP_CONTENT_BOX_BOTTOM_GUTTER 10
-#elif defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#  define APP_NAME               "betta-ha-panel-s3"
-#  define APP_SCREEN_WIDTH       480
-#  define APP_SCREEN_HEIGHT      480
-#  define APP_CONTENT_BOX_WIDTH_BASE  480
-#  define APP_CONTENT_BOX_HEIGHT_BASE 360
-#  define APP_CONTENT_BOX_BOTTOM_GUTTER 8
-#else /* CONFIG_APP_PANEL_VARIANT_4INCH_720 (default) */
-#  define APP_NAME               "betta-ha-panel"
-#  define APP_SCREEN_WIDTH       720
-#  define APP_SCREEN_HEIGHT      720
-#  define APP_CONTENT_BOX_WIDTH_BASE  720
-#  define APP_CONTENT_BOX_HEIGHT_BASE 600
-#  define APP_CONTENT_BOX_BOTTOM_GUTTER 12
+#else
+#  error "No board selected (CONFIG_APP_PANEL_BOARD_*)"
 #endif
 /* Scan-out framebuffer geometry; differs from APP_SCREEN_* only when the UI is
  * rotated by 90/270 deg in software. */
@@ -264,11 +236,7 @@ extern int16_t g_app_content_box_h;
 #define APP_DISPLAY_NAV_HOME_IDLE_COLOR 0x9EB8C7
 #define APP_DISPLAY_NAV_HOME_ACTIVE_COLOR 0x53E5FF
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_EVENT_QUEUE_LENGTH 64
-#else
 #define APP_EVENT_QUEUE_LENGTH 96
-#endif
 #define APP_EVENT_QUEUE_WAIT_MS 50
 /* When the event queue is full (e.g. the UI task is stuck), evict the oldest
  * event instead of dropping the newest one. State events are superseded by the
@@ -426,11 +394,8 @@ extern int16_t g_app_content_box_h;
 
 #define APP_UI_DEFAULT_LANGUAGE "de"
 
-#define APP_XIAOZHI_SERVER_MAX_LEN 256
-#define APP_XIAOZHI_DEVICE_MAX_LEN 64
-#define APP_XIAOZHI_TOKEN_MAX_LEN 512
-#define APP_XIAOZHI_OTA_URL_MAX_LEN 256
-#define APP_XIAOZHI_OTA_URL_DEFAULT "https://api.tenclass.net/xiaozhi/ota/"
+/* Optional password for the web editor and the HTTP API (empty = open). */
+#define APP_WEB_PASSWORD_MAX_LEN 65
 
 #define APP_UI_DEFAULT_LANGUAGE "de"
 #define APP_MQTT_ENABLED_DEFAULT 1
@@ -450,8 +415,8 @@ extern int16_t g_app_content_box_h;
 #define APP_SETUP_AP_MAX_CONNECTIONS 4
 
 /* Two slots above the "six tiles pages" a layout usually needs: the runtime
- * also registers app pages of its own (the hidden radio app, plus the Xiaozhi
- * and cameras fallbacks for older layouts) and those must never be dropped
+ * also registers app pages of its own (the hidden radio app, plus the cameras
+ * fallback for older layouts) and those must never be dropped
  * because the table is full. */
 #define APP_MAX_PAGES 8
 #define APP_MAX_WIDGETS_PER_PAGE 32
@@ -470,40 +435,11 @@ extern int16_t g_app_content_box_h;
 #define APP_MAX_ALARM_MODES_LEN 48
 
 /* ---- microSD / TF card --------------------------------------------------
- * The 4" board wires the TF socket to the SPI bus (manufacturer demo
- * `switch86_lvgl_music/HAL.h`: SD_CS 42, SPI_MOSI 47, SPI_MISO 41, SPI_SCK 48;
- * the pin spreadsheet lists the same pins as TF(SCK)/TF(SDA)/TF(D1)/TF(D3)).
- * IO47/IO48 are shared with the bit-banged ST7701 init sequence, so the card
- * is mounted only once display_init() has returned and the RGB panel has
- * released those pins (enable_io_multiplex=1).
- *
- * The 7" Waveshare board takes the same card through the SDMMC peripheral
- * instead: 4-bit slot 0 on the IO_MUX pins (CLK 43, CMD 44, D0..D3 39..42),
- * with the slot powered from on-chip LDO channel 4 (both taken from the board
- * BSP, `bsp_sdcard_mount()`).  No SPI bus and no pin sharing there.
- *
- * The remaining panel variants have no socket, so the feature is compiled out.
- */
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_SD_SUPPORTED 1
-#define APP_SD_USE_SDMMC 0
-#elif defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
-#define APP_SD_SUPPORTED 1
-#define APP_SD_USE_SDMMC 1
-#else
-#define APP_SD_SUPPORTED 0
-#define APP_SD_USE_SDMMC 0
-#endif
+ * Both boards take the card through the SDMMC peripheral: 4-bit slot 0 on the
+ * IO_MUX pins, with the slot powered from on-chip LDO channel 4 (as in the
+ * board BSPs, `bsp_sdcard_mount()`). */
 #define APP_SD_MOUNT_POINT "/sd"
-#define APP_SD_PIN_SCK 48
-#define APP_SD_PIN_MOSI 47
-#define APP_SD_PIN_MISO 41
-#define APP_SD_PIN_CS 42
-/* The 4" socket is only wired for SPI mode (DAT0 is not connected), so the card
- * is always driven at this clock.  10 MHz is the fastest rate that proved
- * reliable on that board. */
-#define APP_SD_SPI_HOST 2
-#define APP_SD_FREQ_HZ (APP_SD_USE_SDMMC ? (40 * 1000 * 1000) : (10 * 1000 * 1000))
+#define APP_SD_FREQ_HZ (40 * 1000 * 1000)
 /* SDMMC peripheral slot and the on-chip LDO channel that feeds its IO rail. */
 #define APP_SD_SDMMC_SLOT 0
 #define APP_SD_LDO_CHAN 4
@@ -547,24 +483,12 @@ extern int16_t g_app_content_box_h;
 #define APP_HA_LIGHT_DISCOVERY_REGISTRY_ENABLED 0
 /* Default discovery path: HA renders compact light pages server-side; the panel fetches them one by one. */
 #define APP_HA_LIGHT_DISCOVERY_TEMPLATE_ENABLED 1
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_HA_LIGHT_DISCOVERY_PAGE_SIZE 16
-#else
 #define APP_HA_LIGHT_DISCOVERY_PAGE_SIZE 24
-#endif
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_HA_QUEUE_LENGTH 48
-#else
 #define APP_HA_QUEUE_LENGTH 96
-#endif
 #define APP_HA_TASK_STACK 12288
 #define APP_HA_TASK_PRIO 8
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_HA_COVER_TASK_STACK 20480
-#else
 #define APP_HA_COVER_TASK_STACK 8192
-#endif
 #define APP_HA_COVER_TASK_PRIO 3
 
 /* Keep pre-language behavior for light commands (explicit no-fade). */
@@ -595,11 +519,7 @@ extern int16_t g_app_content_box_h;
  * serviced" timestamps for the freeze report (lvhand=). */
 #define APP_LVGL_TRACE_PERIOD_MS 250
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_LVGL_TASK_STACK 16384
-#else
 #define APP_LVGL_TASK_STACK 24576
-#endif
 
 #define APP_HTTP_PORT 80
 
@@ -620,11 +540,7 @@ extern int16_t g_app_content_box_h;
  * scheduler every N units, so a slow client cannot own the core either. */
 #define APP_HTTP_STREAM_YIELD_UNITS 32
 
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-#define APP_HTTP_TASK_STACK 8192
-#else
 #define APP_HTTP_TASK_STACK 12288
-#endif
 
 #define APP_OTA_URL_MAX_LEN 512
 #define APP_OTA_JSON_MAX_LEN 768

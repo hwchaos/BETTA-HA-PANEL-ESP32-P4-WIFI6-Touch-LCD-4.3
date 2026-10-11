@@ -20,6 +20,7 @@
 #include "soc/soc_caps.h"
 
 #include "api/http_server.h"
+#include "api/http_guard.h"
 #include "api/api_routes.h"
 #include "app_config.h"
 #include "app_events.h"
@@ -191,76 +192,6 @@ static esp_err_t init_nvs(void)
 }
 
 #if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
-/* The ESP32-P4-ETH kit keeps ESPHome's partition table (16 MB layout), which
- * has no LittleFS partition. The module carries 32 MB, so the "storage" area
- * is registered in the upper half at runtime. Before that, make sure the
- * flash driver really reaches beyond 16 MB: if an address there reads back the
- * bootloader and the partition table, accesses wrap around and writing would
- * destroy the boot area - then refuse (the panel then reboots and the OTA
- * rollback returns to the previous firmware). */
-#include "esp_flash.h"
-#include "esp_partition.h"
-
-#define P4ETH_STORAGE_OFFSET 0x1000000U
-#define P4ETH_STORAGE_SIZE 0x800000U
-
-static esp_err_t p4eth_register_storage(void)
-{
-    if (esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, NULL) != NULL) {
-        return ESP_OK;
-    }
-    uint32_t size = 0;
-    uint32_t physical = 0;
-    (void)esp_flash_get_size(esp_flash_default_chip, &size);
-    (void)esp_flash_get_physical_size(esp_flash_default_chip, &physical);
-    ESP_LOGI(TAG_APP, "flash: configured %u MB, physical %u MB", (unsigned)(size >> 20), (unsigned)(physical >> 20));
-    if (size < P4ETH_STORAGE_OFFSET + P4ETH_STORAGE_SIZE || physical < P4ETH_STORAGE_OFFSET + P4ETH_STORAGE_SIZE) {
-        ESP_LOGE(TAG_APP, "flash too small or not addressable beyond 16 MB - no storage");
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    static const uint32_t probe_addrs[] = {0x2000U, 0x8000U}; /* bootloader, partition table */
-    uint8_t *low = malloc(512);
-    uint8_t *high = malloc(512);
-    if (low == NULL || high == NULL) {
-        free(low);
-        free(high);
-        return ESP_ERR_NO_MEM;
-    }
-    int same = 0;
-    for (size_t i = 0; i < sizeof(probe_addrs) / sizeof(probe_addrs[0]); i++) {
-        if (esp_flash_read(esp_flash_default_chip, low, probe_addrs[i], 512) != ESP_OK ||
-            esp_flash_read(esp_flash_default_chip, high, P4ETH_STORAGE_OFFSET + probe_addrs[i], 512) != ESP_OK) {
-            free(low);
-            free(high);
-            ESP_LOGE(TAG_APP, "flash read beyond 16 MB failed - no storage");
-            return ESP_FAIL;
-        }
-        if (memcmp(low, high, 512) == 0) {
-            same++;
-        }
-    }
-    free(low);
-    free(high);
-    if (same == (int)(sizeof(probe_addrs) / sizeof(probe_addrs[0]))) {
-        ESP_LOGE(TAG_APP, "flash addresses beyond 16 MB wrap around - refusing to use them");
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-
-    const esp_partition_t *part = NULL;
-    esp_err_t err = esp_partition_register_external(esp_flash_default_chip, P4ETH_STORAGE_OFFSET, P4ETH_STORAGE_SIZE,
-        "storage", ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, &part);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG_APP, "storage registered at 0x%x (%u KB)", (unsigned)P4ETH_STORAGE_OFFSET,
-            (unsigned)(P4ETH_STORAGE_SIZE / 1024));
-    } else {
-        ESP_LOGE(TAG_APP, "storage registration failed: %s", esp_err_to_name(err));
-    }
-    return err;
-}
-#endif
-
-#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
 /* While the new image is not confirmed yet, a line on the top layer tells
  * what the network does and how long until the fallback to the previous
  * firmware - readable without logs, which are unreachable without network. */
@@ -269,7 +200,7 @@ static esp_err_t p4eth_register_storage(void)
 #define P4ETH_FALLBACK_S (4 * 60)
 
 /* Warnings/errors at the end of the previous run's log file, captured before
- * this run appends to it (the file lives above 16 MB, ESPHome leaves it). */
+ * this run appends to it. */
 #define P4ETH_PREV_LINES 6
 #define P4ETH_PREV_LINE_LEN 120
 static char s_prev_log[P4ETH_PREV_LINES * (P4ETH_PREV_LINE_LEN + 1) + 1];
@@ -353,7 +284,7 @@ static void p4eth_netinfo_task(void *arg)
         if (!done && left > 0) {
             const size_t n = strlen(text);
             snprintf(text + n, sizeof(text) - n, "\n%s %d s",
-                ui_i18n_get("netinfo.fallback", "No network: back to ESPHome in"), left);
+                ui_i18n_get("netinfo.fallback", "No network: back to the previous firmware in"), left);
         }
         /* "idle" is the normal running state; "confirmed" a healthy update. */
         const bool prev_bad = prev != NULL && prev[0] != '\0' && strcmp(prev, "confirmed") != 0 &&
@@ -414,9 +345,6 @@ static void p4eth_netinfo_start(void)
 
 static esp_err_t init_littlefs(void)
 {
-#if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
-    ESP_RETURN_ON_ERROR(p4eth_register_storage(), TAG_APP, "storage");
-#endif
     esp_vfs_littlefs_conf_t conf = {
         .base_path = "/littlefs",
         .partition_label = NULL,
@@ -630,6 +558,7 @@ void app_main(void)
         ESP_LOGW(TAG_APP, "Failed to load runtime settings (%s), continuing with defaults", esp_err_to_name(settings_err));
         runtime_settings_set_defaults(&s_runtime_settings);
     }
+    http_guard_set_password(s_runtime_settings.web_password);
     /* Verbosity is applied as early as possible so the boot sequence itself is
      * captured at the level the user configured. */
     system_log_set_verbosity(s_runtime_settings.log_verbosity);

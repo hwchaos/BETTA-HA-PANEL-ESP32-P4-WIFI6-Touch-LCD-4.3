@@ -18,8 +18,7 @@
  * Tasks created this way are never deleted. If one ever has to be, use
  * app_task_delete() instead of vTaskDelete(), otherwise the PSRAM stack leaks. */
 
-#if defined(CONFIG_SPIRAM) && CONFIG_SPIRAM && defined(CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM) \
-    && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+#if defined(CONFIG_SPIRAM) && CONFIG_SPIRAM && defined(CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM)      && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
 #define APP_TASK_STACK_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #define APP_TASK_STACK_EXT  1
 #else

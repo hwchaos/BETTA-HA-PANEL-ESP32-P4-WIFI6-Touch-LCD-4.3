@@ -25,7 +25,7 @@
 
 #define DSIW_FIFO_UNKNOWN 0xFFFFFFFFu
 
-#if defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024) && defined(CONFIG_IDF_TARGET_ESP32P4)
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 
 #include "esp_attr.h"
 #include "esp_lcd_mipi_dsi.h"

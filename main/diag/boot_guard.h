@@ -48,7 +48,7 @@ void boot_guard_start_confirm_task(void);
 
 #if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
 /* Last boot stage of the previous run of this firmware ("" when unknown,
- * "confirmed" when it came up fine). Kept in NVS across ESPHome fallbacks. */
+ * "confirmed" when it came up fine). Kept in NVS across rollbacks. */
 const char *boot_guard_prev_run_stage(void);
 #endif
 

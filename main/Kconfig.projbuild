@@ -2,74 +2,43 @@
 # Copyright (c) 2026 Cpt_Kirk
 menu "Example Configuration"
 
-menu "Panel Hardware Variant"
+menu "Panel Hardware"
 
-choice APP_PANEL_VARIANT
-    prompt "Display panel variant"
-    default APP_PANEL_VARIANT_4INCH_720
+choice APP_PANEL_BOARD
+    prompt "Board"
+    default APP_PANEL_BOARD_WAVESHARE_43
     help
-        Select the physical LCD / touch panel this firmware image targets.
-        Affects screen resolution (APP_SCREEN_WIDTH/HEIGHT), panel init
-        sequence and touch-controller driver selection.
-
-config APP_PANEL_VARIANT_4INCH_720
-    bool "4\" 720x720 round (smart86 base)"
-    help
-        Original smart86 4-inch 720x720 square/round panel.
-
-config APP_PANEL_VARIANT_10INCH_1280
-    bool "10.1\" 1280x800 (betta large)"
-    help
-        10.1-inch 1280x800 panel variant.
-
-config APP_PANEL_VARIANT_S3_480
-    bool "4\" 480x480 (Guition CYD ESP32-S3 4848S040)"
-    help
-        Guition CYD ESP32-S3 4848S040 4-inch 480x480 RGB panel
-        with ST7701S controller and GT911 capacitive touch.
-        Native Wi-Fi (no ESP-Hosted/C6 coprocessor).
-
-config APP_PANEL_VARIANT_7INCH_1024
-    bool "7\" 1024x600 (Waveshare ESP32-P4-WIFI6-Touch-LCD-7B)"
-    help
-        Waveshare ESP32-P4-WIFI6-Touch-LCD-7B 7-inch 1024x600
-        MIPI-DSI panel (EK79007) with GT911 capacitive touch.
-
-endchoice
+        The board this firmware image is built for. sdkconfig.defaults.panel43
+        and sdkconfig.defaults.p4eth101 select it.
 
 config APP_PANEL_BOARD_WAVESHARE_43
-    bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-4.3 (480x800, ST7701)"
-    default n
-    depends on APP_PANEL_VARIANT_7INCH_1024
-    help
-        Sub-variant of the 7B build for the Waveshare 4.3" board.
+    bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-4.3 (480x800, ST7701, Wi-Fi via C6)"
 
 config APP_PANEL_BOARD_WAVESHARE_P4ETH101
-    bool "Waveshare ESP32-P4-ETH + 10.1-DSI-TOUCH-A (1280x800, Ethernet)"
-    default n
-    depends on APP_PANEL_VARIANT_7INCH_1024 && !APP_PANEL_BOARD_WAVESHARE_43
+    bool "Waveshare ESP32-P4-POE-ETH-KIT-B (10.1\" 800x1280, Ethernet)"
     help
-        Sub-variant of the 7B build for the ESP32-P4-POE-ETH-KIT-B: 10.1"
-        800x1280 DSI panel (Nano BSP), ES8311 audio and IP101 Ethernet
-        instead of Wi-Fi. Flash layout compatible with ESPHome.
+        10.1" 800x1280 DSI panel (Nano BSP), ES8311 audio and IP101 Ethernet
+        instead of Wi-Fi.
+
+endchoice
 
 endmenu
 
 menu "Local Camera (MIPI-CSI)"
 
 config APP_FEATURE_LOCAL_CAMERA
-    bool "Built-in MIPI-CSI camera support"
-    default y
-    depends on APP_PANEL_VARIANT_7INCH_1024
+    bool "OV5647 MIPI-CSI camera support"
+    default n
     help
-        Enables the built-in OV5647 MIPI-CSI camera of the Waveshare
-        ESP32-P4-WIFI6-Touch-LCD-7B panel: on-panel preview, snapshot
-        endpoint (/api/camera/snapshot), MJPEG stream (/api/camera/stream),
-        camera status endpoint and motion-based screen wake.
+        Support for an OV5647 camera on the board's MIPI-CSI connector:
+        on-panel preview, snapshot endpoint (/api/camera/snapshot), MJPEG
+        stream (/api/camera/stream), camera status endpoint and motion-based
+        screen wake.
 
+        Carried over from the Waveshare 7B port and not yet tested on the
+        4.3" board or the ETH kit (CSI/SCCB wiring may need adjusting).
         The sensor format is selected through the esp_cam_sensor (OV5647)
-        Kconfig, not here.  sdkconfig.defaults.panel7 enables
-        1920x1080 RAW10 and the matching default format.
+        Kconfig, not here.
 
 config APP_LOCAL_CAMERA_HFLIP
     bool "Horizontally mirror camera image"

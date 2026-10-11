@@ -30,7 +30,6 @@ const DEFAULT_GRAPH_DISPLAY_MODE = "line";
 const GRAPH_BAR_BUCKET_MIN_OPTIONS = [5, 10, 15, 30];
 const DEFAULT_GRAPH_BAR_BUCKET_MIN = 15;
 const ENERGY_PAGE_TYPE = "energy_dashboard";
-const XIAOZHI_PAGE_TYPE = "xiaozhi";
 const CAMERAS_PAGE_TYPE = "cameras";
 const MUSIC_PAGE_TYPE = "music_assistant";
 const RADIO_PAGE_TYPE = "radio";
@@ -82,7 +81,6 @@ const CAMERA_ENTITY_DISCOVERY_MAX_POLLS = 90;
 const ENTITY_PICKER_SEARCH_DEBOUNCE_MS = 350;
 const SETUP_WIZARD_PENDING_STORAGE_KEY = "betta.setupWizard.pending";
 const SETUP_WIZARD_DISMISSED_STORAGE_KEY = "betta.setupWizard.dismissed";
-const OTA_RELEASE_REPO = "cptkirki/BETTA-HA-PANEL";
 /* Tiles that may stay without an entity; they bind one when it is set. */
 const ENTITY_OPTIONAL_WIDGET_TYPES = ["cover_tile", "scene_tile", "person_tile", "timer_tile"];
 const ENTITY_PICKER_CONFIGS = {
@@ -404,7 +402,6 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.add_radio": "+ Radio Page",
     "layout.pages.menu_normal": "Normal Page",
     "layout.pages.menu_energy": "Energy Page",
-    "layout.pages.menu_xiaozhi": "Xiaozhi Page",
     "layout.pages.menu_cameras": "Cameras Page",
     "layout.pages.cameras_title": "Cameras",
     "layout.pages.menu_music": "Music Page",
@@ -427,7 +424,6 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.apply_title": "Apply page title",
     "layout.pages.new_title": "Page {number}",
     "layout.pages.energy_title": "Energy",
-    "layout.pages.xiaozhi_title": "Xiaozhi",
     "layout.pages.music_title": "Music",
     "layout.pages.radio_title": "Radio",
     "layout.energy.heading": "Energy Page",
@@ -492,8 +488,6 @@ const WEB_I18N_BUILTIN = {
     "layout.radio.preview_defaults": "Built-in station list",
     "layout.radio.preview_more": "+{count} more",
     "layout.status.energy_page_only": "Energy pages do not accept widgets.",
-    "layout.status.xiaozhi_page_only": "Xiaozhi pages are dedicated to the voice assistant and do not accept widgets.",
-    "layout.status.xiaozhi_page_locked": "This page is managed by the Xiaozhi AI voice assistant built into the firmware. Configure it in Settings → Xiaozhi AI.",
     "layout.status.cameras_page_only": "Camera pages show the cameras configured in Settings and do not accept widgets.",
     "layout.status.cameras_page_locked": "This page shows the cameras configured in Settings → Cameras.",
     "layout.status.music_page_only": "Music pages do not accept widgets.",
@@ -840,14 +834,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token": "Long-lived Access Token",
     "settings.ha.token_placeholder": "Leave empty to keep the stored token",
     "settings.ha.rest_fallback": "Enable HA REST fallback (Default: Off, WS-only preferred)",
-    "settings.xiaozhi.heading": "Xiaozhi AI",
     "settings.assist.heading": "Voice assistant (HA Assist)",
-    "settings.xiaozhi.enabled": "Enable Xiaozhi AI voice assistant",
-    "settings.xiaozhi.cloud_activation": "Cloud activation (pairing code)",
-    "settings.xiaozhi.server": "WebSocket URL (ws:// or wss://)",
-    "settings.xiaozhi.ota_url": "Xiaozhi Cloud OTA URL (pairing code)",
-    "settings.xiaozhi.device": "Device ID (optional)",
-    "settings.xiaozhi.token": "Access Token",
     "settings.cameras.heading": "Cameras",
     "settings.cameras.hint": "Configure up to 4 cameras (HA camera.* entities or HTTP snapshots).",
     "settings.cameras.add": "+ Add camera",
@@ -926,7 +913,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ap.hint": "If setup AP is active, connect to it and open <code>http://192.168.4.1</code>.",
     "settings.ota.heading": "Firmware Update",
     "settings.ota.url": "OTA URL",
-    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-7b.ota.bin",
+    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-43.bin",
     "settings.ota.flash_url": "Flash URL",
     "settings.ota.refresh": "Refresh Status",
     "settings.ota.file": "OTA .bin File",
@@ -1272,8 +1259,6 @@ const WEB_I18N_BUILTIN = {
     "settings.language.invalid_country": "Wi-Fi country code must be a 2-letter ISO code (e.g. US, DE)",
     "settings.language.invalid_bssid": "BSSID must be empty or in format AA:BB:CC:DD:EE:FF",
     "settings.language.invalid_ha_url": "HA URL must start with ws:// or wss://",
-    "settings.language.invalid_xiaozhi_url": "Xiaozhi URL must start with ws:// or wss://",
-    "settings.language.invalid_ota_url": "Xiaozhi OTA URL must start with http:// or https://",
     "provision.wifi.required_ssid": "SSID is required.",
     "provision.wifi.required_country": "Country code must be 2 letters (e.g. US, DE).",
     "provision.ha.required_url": "WebSocket URL is required.",
@@ -1306,7 +1291,6 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.add_radio": "+ Radio-Seite",
     "layout.pages.menu_normal": "Normale Seite",
     "layout.pages.menu_energy": "Energie-Seite",
-    "layout.pages.menu_xiaozhi": "Xiaozhi-Seite",
     "layout.pages.menu_cameras": "Kamera-Seite",
     "layout.pages.cameras_title": "Kameras",
     "layout.pages.menu_music": "Musik-Seite",
@@ -1329,7 +1313,6 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.apply_title": "Seitentitel uebernehmen",
     "layout.pages.new_title": "Seite {number}",
     "layout.pages.energy_title": "Energie",
-    "layout.pages.xiaozhi_title": "Xiaozhi",
     "layout.pages.music_title": "Musik",
     "layout.pages.radio_title": "Radio",
     "layout.energy.heading": "Energie-Seite",
@@ -1395,8 +1378,6 @@ const WEB_I18N_BUILTIN = {
     "layout.radio.preview_defaults": "Eingebaute Senderliste",
     "layout.radio.preview_more": "+{count} weitere",
     "layout.status.energy_page_only": "Energie-Seiten akzeptieren keine Widgets.",
-    "layout.status.xiaozhi_page_only": "Xiaozhi-Seiten sind dem Sprachassistenten vorbehalten und akzeptieren keine Widgets.",
-    "layout.status.xiaozhi_page_locked": "Diese Seite wird vom integrierten Xiaozhi-KI-Sprachassistenten verwaltet. Konfiguration unter Einstellungen → Xiaozhi-KI.",
     "layout.status.cameras_page_only": "Kamera-Seiten zeigen die in den Einstellungen konfigurierten Kameras und akzeptieren keine Widgets.",
     "layout.status.cameras_page_locked": "Diese Seite zeigt die unter Einstellungen → Kameras konfigurierten Kameras.",
     "layout.status.music_page_only": "Musik-Seiten akzeptieren keine Widgets.",
@@ -1671,16 +1652,9 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token": "Long-lived Access Token",
     "settings.ha.token_placeholder": "Leer lassen, um vorhandenen Token zu behalten",
     "settings.ha.rest_fallback": "HA REST Fallback aktivieren (Standard: Aus, WS bevorzugt)",
-    "settings.xiaozhi.heading": "Xiaozhi KI",
     "settings.assist.heading": "Sprachassistent (HA Assist)",
     "settings.statusbar.heading": "Statusleiste",
     "settings.radar.heading": "Präsenzsensor (LD2410)",
-    "settings.xiaozhi.enabled": "Xiaozhi-KI-Sprachassistent aktivieren",
-    "settings.xiaozhi.cloud_activation": "Cloud-Aktivierung (Kopplungscode)",
-    "settings.xiaozhi.server": "WebSocket-URL (ws:// oder wss://)",
-    "settings.xiaozhi.ota_url": "Xiaozhi-Cloud-OTA-URL (Kopplungscode)",
-    "settings.xiaozhi.device": "Gerate-ID (optional)",
-    "settings.xiaozhi.token": "Zugangstoken",
     "settings.cameras.heading": "Kameras",
     "settings.cameras.item_refresh": "Aktualisierung: {ms} ms",
     "settings.cameras.disabled": "Deaktiviert",
@@ -1759,7 +1733,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ap.hint": "Wenn Setup AP aktiv ist, verbinden und <code>http://192.168.4.1</code> oeffnen.",
     "settings.ota.heading": "Firmware Update",
     "settings.ota.url": "OTA URL",
-    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-7b.ota.bin",
+    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-43.bin",
     "settings.ota.flash_url": "URL flashen",
     "settings.ota.refresh": "Status aktualisieren",
     "settings.ota.file": "OTA .bin Datei",
@@ -1836,8 +1810,6 @@ const WEB_I18N_BUILTIN = {
     "settings.language.invalid_country": "WLAN Laendercode muss ein 2-stelliger ISO Code sein (z.B. US, DE)",
     "settings.language.invalid_bssid": "BSSID muss leer sein oder Format AA:BB:CC:DD:EE:FF haben",
     "settings.language.invalid_ha_url": "HA URL muss mit ws:// oder wss:// beginnen",
-    "settings.language.invalid_xiaozhi_url": "Xiaozhi-URL muss mit ws:// oder wss:// beginnen",
-    "settings.language.invalid_ota_url": "Xiaozhi-OTA-URL muss mit http:// oder https:// beginnen",
     "provision.wifi.required_ssid": "SSID ist erforderlich.",
     "provision.wifi.required_country": "Laendercode muss 2 Buchstaben haben (z.B. US, DE).",
     "provision.ha.required_url": "WebSocket URL ist erforderlich.",
@@ -2065,19 +2037,9 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token": "Token de acceso de larga duracion",
     "settings.ha.token_placeholder": "Dejar vacio para conservar el token guardado",
     "settings.ha.rest_fallback": "Activar fallback REST de HA (por defecto: off, se prefiere WS)",
-    "settings.xiaozhi.heading": "Xiaozhi IA",
-    "settings.xiaozhi.enabled": "Activar asistente de voz Xiaozhi IA",
-    "settings.xiaozhi.cloud_activation": "Activacion en la nube (codigo de vinculacion)",
-    "settings.xiaozhi.server": "URL WebSocket (ws:// o wss://)",
-    "settings.xiaozhi.ota_url": "URL OTA de la nube Xiaozhi (codigo de vinculacion)",
-    "settings.xiaozhi.device": "ID de dispositivo (opcional)",
-    "settings.xiaozhi.token": "Token de acceso",
     "settings.cameras.heading": "Camaras",
     "settings.cameras.item_refresh": "Actualizacion: {ms} ms",
     "settings.cameras.disabled": "Desactivada",
-    "layout.status.xiaozhi_page_only": "Las paginas Xiaozhi estan dedicadas al asistente de voz y no aceptan widgets.",
-    "layout.status.xiaozhi_page_locked": "Esta pagina la gestiona el asistente de voz Xiaozhi AI integrado en el firmware. Configuralo en Ajustes -> Xiaozhi AI.",
-    "layout.pages.xiaozhi_title": "Xiaozhi",
     "settings.cameras.hint": "Configura hasta 4 camaras (entidades HA camera.* o instantaneas HTTP).",
     "settings.cameras.add": "+ Agregar camara",
     "settings.cameras.name": "Nombre",
@@ -2153,7 +2115,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ap.hint": "Si el AP de setup esta activo, conectate y abre <code>http://192.168.4.1</code>.",
     "settings.ota.heading": "Actualizacion de firmware",
     "settings.ota.url": "URL OTA",
-    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-7b.ota.bin",
+    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-43.bin",
     "settings.ota.flash_url": "Flashear URL",
     "settings.ota.refresh": "Actualizar estado",
     "settings.ota.file": "Archivo OTA .bin",
@@ -2226,8 +2188,6 @@ const WEB_I18N_BUILTIN = {
     "settings.language.invalid_country": "El codigo de pais Wi-Fi debe ser ISO de 2 letras (p.ej. US, DE)",
     "settings.language.invalid_bssid": "El BSSID debe estar vacio o en formato AA:BB:CC:DD:EE:FF",
     "settings.language.invalid_ha_url": "La URL HA debe empezar con ws:// o wss://",
-    "settings.language.invalid_xiaozhi_url": "La URL Xiaozhi debe empezar con ws:// o wss://",
-    "settings.language.invalid_ota_url": "La URL OTA Xiaozhi debe empezar con http:// o https://",
     "provision.wifi.required_ssid": "SSID es obligatorio.",
     "provision.wifi.required_country": "El codigo de pais debe tener 2 letras (p.ej. US, DE).",
     "provision.ha.required_url": "La URL WebSocket es obligatoria.",
@@ -2455,19 +2415,9 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token": "Jeton d'acces longue duree",
     "settings.ha.token_placeholder": "Laisser vide pour garder le token stocke",
     "settings.ha.rest_fallback": "Activer le fallback REST HA (defaut: off, WS prefere)",
-    "settings.xiaozhi.heading": "Xiaozhi IA",
-    "settings.xiaozhi.enabled": "Activer l'assistant vocal Xiaozhi IA",
-    "settings.xiaozhi.cloud_activation": "Activation cloud (code d'appairage)",
-    "settings.xiaozhi.server": "URL WebSocket (ws:// ou wss://)",
-    "settings.xiaozhi.ota_url": "URL OTA du cloud Xiaozhi (code d'appairage)",
-    "settings.xiaozhi.device": "ID de l'appareil (facultatif)",
-    "settings.xiaozhi.token": "Jeton d'acces",
     "settings.cameras.heading": "Cameras",
     "settings.cameras.item_refresh": "Actualisation : {ms} ms",
     "settings.cameras.disabled": "Desactivee",
-    "layout.status.xiaozhi_page_only": "Les pages Xiaozhi sont dediees a l'assistant vocal et n'acceptent pas de widgets.",
-    "layout.status.xiaozhi_page_locked": "Cette page est geree par l'assistant vocal Xiaozhi AI integre au firmware. Configurez-le dans Reglages -> Xiaozhi AI.",
-    "layout.pages.xiaozhi_title": "Xiaozhi",
     "settings.cameras.hint": "Configurez jusqu'a 4 cameras (entites HA camera.* ou instantanes HTTP).",
     "settings.cameras.add": "+ Ajouter une camera",
     "settings.cameras.name": "Nom",
@@ -2543,7 +2493,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ap.hint": "Si le setup AP est actif, connectez-vous et ouvrez <code>http://192.168.4.1</code>.",
     "settings.ota.heading": "Mise a jour firmware",
     "settings.ota.url": "URL OTA",
-    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-7b.ota.bin",
+    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-43.bin",
     "settings.ota.flash_url": "Flasher URL",
     "settings.ota.refresh": "Actualiser statut",
     "settings.ota.file": "Fichier OTA .bin",
@@ -2616,8 +2566,6 @@ const WEB_I18N_BUILTIN = {
     "settings.language.invalid_country": "Le code pays Wi-Fi doit etre un code ISO a 2 lettres (ex: US, DE)",
     "settings.language.invalid_bssid": "Le BSSID doit etre vide ou au format AA:BB:CC:DD:EE:FF",
     "settings.language.invalid_ha_url": "L'URL HA doit commencer par ws:// ou wss://",
-    "settings.language.invalid_xiaozhi_url": "L'URL Xiaozhi doit commencer par ws:// ou wss://",
-    "settings.language.invalid_ota_url": "L'URL OTA Xiaozhi doit commencer par http:// ou https://",
     "provision.wifi.required_ssid": "SSID requis.",
     "provision.wifi.required_country": "Le code pays doit avoir 2 lettres (ex: US, DE).",
     "provision.ha.required_url": "URL WebSocket requise.",
@@ -2653,7 +2601,6 @@ const WEB_I18N_BUILTIN = {
     "layout.pages.apply_title": "Zastosuj tytuł strony",
     "layout.pages.new_title": "Strona {number}",
     "layout.pages.energy_title": "Energia",
-    "layout.pages.xiaozhi_title": "Xiaozhi",
     "layout.energy.heading": "Strona Energii",
     "layout.energy.hint": "Wybierz, czy strona odzwierciedla Energię z Home Assistant, czy używa ręcznych czujników na żywo.",
     "layout.energy.source": "Źródło danych",
@@ -2687,8 +2634,6 @@ const WEB_I18N_BUILTIN = {
     "layout.energy.battery": "Bateria",
     "layout.energy.water": "Woda",
     "layout.status.energy_page_only": "Strony Energii nie przyjmują widżetów.",
-    "layout.status.xiaozhi_page_only": "Strony Xiaozhi są przeznaczone dla asystenta głosowego i nie przyjmują widżetów.",
-    "layout.status.xiaozhi_page_locked": "Ta strona jest zarządzana przez asystenta głosowego Xiaozhi AI wbudowanego w oprogramowanie. Skonfiguruj go w Ustawienia → Xiaozhi AI.",
     "layout.widgets.heading": "Widżety",
     "layout.widgets.add_sensor": "+ Czujnik",
     "layout.widgets.add_binary": "+ Czujnik binarny",
@@ -2906,13 +2851,6 @@ const WEB_I18N_BUILTIN = {
     "settings.ha.token": "Długoterminowy token dostępu",
     "settings.ha.token_placeholder": "Pozostaw puste, aby zachować zapisany token",
     "settings.ha.rest_fallback": "Włącz zapasowy REST HA (Domyślnie: Wył., preferowany tylko WS)",
-    "settings.xiaozhi.heading": "Xiaozhi AI",
-    "settings.xiaozhi.enabled": "Włącz asystenta głosowego Xiaozhi AI",
-    "settings.xiaozhi.cloud_activation": "Aktywacja w chmurze (kod parowania)",
-    "settings.xiaozhi.server": "Adres WebSocket (ws:// lub wss://)",
-    "settings.xiaozhi.ota_url": "Adres OTA Xiaozhi Cloud (kod parowania)",
-    "settings.xiaozhi.device": "ID urządzenia (opcjonalnie)",
-    "settings.xiaozhi.token": "Token dostępu",
     "settings.cameras.heading": "Kamery",
     "settings.cameras.hint": "Skonfiguruj do 4 kamer (encje HA camera.* lub migawki HTTP).",
     "settings.cameras.add": "+ Dodaj kamerę",
@@ -2958,7 +2896,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ap.inactive": "AP konfiguracyjny nieaktywny.\nUżyj adresu IP panelu w domowej sieci Wi-Fi.",
     "settings.ota.heading": "Aktualizacja oprogramowania",
     "settings.ota.url": "Adres OTA",
-    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-7b.ota.bin",
+    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-43.bin",
     "settings.ota.flash_url": "Adres flash",
     "settings.ota.refresh": "Odśwież status",
     "settings.ota.file": "Plik OTA .bin",
@@ -3040,8 +2978,6 @@ const WEB_I18N_BUILTIN = {
     "settings.language.invalid_country": "Kod kraju Wi-Fi musi być 2-literowym kodem ISO (np. US, DE)",
     "settings.language.invalid_bssid": "BSSID musi być puste lub w formacie AA:BB:CC:DD:EE:FF",
     "settings.language.invalid_ha_url": "Adres HA musi zaczynać się od ws:// lub wss://",
-    "settings.language.invalid_xiaozhi_url": "Adres Xiaozhi musi zaczynać się od ws:// lub wss://",
-    "settings.language.invalid_ota_url": "Adres OTA Xiaozhi musi zaczynać się od http:// lub https://",
     "provision.wifi.required_ssid": "SSID jest wymagane.",
     "provision.wifi.required_country": "Kod kraju musi mieć 2 litery (np. US, DE).",
     "provision.ha.required_url": "Adres WebSocket jest wymagany.",
@@ -3084,7 +3020,6 @@ const WEB_I18N_BUILTIN = {
     "layout.widgets.weather_hum_title": "Wilgotność",
     "layout.pages.menu_normal": "Zwykła strona",
     "layout.pages.menu_energy": "Strona energii",
-    "layout.pages.menu_xiaozhi": "Strona Xiaozhi",
     "layout.pages.menu_cameras": "Strona kamer",
     "layout.pages.cameras_title": "Kamery",
     "layout.pages.menu_music": "Strona muzyki",
@@ -3186,9 +3121,6 @@ const WEB_I18N_BUILTIN = {
     "settings.localCam.motion_triggers": "wyzwolenia",
     "settings.localCam.motion_lighting": "oświetlenie ignorowane",
     "settings.localCam.motion_diag_failed": "Sprawdzenie detekcji nieudane: {error}",
-    "layout.status.xiaozhi_page_only": "Strony Xiaozhi są przeznaczone dla asystenta głosowego i nie przyjmują widżetów.",
-    "layout.status.xiaozhi_page_locked": "Ta strona jest zarządzana przez asystenta głosowego Xiaozhi AI wbudowanego w oprogramowanie. Skonfiguruj go w Ustawienia → Xiaozhi AI.",
-    "layout.pages.xiaozhi_title": "Xiaozhi",
     "settings.wifi.ssid": "SSID",
     "settings.wifi.country_code": "Kod kraju",
     "settings.wifi.bssid": "Blokada BSSID (opcjonalnie)",
@@ -3852,8 +3784,6 @@ const WEB_I18N_BUILTIN = {
     "settings.language.invalid_bssid": "BSSID musi być puste lub w formacie AA:BB:CC:DD:EE:FF",
     "settings.language.invalid_country": "Kod kraju Wi-Fi musi być 2-literowym kodem ISO (np. US, DE)",
     "settings.language.invalid_ha_url": "Adres HA musi zaczynać się od ws:// lub wss://",
-    "settings.language.invalid_ota_url": "Adres OTA Xiaozhi musi zaczynać się od http:// lub https://",
-    "settings.language.invalid_xiaozhi_url": "Adres Xiaozhi musi zaczynać się od ws:// lub wss://",
     "settings.language.option_de": "Niemiecki",
     "settings.language.option_en": "Angielski",
     "settings.language.option_es": "Hiszpański",
@@ -3877,7 +3807,7 @@ const WEB_I18N_BUILTIN = {
     "settings.ota.upload_progress": "Wgrywanie do panelu: {progress}% ({written} / {total})",
     "settings.ota.uploading": "Panel otrzymał wgranie: {progress}% ({written} / {total})",
     "settings.ota.url": "Adres OTA",
-    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-7b.ota.bin",
+    "settings.ota.url_placeholder": "https://example.com/betta-ha-panel-43.bin",
     "settings.theme.heading": "Motyw",
     "settings.time.heading": "Czas",
     "settings.time.info": "Zastosowane po restarcie. Synchronizacja czasu zaczyna się po połączeniu Wi-Fi.",
@@ -3898,13 +3828,6 @@ const WEB_I18N_BUILTIN = {
     "settings.ui.upload_button": "Wgraj / dodaj język",
     "settings.ui.upload_code": "Kod języka",
     "settings.ui.upload_file": "Plik JSON tłumaczenia",
-    "settings.xiaozhi.cloud_activation": "Aktywacja w chmurze (kod parowania)",
-    "settings.xiaozhi.device": "ID urządzenia (opcjonalnie)",
-    "settings.xiaozhi.enabled": "Włącz asystenta głosowego Xiaozhi AI",
-    "settings.xiaozhi.heading": "Xiaozhi AI",
-    "settings.xiaozhi.ota_url": "Adres OTA Xiaozhi Cloud (kod parowania)",
-    "settings.xiaozhi.server": "Adres WebSocket (ws:// lub wss://)",
-    "settings.xiaozhi.token": "Token dostępu",
     "setup.add_button": "+ Przełącznik",
     "setup.add_heating": "+ Ogrzewanie",
     "setup.add_light": "+ Światło",
@@ -3971,7 +3894,6 @@ const WEB_I18N_BUILTIN = {
     "layout.widgets.weather_hum_title": "Wilgotność",
     "layout.pages.menu_normal": "Zwykła strona",
     "layout.pages.menu_energy": "Strona energii",
-    "layout.pages.menu_xiaozhi": "Strona Xiaozhi",
     "layout.pages.menu_cameras": "Strona kamer",
     "layout.pages.cameras_title": "Kamery",
     "layout.pages.menu_music": "Strona muzyki",
@@ -4245,7 +4167,6 @@ const el = {
   toggleInspectorSection: document.getElementById("toggleInspectorSection"),
   addPageBtn: document.getElementById("addPageBtn"),
   addEnergyPageBtn: document.getElementById("addEnergyPageBtn"),
-  addXiaozhiPageBtn: document.getElementById("addXiaozhiPageBtn"),
   addCamerasPageBtn: document.getElementById("addCamerasPageBtn"),
   addMusicPageBtn: document.getElementById("addMusicPageBtn"),
   addRadioPageBtn: document.getElementById("addRadioPageBtn"),
@@ -4454,12 +4375,6 @@ const el = {
   settingsHaUrl: document.getElementById("settingsHaUrl"),
   settingsHaToken: document.getElementById("settingsHaToken"),
   settingsHaRestEnabled: document.getElementById("settingsHaRestEnabled"),
-  settingsXiaozhiEnabled: document.getElementById("settingsXiaozhiEnabled"),
-  settingsXiaozhiServer: document.getElementById("settingsXiaozhiServer"),
-  settingsXiaozhiOtaUrl: document.getElementById("settingsXiaozhiOtaUrl"),
-  settingsXiaozhiDevice: document.getElementById("settingsXiaozhiDevice"),
-  settingsXiaozhiToken: document.getElementById("settingsXiaozhiToken"),
-  settingsXiaozhiInfo: document.getElementById("settingsXiaozhiInfo"),
   camerasList: document.getElementById("camerasList"),
   camerasAddBtn: document.getElementById("camerasAddBtn"),
   camerasEditor: document.getElementById("camerasEditor"),
@@ -5738,6 +5653,10 @@ function bindPageLookInputs() {
 
 function normalizeLayoutWidgets(layout) {
   if (!layout || !Array.isArray(layout.pages)) return;
+  /* The Xiaozhi assistant is gone; the firmware ignores such pages in older
+   * layouts, so the editor drops them as well. */
+  layout.pages = layout.pages.filter((page) => page?.type !== "xiaozhi");
+  if (!layout.pages.length) layout.pages.push(defaultLayout().pages[0]);
   for (const page of layout.pages) {
     normalizePageLook(page);
     if (isEnergyPage(page)) {
@@ -6011,77 +5930,6 @@ async function loadAppVersion() {
     editor.appScreenH = 0;
   }
   renderAppVersion();
-  void refreshLatestOtaUrl();
-}
-
-function otaPanelVariant() {
-  const project = (editor.appProject || "").toLowerCase();
-  if (project.includes("10.1") || project.includes("panel10") || editor.appScreenW >= 1000) {
-    return "panel10";
-  }
-  return "panel4";
-}
-
-function otaCurrentVersionTag() {
-  const version = (editor.appVersion || "").trim();
-  return /^v\d+\.\d+\.\d+/.test(version) ? version : "";
-}
-
-function otaLatestFallbackUrl() {
-  const version = otaCurrentVersionTag();
-  if (!version) return "";
-  const variant = otaPanelVariant();
-  return `https://github.com/${OTA_RELEASE_REPO}/releases/latest/download/betta86-ha-panel-${version}-${variant}.ota.bin`;
-}
-
-function applyLatestOtaUrl(url) {
-  if (!url) return;
-  const previousAuto = editor.ota.autoFilledUrl || "";
-  editor.ota.latestUrl = url;
-  if (el.settingsOtaUrl) {
-    el.settingsOtaUrl.placeholder = url;
-    const current = el.settingsOtaUrl.value.trim();
-    if (!current || current === previousAuto) {
-      el.settingsOtaUrl.value = url;
-      editor.ota.autoFilledUrl = url;
-    }
-  }
-}
-
-async function refreshLatestOtaUrl() {
-  if (editor.ota.latestUrlLoading) return;
-
-  const fallback = otaLatestFallbackUrl();
-  if (fallback) {
-    applyLatestOtaUrl(fallback);
-  }
-
-  editor.ota.latestUrlLoading = true;
-  try {
-    const response = await fetch(`https://api.github.com/repos/${OTA_RELEASE_REPO}/releases/latest`, {
-      cache: "no-store",
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!response.ok) return;
-    const payload = await response.json();
-    const assets = Array.isArray(payload?.assets) ? payload.assets : [];
-    const variant = otaPanelVariant();
-    const suffix = `-${variant}.ota.bin`;
-    const asset = assets.find((item) =>
-      typeof item?.name === "string" &&
-      item.name.startsWith("betta86-ha-panel-") &&
-      item.name.endsWith(suffix)
-    );
-    if (asset?.name) {
-      applyLatestOtaUrl(`https://github.com/${OTA_RELEASE_REPO}/releases/latest/download/${asset.name}`);
-    } else if (typeof asset?.browser_download_url === "string") {
-      applyLatestOtaUrl(asset.browser_download_url);
-    }
-  } catch (_) {
-    /* Keep the firmware-version fallback URL. */
-  } finally {
-    editor.ota.latestUrlLoading = false;
-  }
 }
 
 async function loadHaDiagnostics() {
@@ -6298,7 +6146,6 @@ function applyWebTranslations() {
   setTextById("applyMusicPageBtn", "layout.music.apply");
   setTextById("addPageMenuNormal", "layout.pages.menu_normal");
   setTextById("addPageMenuEnergy", "layout.pages.menu_energy");
-  setTextById("addPageMenuXiaozhi", "layout.pages.menu_xiaozhi");
   setTextById("addPageMenuCameras", "layout.pages.menu_cameras");
   setTextById("addPageMenuMusic", "layout.pages.menu_music");
   setTextById("addPageMenuRadio", "layout.pages.menu_radio");
@@ -6527,16 +6374,9 @@ function applyWebTranslations() {
   setPlaceholderById("settingsHaToken", "settings.ha.token_placeholder");
   setTextById("settingsHaRestEnabledLabel", "settings.ha.rest_fallback");
 
-  setTextById("settingsXiaozhiHeading", "settings.xiaozhi.heading");
   setTextById("settingsAssistHeading", "settings.assist.heading");
   setTextById("settingsStatusbarHeading", "settings.statusbar.heading");
   setTextById("settingsRadarHeading", "settings.radar.heading");
-  setTextById("settingsXiaozhiEnabledLabel", "settings.xiaozhi.enabled");
-  setTextById("settingsXiaozhiServerLabel", "settings.xiaozhi.server");
-  setTextById("settingsXiaozhiOtaUrlLabel", "settings.xiaozhi.ota_url");
-  setTextById("settingsXiaozhiDeviceLabel", "settings.xiaozhi.device");
-  setTextById("settingsXiaozhiTokenLabel", "settings.xiaozhi.token");
-  setPlaceholderById("settingsXiaozhiToken", "settings.ha.token_placeholder");
 
   setTextById("settingsCamerasHeading", "settings.cameras.heading");
   setTextById("camerasHint", "settings.cameras.hint");
@@ -7651,23 +7491,7 @@ function renderSettings() {
     el.settingsHaRestEnabled.checked = ha.rest_enabled === true;
   }
   applyAssistSettings(settings.assist || {});
-
-  const xiaozhi = settings.xiaozhi || {};
-  if (el.settingsXiaozhiEnabled) {
-    el.settingsXiaozhiEnabled.checked = xiaozhi.enabled === true;
-  }
-  if (el.settingsXiaozhiServer) {
-    el.settingsXiaozhiServer.value = xiaozhi.server || "";
-  }
-  if (el.settingsXiaozhiOtaUrl) {
-    el.settingsXiaozhiOtaUrl.value = xiaozhi.ota_url || "";
-  }
-  if (el.settingsXiaozhiDevice) {
-    el.settingsXiaozhiDevice.value = xiaozhi.device || "";
-  }
-  if (el.settingsXiaozhiToken) {
-    el.settingsXiaozhiToken.value = "";
-  }
+  applyWebPasswordState(settings.system || {});
 
   const camera = (settings && settings.camera) || {};
   const cameraMotion = camera.motion && typeof camera.motion === "object" ? camera.motion : {};
@@ -7760,14 +7584,6 @@ function renderSettings() {
     `${t("settings.info.token_stored")}: ${ha.access_token_set ? t("common.yes") : t("common.no")}`,
     `${t("settings.info.rest_fallback")}: ${ha.rest_enabled ? t("common.yes") : t("common.no")}`,
   ].join(" | ");
-
-  if (el.settingsXiaozhiInfo) {
-    el.settingsXiaozhiInfo.textContent = [
-      `${t("settings.info.configured")}: ${xiaozhi.configured ? t("common.yes") : t("common.no")}`,
-      `${t("settings.info.token_stored")}: ${xiaozhi.access_token_set ? t("common.yes") : t("common.no")}`,
-      `${t("settings.xiaozhi.cloud_activation")}: ${(xiaozhi.ota_url || "").length > 0 ? t("common.yes") : t("common.no")}`,
-    ].join(" | ");
-  }
 
   el.settingsTimeInfo.textContent = t("settings.time.info");
 
@@ -8027,11 +7843,6 @@ function renderSettings() {
     el.scanWifiBtn.disabled = !scanSupported || editor.wifiScanInProgress;
   }
   renderOtaStatus(editor.ota.status);
-  if (editor.ota.latestUrl) {
-    applyLatestOtaUrl(editor.ota.latestUrl);
-  } else {
-    void refreshLatestOtaUrl();
-  }
   restoreOtaUrl();
   renderWifiScanResults(editor.wifiScanItems);
   void loadPanelPages(false);
@@ -8481,6 +8292,56 @@ async function uploadOtaFile() {
   }
 }
 
+/* ---- Access protection (web password) ---- */
+let webPasswordSet = false;
+
+function applyWebPasswordState(system) {
+  webPasswordSet = system.web_password_set === true;
+  const box = document.getElementById("settingsWebPwEnabled");
+  if (box) box.checked = webPasswordSet;
+  const field = document.getElementById("settingsWebPw");
+  if (field) field.value = "";
+  const info = document.getElementById("settingsWebPwInfo");
+  if (info) {
+    info.textContent = webPasswordSet
+      ? L("Passwortschutz ist aktiv.", "Password protection is on.")
+      : L("Kein Passwort gesetzt: jedes Gerät im Netz kann den Editor nutzen.",
+          "No password set: any device on the network can use the editor.");
+  }
+}
+
+async function applyWebPassword() {
+  const enabled = document.getElementById("settingsWebPwEnabled")?.checked === true;
+  const password = document.getElementById("settingsWebPw")?.value || "";
+  const info = document.getElementById("settingsWebPwInfo");
+  let next;
+  if (!enabled) {
+    if (!webPasswordSet) return;
+    next = "";
+  } else if (password) {
+    next = password;
+  } else {
+    if (info && !webPasswordSet) info.textContent = L("Bitte ein Passwort eingeben.", "Please enter a password.");
+    return;
+  }
+  try {
+    await putSettings({ system: { web_password: next }, reboot: false });
+    if (next) {
+      /* From now on every request needs it: reload so the browser asks once. */
+      window.location.reload();
+      return;
+    }
+    await loadSettings(true);
+  } catch (err) {
+    if (info) info.textContent = `${L("Fehler", "Error")}: ${err.message}`;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("applyWebPwBtn");
+  if (btn) btn.addEventListener("click", () => void applyWebPassword());
+});
+
 async function putSettings(payload) {
   const response = await fetch("/api/settings", {
     method: "PUT",
@@ -8645,11 +8506,6 @@ async function saveSettings() {
   const haUrl = el.settingsHaUrl.value.trim();
   const haToken = el.settingsHaToken.value.trim();
   const haRestEnabled = Boolean(el.settingsHaRestEnabled?.checked);
-  const xiaozhiServer = (el.settingsXiaozhiServer?.value || "").trim();
-  const xiaozhiOtaUrl = (el.settingsXiaozhiOtaUrl?.value || "").trim();
-  const xiaozhiDevice = (el.settingsXiaozhiDevice?.value || "").trim();
-  const xiaozhiToken = (el.settingsXiaozhiToken?.value || "").trim();
-  const xiaozhiEnabled = Boolean(el.settingsXiaozhiEnabled?.checked);
   const ntpServer = el.settingsNtpServer.value.trim();
   const timezone = el.settingsTimezone.value.trim();
   const language = normalizeUiLanguage(el.settingsLanguage?.value);
@@ -8676,14 +8532,6 @@ async function saveSettings() {
     setStatus(t("settings.language.invalid_ha_url"), true);
     return;
   }
-  if (xiaozhiServer && !xiaozhiServer.startsWith("ws://") && !xiaozhiServer.startsWith("wss://")) {
-    setStatus(t("settings.language.invalid_xiaozhi_url"), true);
-    return;
-  }
-  if (xiaozhiOtaUrl && !xiaozhiOtaUrl.startsWith("https://") && !xiaozhiOtaUrl.startsWith("http://")) {
-    setStatus(t("settings.language.invalid_ota_url"), true);
-    return;
-  }
 
   const payload = {
     wifi: {
@@ -8701,12 +8549,6 @@ async function saveSettings() {
       rest_enabled: haRestEnabled,
     },
     assist: collectAssistPayload(),
-    xiaozhi: {
-      server: xiaozhiServer,
-      ota_url: xiaozhiOtaUrl,
-      device: xiaozhiDevice,
-      enabled: xiaozhiEnabled,
-    },
     time: {
       ntp_server: ntpServer,
       timezone,
@@ -8724,9 +8566,6 @@ async function saveSettings() {
   }
   if (haToken.length > 0) {
     payload.ha.access_token = haToken;
-  }
-  if (xiaozhiToken.length > 0) {
-    payload.xiaozhi.access_token = xiaozhiToken;
   }
 
   setStatus(t("status.saving_settings"));
@@ -10869,16 +10708,12 @@ function isEnergyPage(page) {
   return page?.type === ENERGY_PAGE_TYPE;
 }
 
-function isXiaozhiPage(page) {
-  return page?.type === XIAOZHI_PAGE_TYPE;
-}
-
 function isCamerasPage(page) {
   return page?.type === CAMERAS_PAGE_TYPE;
 }
 
 function pageAcceptsWidgets(page) {
-  return !isEnergyPage(page) && !isXiaozhiPage(page) && !isCamerasPage(page);
+  return !isEnergyPage(page) && !isCamerasPage(page);
 }
 
 function energyPageUsesHaSource(page) {
@@ -12135,9 +11970,7 @@ function renderPages() {
     const label = document.createElement("span");
     const badge = isEnergyPage(page)
       ? " ⚡"
-      : isXiaozhiPage(page)
-        ? " 🎤"
-        : isCamerasPage(page)
+      : isCamerasPage(page)
           ? " 📷"
         : isRadioPage(page)
           ? " 📻"
@@ -12147,9 +11980,7 @@ function renderPages() {
     label.textContent = `${page.title || page.id}${badge}`;
     const typeTag = isEnergyPage(page)
       ? "energy"
-      : isXiaozhiPage(page)
-        ? "xiaozhi"
-        : isCamerasPage(page)
+      : isCamerasPage(page)
           ? "cameras"
         : isRadioPage(page)
           ? "radio"
@@ -12244,7 +12075,7 @@ function renderPagesMini() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `mini-page-btn ${page.id === editor.selectedPageId ? "active" : ""}`;
-    button.textContent = `${isEnergyPage(page) ? "E " : isXiaozhiPage(page) ? "X " : isRadioPage(page) ? "R " : isMusicPage(page) ? "M " : isWeatherPage(page) ? "W " : ""}${page.title || page.id}`;
+    button.textContent = `${isEnergyPage(page) ? "E " : isRadioPage(page) ? "R " : isMusicPage(page) ? "M " : isWeatherPage(page) ? "W " : ""}${page.title || page.id}`;
     button.title = `${page.title || page.id} [${page.id}]`;
     button.onclick = () => {
       editor.selectedPageId = page.id;
@@ -12390,9 +12221,7 @@ function renderWidgets() {
     const li = document.createElement("li");
     li.className = "list-item muted";
     li.textContent = t(
-      isXiaozhiPage(page)
-        ? "layout.status.xiaozhi_page_only"
-        : isCamerasPage(page)
+      isCamerasPage(page)
           ? "layout.status.cameras_page_only"
         : radioPage
           ? "layout.radio.no_widgets"
@@ -12983,14 +12812,6 @@ function renderCanvas() {
     return;
   }
 
-  if (isXiaozhiPage(page)) {
-    const note = document.createElement("div");
-    note.className = "canvas-empty-note";
-    note.textContent = t("layout.status.xiaozhi_page_locked");
-    el.canvas.appendChild(note);
-    return;
-  }
-
   if (isCamerasPage(page)) {
     const note = document.createElement("div");
     note.className = "canvas-empty-note";
@@ -13577,19 +13398,6 @@ function addEnergyPage() {
   void loadEnergyPreview();
 }
 
-function addXiaozhiPage() {
-  const pageId = uniqueId("xiaozhi", editor.layout.pages);
-  editor.layout.pages.push({
-    id: pageId,
-    type: XIAOZHI_PAGE_TYPE,
-    title: t("layout.pages.xiaozhi_title"),
-    widgets: [],
-  });
-  editor.selectedPageId = pageId;
-  editor.selectedWidgetId = null;
-  renderAll();
-}
-
 function addCamerasPage() {
   const pageId = uniqueId("cameras", editor.layout.pages);
   editor.layout.pages.push({
@@ -13735,9 +13543,7 @@ function addWidget(type, options = {}) {
   const page = selectedPage();
   if (!page) return;
   if (!pageAcceptsWidgets(page)) {
-    setStatus(t(isXiaozhiPage(page)
-      ? "layout.status.xiaozhi_page_only"
-      : isCamerasPage(page)
+    setStatus(t(isCamerasPage(page)
         ? "layout.status.cameras_page_only"
         : "layout.status.energy_page_only"), true);
     return null;
@@ -14360,9 +14166,6 @@ function bindUi() {
   }
   if (el.addEnergyPageBtn) {
     el.addEnergyPageBtn.onclick = addEnergyPage;
-  }
-  if (el.addXiaozhiPageBtn) {
-    el.addXiaozhiPageBtn.onclick = addXiaozhiPage;
   }
   if (el.addCamerasPageBtn) {
     el.addCamerasPageBtn.onclick = addCamerasPage;
@@ -15856,13 +15659,6 @@ function initSimpleUiMenus() {
     pageEnergy.onclick = () => {
       closeAllDropdowns();
       if (el.addEnergyPageBtn) el.addEnergyPageBtn.click();
-    };
-  }
-  const pageXiaozhi = document.getElementById("addPageMenuXiaozhi");
-  if (pageXiaozhi) {
-    pageXiaozhi.onclick = () => {
-      closeAllDropdowns();
-      if (el.addXiaozhiPageBtn) el.addXiaozhiPageBtn.click();
     };
   }
   const pageCameras = document.getElementById("addPageMenuCameras");

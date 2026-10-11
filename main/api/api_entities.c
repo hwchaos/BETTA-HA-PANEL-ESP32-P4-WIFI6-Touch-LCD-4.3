@@ -27,7 +27,6 @@ static void set_json_headers(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 }
 
 static size_t parse_max_items(const char *value)
@@ -283,60 +282,6 @@ esp_err_t api_assist_pipelines_get_handler(httpd_req_t *req)
     return err;
 }
 
-/* GET /api/debug/storage?offset=0&len=65536 -> raw bytes of the "storage"
- * (LittleFS) partition. Read-only; used to recover data from blocks the file
- * system has already released. */
-esp_err_t api_debug_storage_get_handler(httpd_req_t *req)
-{
-    const esp_partition_t *part =
-        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
-    if (part == NULL) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no storage partition");
-    }
-    char qs[64] = {0};
-    char raw[16] = {0};
-    size_t offset = 0;
-    size_t len = 65536;
-    if (httpd_req_get_url_query_str(req, qs, sizeof(qs)) == ESP_OK) {
-        if (httpd_query_key_value(qs, "offset", raw, sizeof(raw)) == ESP_OK) {
-            offset = (size_t)strtoul(raw, NULL, 0);
-        }
-        if (httpd_query_key_value(qs, "len", raw, sizeof(raw)) == ESP_OK) {
-            len = (size_t)strtoul(raw, NULL, 0);
-        }
-    }
-    if (offset >= part->size) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "offset out of range");
-    }
-    if (len == 0 || len > 65536) {
-        len = 65536;
-    }
-    if (offset + len > part->size) {
-        len = part->size - offset;
-    }
-    uint8_t *buf = malloc(4096);
-    if (buf == NULL) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
-    }
-    char size_hdr[16];
-    snprintf(size_hdr, sizeof(size_hdr), "%u", (unsigned)part->size);
-    httpd_resp_set_type(req, "application/octet-stream");
-    httpd_resp_set_hdr(req, "X-Partition-Size", size_hdr);
-    esp_err_t err = ESP_OK;
-    for (size_t done = 0; done < len && err == ESP_OK; done += 4096) {
-        const size_t n = (len - done) > 4096 ? 4096 : (len - done);
-        err = esp_partition_read(part, offset + done, buf, n);
-        if (err == ESP_OK) {
-            err = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)n);
-        }
-    }
-    free(buf);
-    if (err == ESP_OK) {
-        err = httpd_resp_send_chunk(req, NULL, 0);
-    }
-    return err;
-}
-
 /* GET /api/debug/activity -> what keeps resetting the screensaver's idle timer. */
 esp_err_t api_debug_activity_get_handler(httpd_req_t *req)
 {
@@ -347,6 +292,16 @@ esp_err_t api_debug_activity_get_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
     }
     cJSON_AddNumberToObject(root, "idle_ms", (double)display_ms_since_activity());
+    /* Render cost since boot: compare total_ms / passes before and after a change. */
+    display_render_stats_t rs;
+    display_render_stats_get(&rs);
+    cJSON *render = cJSON_AddObjectToObject(root, "render");
+    if (render != NULL) {
+        cJSON_AddNumberToObject(render, "passes", rs.passes);
+        cJSON_AddNumberToObject(render, "full_passes", rs.full_passes);
+        cJSON_AddNumberToObject(render, "total_ms", (double)(rs.total_pass_us / 1000));
+        cJSON_AddNumberToObject(render, "max_ms", rs.max_pass_ms);
+    }
     cJSON *list = cJSON_AddArrayToObject(root, "sources");
     for (size_t i = 0; i < n && list != NULL; i++) {
         cJSON *item = cJSON_CreateObject();

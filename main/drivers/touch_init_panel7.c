@@ -24,15 +24,9 @@
 #define BSP_LCD_TOUCH_RST GPIO_NUM_NC
 #endif
 
-#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43) || defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
 #define TOUCH_SWAP_XY 0
 #define TOUCH_MIRROR_X 0
 #define TOUCH_MIRROR_Y 0
-#else
-#define TOUCH_SWAP_XY 0
-#define TOUCH_MIRROR_X 1
-#define TOUCH_MIRROR_Y 1
-#endif
 
 static bool s_touch_ready = false;
 static lv_indev_t *s_touch_indev = NULL;
@@ -124,13 +118,9 @@ static esp_err_t touch_create_gt911(esp_lcd_touch_handle_t *out_touch, int attem
 
     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
     tp_io_config.scl_speed_hz = CONFIG_BSP_I2C_CLK_SPEED_HZ;
-#if defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_43) || defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
     /* No INT/RST wired: the GT911 answers on 0x5D or 0x14, so alternate. */
     tp_io_config.dev_addr = (attempt % 2 == 1) ? 0x5D : 0x14;
     ESP_LOGI(TAG_TOUCH, "GT911 probing address 0x%02x", (unsigned)tp_io_config.dev_addr);
-#else
-    (void)attempt;
-#endif
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
     err = esp_lcd_new_panel_io_i2c(i2c_handle, &tp_io_config, &io_handle);

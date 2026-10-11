@@ -39,7 +39,6 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root, const char *status)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     if (status != NULL) {
         httpd_resp_set_status(req, status);
     }
@@ -337,7 +336,6 @@ esp_err_t api_sd_file_get_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, content_type_for(rel));
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
     esp_err_t err = ESP_OK;
     size_t got = 0;

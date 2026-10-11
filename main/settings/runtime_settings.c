@@ -21,8 +21,10 @@
 #define SETTINGS_NVS_NAMESPACE "runtime_sec"
 #define SETTINGS_NVS_KEY_WIFI_PASSWORD "wifi_pwd"
 #define SETTINGS_NVS_KEY_HA_ACCESS_TOKEN "ha_token"
-#define SETTINGS_NVS_KEY_XIAOZHI_TOKEN "xz_token"
+/* Left over from the removed Xiaozhi assistant; erased on the next save. */
+#define SETTINGS_NVS_KEY_LEGACY_XIAOZHI_TOKEN "xz_token"
 #define SETTINGS_NVS_KEY_MQTT_PASSWORD "mqtt_pwd"
+#define SETTINGS_NVS_KEY_WEB_PASSWORD "web_pwd"
 
 static bool is_placeholder(const char *text)
 {
@@ -230,19 +232,17 @@ cJSON *runtime_settings_public_json(const runtime_settings_t *settings)
     cJSON *ha = cJSON_CreateObject();
     cJSON *time_cfg = cJSON_CreateObject();
     cJSON *ui = cJSON_CreateObject();
-    cJSON *xiaozhi = cJSON_CreateObject();
     cJSON *display = cJSON_CreateObject();
     cJSON *mqtt = cJSON_CreateObject();
     cJSON *system = cJSON_CreateObject();
     cJSON *storage = cJSON_CreateObject();
-    if (root == NULL || wifi == NULL || ha == NULL || time_cfg == NULL || ui == NULL || xiaozhi == NULL ||
+    if (root == NULL || wifi == NULL || ha == NULL || time_cfg == NULL || ui == NULL ||
         display == NULL || mqtt == NULL || system == NULL || storage == NULL) {
         cJSON_Delete(root);
         cJSON_Delete(wifi);
         cJSON_Delete(ha);
         cJSON_Delete(time_cfg);
         cJSON_Delete(ui);
-        cJSON_Delete(xiaozhi);
         cJSON_Delete(display);
         cJSON_Delete(mqtt);
         cJSON_Delete(system);
@@ -272,13 +272,6 @@ cJSON *runtime_settings_public_json(const runtime_settings_t *settings)
 
     cJSON_AddStringToObject(ui, "language", settings->ui_language);
     cJSON_AddItemToObject(root, "ui", ui);
-
-    /* The Xiaozhi token is a secret and is persisted in NVS, never here. */
-    cJSON_AddStringToObject(xiaozhi, "server", settings->xiaozhi_server);
-    cJSON_AddStringToObject(xiaozhi, "device", settings->xiaozhi_device);
-    cJSON_AddStringToObject(xiaozhi, "ota_url", settings->xiaozhi_ota_url);
-    cJSON_AddBoolToObject(xiaozhi, "enabled", settings->xiaozhi_enabled);
-    cJSON_AddItemToObject(root, "xiaozhi", xiaozhi);
 
     cJSON_AddNumberToObject(display, "brightness", settings->display_brightness);
     cJSON_AddNumberToObject(display, "saver_brightness", settings->display_saver_brightness);
@@ -497,7 +490,6 @@ static esp_err_t parse_settings_json(
     cJSON *ha = cJSON_GetObjectItemCaseSensitive(root, "ha");
     cJSON *time_cfg = cJSON_GetObjectItemCaseSensitive(root, "time");
     cJSON *ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
-    cJSON *xiaozhi = cJSON_GetObjectItemCaseSensitive(root, "xiaozhi");
     cJSON *display = cJSON_GetObjectItemCaseSensitive(root, "display");
     cJSON *mqtt = cJSON_GetObjectItemCaseSensitive(root, "mqtt");
     cJSON *system = cJSON_GetObjectItemCaseSensitive(root, "system");
@@ -594,20 +586,6 @@ static esp_err_t parse_settings_json(
         json_copy_string(ui, "language", out->ui_language, sizeof(out->ui_language));
     } else {
         json_copy_string(root, "language", out->ui_language, sizeof(out->ui_language));
-    }
-
-    if (cJSON_IsObject(xiaozhi)) {
-        json_copy_string(xiaozhi, "server", out->xiaozhi_server, sizeof(out->xiaozhi_server));
-        json_copy_string(xiaozhi, "device", out->xiaozhi_device, sizeof(out->xiaozhi_device));
-        json_copy_string(xiaozhi, "ota_url", out->xiaozhi_ota_url, sizeof(out->xiaozhi_ota_url));
-        cJSON *enabled = cJSON_GetObjectItemCaseSensitive(xiaozhi, "enabled");
-        if (cJSON_IsBool(enabled)) {
-            out->xiaozhi_enabled = cJSON_IsTrue(enabled);
-        }
-    } else {
-        json_copy_string(root, "xiaozhi_server", out->xiaozhi_server, sizeof(out->xiaozhi_server));
-        json_copy_string(root, "xiaozhi_device", out->xiaozhi_device, sizeof(out->xiaozhi_device));
-        json_copy_string(root, "xiaozhi_ota_url", out->xiaozhi_ota_url, sizeof(out->xiaozhi_ota_url));
     }
 
     if (cJSON_IsObject(display)) {
@@ -1175,13 +1153,19 @@ static esp_err_t nvs_save_secrets(const runtime_settings_t *settings)
         return err;
     }
 
-    err = nvs_set_or_erase_secret(handle, SETTINGS_NVS_KEY_XIAOZHI_TOKEN, settings->xiaozhi_token);
-    if (err != ESP_OK) {
+    err = nvs_erase_key(handle, SETTINGS_NVS_KEY_LEGACY_XIAOZHI_TOKEN);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         nvs_close(handle);
         return err;
     }
 
     err = nvs_set_or_erase_secret(handle, SETTINGS_NVS_KEY_MQTT_PASSWORD, settings->mqtt_password);
+    if (err != ESP_OK) {
+        nvs_close(handle);
+        return err;
+    }
+
+    err = nvs_set_or_erase_secret(handle, SETTINGS_NVS_KEY_WEB_PASSWORD, settings->web_password);
     if (err != ESP_OK) {
         nvs_close(handle);
         return err;
@@ -1216,20 +1200,20 @@ static void runtime_settings_merge_secrets_from_nvs(runtime_settings_t *settings
         strlcpy(settings->ha_access_token, ha_access_token, sizeof(settings->ha_access_token));
     }
 
-    char xiaozhi_token[APP_XIAOZHI_TOKEN_MAX_LEN] = {0};
-    bool has_xiaozhi_token = false;
-    esp_err_t xz_token_err = nvs_load_secret(
-        SETTINGS_NVS_KEY_XIAOZHI_TOKEN, xiaozhi_token, sizeof(xiaozhi_token), &has_xiaozhi_token);
-    if (xz_token_err == ESP_OK && has_xiaozhi_token) {
-        strlcpy(settings->xiaozhi_token, xiaozhi_token, sizeof(settings->xiaozhi_token));
-    }
-
     char mqtt_password[APP_MQTT_PASSWORD_MAX_LEN] = {0};
     bool has_mqtt_password = false;
     esp_err_t mqtt_err = nvs_load_secret(
         SETTINGS_NVS_KEY_MQTT_PASSWORD, mqtt_password, sizeof(mqtt_password), &has_mqtt_password);
     if (mqtt_err == ESP_OK && has_mqtt_password) {
         strlcpy(settings->mqtt_password, mqtt_password, sizeof(settings->mqtt_password));
+    }
+
+    char web_password[APP_WEB_PASSWORD_MAX_LEN] = {0};
+    bool has_web_password = false;
+    esp_err_t web_err =
+        nvs_load_secret(SETTINGS_NVS_KEY_WEB_PASSWORD, web_password, sizeof(web_password), &has_web_password);
+    if (web_err == ESP_OK && has_web_password) {
+        strlcpy(settings->web_password, web_password, sizeof(settings->web_password));
     }
 }
 
@@ -1258,11 +1242,6 @@ void runtime_settings_set_defaults(runtime_settings_t *out)
     strlcpy(out->time_tz, APP_TIME_TZ, sizeof(out->time_tz));
     strlcpy(out->ui_language, APP_UI_DEFAULT_LANGUAGE, sizeof(out->ui_language));
 
-    out->xiaozhi_server[0] = '\0';
-    out->xiaozhi_device[0] = '\0';
-    out->xiaozhi_token[0] = '\0';
-    strlcpy(out->xiaozhi_ota_url, APP_XIAOZHI_OTA_URL_DEFAULT, sizeof(out->xiaozhi_ota_url));
-    out->xiaozhi_enabled = false;
     out->display_brightness = APP_DISPLAY_ACTIVE_BRIGHTNESS_PERCENT;
     out->display_saver_brightness = APP_DISPLAY_SAVER_BRIGHTNESS_PERCENT;
     out->display_screensaver_enabled = true;
@@ -1466,6 +1445,17 @@ esp_err_t runtime_settings_load(runtime_settings_t *out)
         strlcpy(out->mqtt_password, nvs_mqtt_password, sizeof(out->mqtt_password));
     }
 
+    char nvs_web_password[APP_WEB_PASSWORD_MAX_LEN] = {0};
+    bool has_nvs_web_password = false;
+    nvs_err = nvs_load_secret(
+        SETTINGS_NVS_KEY_WEB_PASSWORD, nvs_web_password, sizeof(nvs_web_password), &has_nvs_web_password);
+    if (nvs_err != ESP_OK) {
+        return nvs_err;
+    }
+    if (has_nvs_web_password) {
+        strlcpy(out->web_password, nvs_web_password, sizeof(out->web_password));
+    }
+
     bool migrate_to_nvs =
         (legacy_wifi_password && !has_nvs_wifi_password && out->wifi_password[0] != '\0') ||
         (legacy_ha_access_token && !has_nvs_ha_access_token && out->ha_access_token[0] != '\0') ||
@@ -1601,6 +1591,7 @@ esp_err_t runtime_settings_apply_public_json(const char *json, bool *restart_req
     strlcpy(incoming->wifi_static_dns, before.wifi_static_dns, sizeof(incoming->wifi_static_dns));
     strlcpy(incoming->ha_access_token, before.ha_access_token, sizeof(incoming->ha_access_token));
     strlcpy(incoming->mqtt_password, before.mqtt_password, sizeof(incoming->mqtt_password));
+    strlcpy(incoming->web_password, before.web_password, sizeof(incoming->web_password));
 
     err = runtime_settings_save(incoming);
     if (err == ESP_OK && restart_required != NULL) {
@@ -1640,11 +1631,6 @@ bool runtime_settings_has_wifi(const runtime_settings_t *settings)
 bool runtime_settings_has_ha(const runtime_settings_t *settings)
 {
     return settings != NULL && settings->ha_ws_url[0] != '\0' && settings->ha_access_token[0] != '\0';
-}
-
-bool runtime_settings_has_xiaozhi(const runtime_settings_t *settings)
-{
-    return settings != NULL && settings->xiaozhi_enabled && settings->xiaozhi_server[0] != '\0';
 }
 
 esp_err_t runtime_settings_apply_motion_config(const runtime_settings_t *settings)

@@ -25,6 +25,7 @@
 #include "net/wifi_mgr.h"
 #include "settings/i18n_store.h"
 #include "settings/runtime_settings.h"
+#include "api/http_guard.h"
 #include "assist/panel_assist.h"
 #include "radar/ld2410.h"
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
@@ -54,7 +55,6 @@ static void set_json_headers(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 }
 
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
@@ -248,19 +248,17 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
     cJSON *ha = cJSON_CreateObject();
     cJSON *time_cfg = cJSON_CreateObject();
     cJSON *ui = cJSON_CreateObject();
-    cJSON *xiaozhi = cJSON_CreateObject();
     cJSON *display = cJSON_CreateObject();
     cJSON *mqtt = cJSON_CreateObject();
     cJSON *system = cJSON_CreateObject();
     cJSON *camera = cJSON_CreateObject();
-    if (root == NULL || wifi == NULL || ha == NULL || time_cfg == NULL || ui == NULL || xiaozhi == NULL ||
+    if (root == NULL || wifi == NULL || ha == NULL || time_cfg == NULL || ui == NULL ||
         display == NULL || mqtt == NULL || system == NULL || camera == NULL) {
         cJSON_Delete(root);
         cJSON_Delete(wifi);
         cJSON_Delete(ha);
         cJSON_Delete(time_cfg);
         cJSON_Delete(ui);
-        cJSON_Delete(xiaozhi);
         cJSON_Delete(display);
         cJSON_Delete(mqtt);
         cJSON_Delete(system);
@@ -325,14 +323,6 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
 
     cJSON_AddStringToObject(ui, "language", settings->ui_language);
     cJSON_AddItemToObject(root, "ui", ui);
-
-    cJSON_AddStringToObject(xiaozhi, "server", settings->xiaozhi_server);
-    cJSON_AddStringToObject(xiaozhi, "device", settings->xiaozhi_device);
-    cJSON_AddStringToObject(xiaozhi, "ota_url", settings->xiaozhi_ota_url);
-    cJSON_AddBoolToObject(xiaozhi, "enabled", settings->xiaozhi_enabled);
-    cJSON_AddBoolToObject(xiaozhi, "access_token_set", settings->xiaozhi_token[0] != '\0');
-    cJSON_AddBoolToObject(xiaozhi, "configured", runtime_settings_has_xiaozhi(settings));
-    cJSON_AddItemToObject(root, "xiaozhi", xiaozhi);
 
     cJSON_AddNumberToObject(display, "brightness", settings->display_brightness);
     cJSON_AddNumberToObject(display, "saver_brightness", settings->display_saver_brightness);
@@ -423,6 +413,7 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
 
     cJSON_AddBoolToObject(system, "auto_restart_enabled", settings->system_auto_restart_enabled);
     cJSON_AddNumberToObject(system, "auto_restart_hours", (double)settings->system_auto_restart_hours);
+    cJSON_AddBoolToObject(system, "web_password_set", settings->web_password[0] != '\0');
     /* 0 = off, 1 = errors, 2 = +warnings, 3 = +info, 4 = +debug. */
     cJSON_AddNumberToObject(system, "log_verbosity", (double)settings->log_verbosity);
     cJSON_AddItemToObject(root, "system", system);
@@ -634,7 +625,6 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
     cJSON *ha = cJSON_GetObjectItemCaseSensitive(root, "ha");
     cJSON *time_cfg = cJSON_GetObjectItemCaseSensitive(root, "time");
     cJSON *ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
-    cJSON *xiaozhi = cJSON_GetObjectItemCaseSensitive(root, "xiaozhi");
     cJSON *display = cJSON_GetObjectItemCaseSensitive(root, "display");
     cJSON *mqtt = cJSON_GetObjectItemCaseSensitive(root, "mqtt");
     cJSON *system = cJSON_GetObjectItemCaseSensitive(root, "system");
@@ -660,11 +650,6 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         cJSON_Delete(root);
         free(settings);
         return send_json_error(req, "400 Bad Request", "ui must be an object");
-    }
-    if (xiaozhi != NULL && !cJSON_IsObject(xiaozhi)) {
-        cJSON_Delete(root);
-        free(settings);
-        return send_json_error(req, "400 Bad Request", "xiaozhi must be an object");
     }
     if (display != NULL && !cJSON_IsObject(display)) {
         cJSON_Delete(root);
@@ -725,17 +710,6 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
     if (cJSON_IsObject(ui)) {
         (void)update_string_setting(
             ui, "language", settings->ui_language, sizeof(settings->ui_language), &invalid_type, &too_long);
-    }
-    if (cJSON_IsObject(xiaozhi)) {
-        (void)update_string_setting(
-            xiaozhi, "server", settings->xiaozhi_server, sizeof(settings->xiaozhi_server), &invalid_type, &too_long);
-        (void)update_string_setting(
-            xiaozhi, "device", settings->xiaozhi_device, sizeof(settings->xiaozhi_device), &invalid_type, &too_long);
-        (void)update_string_setting(
-            xiaozhi, "ota_url", settings->xiaozhi_ota_url, sizeof(settings->xiaozhi_ota_url), &invalid_type, &too_long);
-        (void)update_string_setting(
-            xiaozhi, "access_token", settings->xiaozhi_token, sizeof(settings->xiaozhi_token), &invalid_type, &too_long);
-        (void)update_bool_setting(xiaozhi, "enabled", &settings->xiaozhi_enabled, &invalid_type);
     }
 
     if (cJSON_IsObject(display)) {
@@ -1088,6 +1062,19 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         }
 
         (void)update_int_setting(system, "log_verbosity", &settings->log_verbosity, 0, 5, &invalid_type);
+
+        /* Web editor / API password: only sent when it changes; "" removes
+         * the protection. */
+        cJSON *web_password = cJSON_GetObjectItemCaseSensitive(system, "web_password");
+        if (web_password != NULL) {
+            if (!cJSON_IsString(web_password) || web_password->valuestring == NULL) {
+                invalid_type = true;
+            } else if (strlen(web_password->valuestring) >= sizeof(settings->web_password)) {
+                too_long = true;
+            } else {
+                strlcpy(settings->web_password, web_password->valuestring, sizeof(settings->web_password));
+            }
+        }
     }
 
     if (cJSON_IsObject(radar_cfg)) {
@@ -1174,15 +1161,6 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         root, "time_tz", settings->time_tz, sizeof(settings->time_tz), &invalid_type, &too_long);
     (void)update_string_setting(
         root, "language", settings->ui_language, sizeof(settings->ui_language), &invalid_type, &too_long);
-    (void)update_string_setting(
-        root, "xiaozhi_server", settings->xiaozhi_server, sizeof(settings->xiaozhi_server), &invalid_type, &too_long);
-    (void)update_string_setting(
-        root, "xiaozhi_device", settings->xiaozhi_device, sizeof(settings->xiaozhi_device), &invalid_type, &too_long);
-    (void)update_string_setting(
-        root, "xiaozhi_ota_url", settings->xiaozhi_ota_url, sizeof(settings->xiaozhi_ota_url), &invalid_type, &too_long);
-    (void)update_string_setting(
-        root, "xiaozhi_access_token", settings->xiaozhi_token, sizeof(settings->xiaozhi_token), &invalid_type, &too_long);
-    (void)update_bool_setting(root, "xiaozhi_enabled", &settings->xiaozhi_enabled, &invalid_type);
 
     bool reboot = true;
     cJSON *reboot_item = cJSON_GetObjectItemCaseSensitive(root, "reboot");
@@ -1299,6 +1277,9 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
     }
 
     esp_err_t save_err = runtime_settings_save(settings);
+    if (save_err == ESP_OK) {
+        http_guard_set_password(settings->web_password);
+    }
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
     bool camera_stream_enabled = settings->camera_stream_enabled;
     bool camera_enabled = settings->camera_enabled;
@@ -1514,7 +1495,6 @@ esp_err_t api_display_wallpaper_get_handler(httpd_req_t *req)
      * the web editor can render a preview without any conversion. */
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"wallpaper.bin\"");
 
     esp_err_t err = ESP_OK;

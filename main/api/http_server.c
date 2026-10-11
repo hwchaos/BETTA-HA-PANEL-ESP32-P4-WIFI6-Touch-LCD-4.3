@@ -78,7 +78,6 @@ static esp_err_t send_gzip_asset(
     }
 
     httpd_resp_set_type(req, content_type);
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "ETag", etag);
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
@@ -116,7 +115,6 @@ static esp_err_t styles_css_get_handler_impl(httpd_req_t *req)
 static esp_err_t favicon_get_handler_impl(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "image/x-icon");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
     httpd_resp_set_status(req, "204 No Content");
     return httpd_resp_send(req, NULL, 0);
@@ -165,22 +163,14 @@ esp_err_t http_server_start(void)
      * handlers below. Keep a few spare slots: running out aborts the boot with
      * ESP_ERR_HTTPD_HANDLERS_FULL. */
     cfg.max_uri_handlers = 64;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    cfg.max_open_sockets = 4;
-#else
     cfg.max_open_sockets = 12;
-#endif
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
     /* A socket that stops draining blocks the single httpd task for this long per
      * send() retry, so a stalled browser used to freeze every other request for
      * ~2x this value before the error surfaced. */
     cfg.send_wait_timeout = 5;
-#if defined(CONFIG_APP_PANEL_VARIANT_S3_480)
-    cfg.backlog_conn = 4;
-#else
     cfg.backlog_conn = 8;
-#endif
 #if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
     cfg.core_id = 1;
 #endif

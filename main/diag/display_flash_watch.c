@@ -19,15 +19,13 @@
 
 #include "app_config.h"
 
-#if defined(CONFIG_APP_PANEL_VARIANT_7INCH_1024)
 
 #include "esp_log.h"
 #include "esp_timer.h"
 
 /* The ESP32-P4-ETH kit dims over I2C (Nano BSP); its LEDC is never set up and
  * every duty read would log "LEDC is not initialized". */
-#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH) && \
-    !defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH) &&      !defined(CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101)
 #include "driver/ledc.h"
 #define FW_HAS_LEDC_DUTY 1
 #else
@@ -1651,59 +1649,3 @@ void display_flash_watch_get_fast(char *out, size_t out_len)
     }
 }
 
-#else /* !CONFIG_APP_PANEL_VARIANT_7INCH_1024 */
-
-/* Other panel variants (Guition 4"/10.1", S3 4") keep their own firmware: the
- * detector compiles to no-ops there so the shared build stays green. */
-esp_err_t display_flash_watch_start(void)
-{
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-void display_flash_watch_set_enabled(bool enabled)
-{
-    (void)enabled;
-}
-
-bool display_flash_watch_get_enabled(void)
-{
-    return false;
-}
-
-void display_flash_watch_note(const char *event)
-{
-    (void)event;
-}
-
-void display_flash_watch_note_snapshot(bool active)
-{
-    (void)active;
-}
-
-void display_flash_watch_set_light_content(bool light)
-{
-    (void)light;
-}
-
-bool display_flash_watch_hold_raise(int current_pct, int target_pct)
-{
-    (void)current_pct;
-    (void)target_pct;
-    return false;
-}
-
-void display_flash_watch_summary(char *out, size_t out_len)
-{
-    if (out != NULL && out_len > 0) {
-        out[0] = '\0';
-    }
-}
-
-void display_flash_watch_get_fast(char *out, size_t out_len)
-{
-    if (out != NULL && out_len > 0) {
-        out[0] = '\0';
-    }
-}
-
-#endif
