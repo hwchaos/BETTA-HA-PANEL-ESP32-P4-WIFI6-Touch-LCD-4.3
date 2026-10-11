@@ -781,6 +781,15 @@ static void ui_runtime_apply_entity_state(const char *entity_id)
         bool is_secondary = (s_widgets[i].secondary_entity_id[0] != '\0') &&
                             (strncmp(entity_id, s_widgets[i].secondary_entity_id, APP_MAX_ENTITY_ID_LEN) == 0);
         if (!is_primary && !is_secondary) {
+            /* Chart tiles follow all of their series, not just the first. */
+            bool is_series = false;
+            for (int c = 0; c < UI_CHART_SERIES_MAX && !is_series; c++) {
+                is_series = s_widgets[i].chart_entities[c][0] != '\0' &&
+                            strncmp(entity_id, s_widgets[i].chart_entities[c], APP_MAX_ENTITY_ID_LEN) == 0;
+            }
+            if (is_series && found) {
+                ui_widget_factory_apply_state(&s_widgets[i], &s_state_scratch);
+            }
             continue;
         }
         (void)ui_runtime_sync_widget_state(&s_widgets[i], is_primary);
@@ -931,6 +940,11 @@ static bool ui_runtime_widget_from_json(cJSON *widget_json, ui_widget_def_t *out
     memset(out, 0, sizeof(*out));
     snprintf(out->id, sizeof(out->id), "%s", id->valuestring);
     snprintf(out->type, sizeof(out->type), "%s", type->valuestring);
+    /* The plain "cover" tile (buttons only) was retired: older layouts get
+     * the cover tile with popup for the same entity instead. */
+    if (strcmp(out->type, "cover") == 0) {
+        snprintf(out->type, sizeof(out->type), "%s", "cover_tile");
+    }
     snprintf(out->title, sizeof(out->title), "%s", cJSON_IsString(title) ? title->valuestring : id->valuestring);
     if (cJSON_IsString(entity_id) && entity_id->valuestring != NULL) {
         snprintf(out->entity_id, sizeof(out->entity_id), "%s", entity_id->valuestring);
@@ -1087,6 +1101,7 @@ static bool ui_runtime_widget_from_json(cJSON *widget_json, ui_widget_def_t *out
     out->y = y->valueint;
     out->w = w->valueint;
     out->h = h->valueint;
+    out->json = widget_json;
     ui_runtime_clamp_widget_rect(out);
     return true;
 }

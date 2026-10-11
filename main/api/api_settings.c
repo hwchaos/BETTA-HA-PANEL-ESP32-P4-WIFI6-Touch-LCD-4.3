@@ -31,6 +31,7 @@
 #if CONFIG_APP_FEATURE_LOCAL_CAMERA
 #include "camera/local_camera.h"
 #endif
+#include "ui/ui_notify.h"
 #include "ui/ui_page_transition.h"
 #include "ui/ui_pages.h"
 #include "ui/ui_press_feedback.h"
@@ -1351,6 +1352,41 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         schedule_restart();
     }
     return send_err;
+}
+
+/* POST /api/notify: full-screen message (same payload as MQTT "notify"). */
+esp_err_t api_notify_post_handler(httpd_req_t *req)
+{
+    char body[512];
+    const int total = req->content_len;
+    if (total <= 0 || total >= (int)sizeof(body)) {
+        return send_json_error(req, "400 Bad Request", "body must be 1..511 bytes");
+    }
+    int got = 0;
+    while (got < total) {
+        const int n = httpd_req_recv(req, body + got, total - got);
+        if (n <= 0) {
+            return send_json_error(req, "400 Bad Request", "could not read body");
+        }
+        got += n;
+    }
+    body[got] = '\0';
+    ui_notify_req_t notify;
+    bool stop = false;
+    if (ui_notify_parse(body, &notify, &stop) != ESP_OK) {
+        return send_json_error(req, "400 Bad Request", "invalid JSON");
+    }
+    esp_err_t err = ESP_OK;
+    if (stop) {
+        ui_notify_stop();
+    } else {
+        err = ui_notify_show(&notify);
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "503 Service Unavailable", esp_err_to_name(err));
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
 esp_err_t api_display_activity_post_handler(httpd_req_t *req)

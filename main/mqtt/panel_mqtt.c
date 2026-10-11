@@ -18,6 +18,7 @@
 #include "app_config.h"
 #include "app_events.h"
 #include "drivers/display_init.h"
+#include "ui/ui_notify.h"
 #include "ui/ui_page_transition.h"
 #include "ui/ui_pages.h"
 #include "ui/ui_press_feedback.h"
@@ -326,6 +327,24 @@ static int panel_mqtt_clamp(int v, int lo, int hi)
 
 static void panel_mqtt_apply_command(esp_mqtt_client_handle_t client, const char *key, const char *payload)
 {
+    if (strcmp(key, "notify") == 0) {
+        /* Full-screen message, e.g. the doorbell: plain text or JSON
+         * {"text":..,"duration":s,"interval":ms,"count":n} / {"stop":true}. */
+        ui_notify_req_t req;
+        bool stop = false;
+        if (ui_notify_parse(payload, &req, &stop) != ESP_OK) {
+            ESP_LOGW(TAG_MQTT, "notify: invalid payload");
+        } else if (stop) {
+            ui_notify_stop();
+        } else {
+            (void)ui_notify_show(&req);
+        }
+        return;
+    }
+    if (strcmp(key, "notify_stop") == 0) {
+        ui_notify_stop();
+        return;
+    }
     if (strcmp(key, "wake") == 0) {
         /* Wake to the screensaver clock (motion-sensor style); a touch
          * dismisses the clock and opens the full UI. */
@@ -546,7 +565,8 @@ static void panel_mqtt_handle_data(esp_mqtt_event_handle_t event)
         return;
     }
 
-    char payload[64] = {0};
+    /* Room for a JSON message command ("notify"). */
+    char payload[384] = {0};
     size_t len = (event->data != NULL) ? (size_t)event->data_len : 0;
     if (len >= sizeof(payload)) {
         len = sizeof(payload) - 1;
@@ -770,6 +790,14 @@ static void panel_mqtt_add_discovery_entity(esp_mqtt_client_handle_t client,
             }
         } else if (strcmp(component, "button") == 0) {
             cJSON_AddStringToObject(root, "payload_press", "PRESS");
+        } else if (strcmp(component, "text") == 0) {
+            /* Write-only: the message has no state to show. Not retained
+             * either: a message sent while the panel is offline must not
+             * pop up late when it reconnects. */
+            cJSON_DeleteItemFromObject(root, "state_topic");
+            cJSON_ReplaceItemInObject(root, "retain", cJSON_CreateBool(false));
+            cJSON_AddNumberToObject(root, "max", 120);
+            cJSON_AddStringToObject(root, "mode", "text");
         }
     }
 
@@ -819,6 +847,14 @@ static void panel_mqtt_publish_discovery(esp_mqtt_client_handle_t client)
     snprintf(object_id, sizeof(object_id), "%s_wake", s_client_id);
     panel_mqtt_add_discovery_entity(client, object_id, "Wake Display",
                                     "button", "wake", 0, 0, 0);
+
+    snprintf(object_id, sizeof(object_id), "%s_notify", s_client_id);
+    panel_mqtt_add_discovery_entity(client, object_id, "Display Message",
+                                    "text", "notify", 0, 0, 0);
+
+    snprintf(object_id, sizeof(object_id), "%s_notify_stop", s_client_id);
+    panel_mqtt_add_discovery_entity(client, object_id, "Clear Display Message",
+                                    "button", "notify_stop", 0, 0, 0);
 
     snprintf(object_id, sizeof(object_id), "%s_page_transition", s_client_id);
     panel_mqtt_add_discovery_entity(client, object_id, "Page Transition",

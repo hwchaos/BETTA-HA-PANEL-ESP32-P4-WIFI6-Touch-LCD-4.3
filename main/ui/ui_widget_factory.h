@@ -3,6 +3,8 @@
  */
 #pragma once
 
+#include "cJSON.h"
+
 #include <stdbool.h>
 
 #include "esp_err.h"
@@ -10,6 +12,8 @@
 
 #include "app_config.h"
 #include "ha/ha_model.h"
+
+#define UI_CHART_SERIES_MAX 4
 
 typedef struct {
     char id[APP_MAX_WIDGET_ID_LEN];
@@ -65,6 +69,10 @@ typedef struct {
     int y;
     int w;
     int h;
+    /* The widget's layout JSON, valid while the widget is created. Lets a
+     * tile read fields of its own (chart series) without growing this
+     * struct, which lives on small UI stacks. */
+    const cJSON *json;
 } ui_widget_def_t;
 
 typedef struct {
@@ -127,6 +135,8 @@ typedef struct {
     uint32_t applied_state_sig;
     bool applied_state_sig_valid;
     bool applied_state_missing_marked;
+    /* Chart tile: every series entity, so state changes reach it. */
+    char chart_entities[UI_CHART_SERIES_MAX][APP_MAX_ENTITY_ID_LEN];
     void *ctx;
     lv_obj_t *obj;
 } ui_widget_instance_t;

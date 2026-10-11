@@ -207,6 +207,11 @@ static esp_err_t guarded_api_sd_logs_export_post(httpd_req_t *req)
     return http_guard_handle(req, api_sd_logs_export_post_handler);
 }
 
+static esp_err_t guarded_api_notify_post(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_notify_post_handler);
+}
+
 static esp_err_t guarded_api_display_activity_post(httpd_req_t *req)
 {
     return http_guard_handle(req, api_display_activity_post_handler);
@@ -521,6 +526,12 @@ esp_err_t api_routes_register(httpd_handle_t server)
         .handler = guarded_api_sd_logs_export_post,
         .user_ctx = NULL,
     };
+    httpd_uri_t post_notify = {
+        .uri = "/api/notify",
+        .method = HTTP_POST,
+        .handler = guarded_api_notify_post,
+        .user_ctx = NULL,
+    };
     httpd_uri_t post_display_activity = {
         .uri = "/api/display/activity",
         .method = HTTP_POST,
@@ -772,6 +783,7 @@ esp_err_t api_routes_register(httpd_handle_t server)
         httpd_register_uri_handler(server, &post_sd_logs_export), "api_routes", "POST /api/sd/logs/export");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &post_display_activity), "api_routes", "POST /api/display/activity");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &post_notify), "api_routes", "POST /api/notify");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &post_display_wallpaper), "api_routes", "POST /api/display/wallpaper");
     ESP_RETURN_ON_ERROR(

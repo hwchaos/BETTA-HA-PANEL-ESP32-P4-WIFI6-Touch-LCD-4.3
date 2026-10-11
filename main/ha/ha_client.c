@@ -4162,6 +4162,12 @@ static size_t ha_client_collect_layout_entity_ids(char *entity_ids, size_t max_c
                 }
                 ha_client_collect_entity_id(widget, "entity_id", entity_ids, &count, max_count);
                 ha_client_collect_entity_id(widget, "secondary_entity_id", entity_ids, &count, max_count);
+                cJSON *chart_series = cJSON_GetObjectItemCaseSensitive(widget, "chart_series");
+                cJSON *series = NULL;
+                cJSON_ArrayForEach(series, chart_series)
+                {
+                    ha_client_collect_entity_id(series, "entity_id", entity_ids, &count, max_count);
+                }
             }
         }
     }

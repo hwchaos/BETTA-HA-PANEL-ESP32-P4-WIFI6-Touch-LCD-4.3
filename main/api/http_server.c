@@ -162,7 +162,7 @@ esp_err_t http_server_start(void)
     /* Must cover every route registered in api_routes.c plus the static/index
      * handlers below. Keep a few spare slots: running out aborts the boot with
      * ESP_ERR_HTTPD_HANDLERS_FULL. */
-    cfg.max_uri_handlers = 64;
+    cfg.max_uri_handlers = 72;
     cfg.max_open_sockets = 12;
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;

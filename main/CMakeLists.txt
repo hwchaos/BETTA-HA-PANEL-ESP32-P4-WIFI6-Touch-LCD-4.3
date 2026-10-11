@@ -111,7 +111,7 @@ idf_component_register(
         "ui/widgets/w_roborock.c"
         "ui/widgets/w_binary_sensor.c"
         "ui/widgets/w_presence.c"
-        "ui/widgets/w_cover.c"
+        "ui/widgets/w_chart.c"
         "ui/widgets/w_lock.c"
         "ui/widgets/w_fan.c"
         "ui/widgets/w_select.c"
@@ -136,6 +136,7 @@ idf_component_register(
         "audio/panel_audio.c"
         "assist/panel_assist.c"
         "ui/ui_assist.c"
+        "ui/ui_notify.c"
         "ui/ui_geometry.c"
         "ui/ui_topbar_waste.c"
         "ui/ui_topbar_alerts.c"
@@ -226,6 +227,8 @@ endif()
 # rendered at runtime by LVGL's Tiny TTF engine).
 if(CONFIG_LV_USE_TINY_TTF)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/ui/fonts/materialdesignicons-webfont.ttf" BINARY)
+    # Text font for full-screen messages (ui_notify.c), rendered at any size.
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/ui/fonts/Poppins-Regular.ttf" BINARY)
 endif()
 
 set(APP_HAVE_HOSTED_C6_FW_IMAGE 0)

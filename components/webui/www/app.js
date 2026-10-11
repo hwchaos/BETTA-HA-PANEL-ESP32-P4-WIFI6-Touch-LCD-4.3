@@ -14,6 +14,8 @@ const DEFAULT_BUTTON_MODE = "auto";
 const DEFAULT_BUTTON_ACCENT_COLOR = "#6fe8ff";
 const DEFAULT_SLIDER_ACCENT_COLOR = "#6fe8ff";
 const DEFAULT_GRAPH_LINE_COLOR = "#6fe8ff";
+const CHART_TYPES = ["bar", "column", "pie", "line"];
+const CHART_DEFAULT_COLORS = ["#03a9f4", "#ff9800", "#4caf50", "#e91e63"];
 /* Tile types whose icon can be chosen in the editor (see ui_mdi_icon.c and
  * widget_apply_custom_icon() in ui_widget_factory.c). */
 const ICON_WIDGET_TYPES = new Set([
@@ -3960,6 +3962,7 @@ function widgetSizeLimits(type) {
         ? { minW: 100, minH: 80, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT }
         : { minW: 100, minH: 100, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT };
     case "graph":
+    case "chart":
       return compact
         ? { minW: 150, minH: 100, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT }
         : { minW: 220, minH: 140, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT };
@@ -4232,7 +4235,7 @@ const el = {
   addTodoListBtn: document.getElementById("addTodoListBtn"),
   addMediaPlayerBtn: document.getElementById("addMediaPlayerBtn"),
   addRoborockTileBtn: document.getElementById("addRoborockTileBtn"),
-  addCoverBtn: document.getElementById("addCoverBtn"),
+  addChartBtn: document.getElementById("addChartBtn"),
   addLockBtn: document.getElementById("addLockBtn"),
   addFanBtn: document.getElementById("addFanBtn"),
   addSelectBtn: document.getElementById("addSelectBtn"),
@@ -5694,6 +5697,18 @@ function normalizeLayoutWidgets(layout) {
         widget.slider_accent_color = normalizeHexColor(widget.slider_accent_color, DEFAULT_SLIDER_ACCENT_COLOR);
         widget.slider_entity_domain = normalizeSliderEntityDomain(widget.slider_entity_domain);
       }
+      /* The plain "cover" tile (buttons only) was retired; the firmware shows
+       * the cover tile with popup instead, so the editor converts it too. */
+      if (widget.type === "cover") {
+        widget.type = "cover_tile";
+      }
+      if (widget.type === "chart") {
+        widget.chart_type = CHART_TYPES.includes(widget.chart_type) ? widget.chart_type : "bar";
+        widget.chart_hours = Math.min(168, Math.max(1, Math.round(Number(widget.chart_hours) || 24)));
+        widget.chart_series = Array.isArray(widget.chart_series)
+          ? widget.chart_series.filter((it) => it && typeof it.entity_id === "string" && it.entity_id).slice(0, 4)
+          : [];
+      }
       if (widget.type === "graph") {
         widget.graph_line_color = normalizeHexColor(widget.graph_line_color, DEFAULT_GRAPH_LINE_COLOR);
         widget.graph_time_window_min = normalizeGraphTimeWindowMin(widget.graph_time_window_min);
@@ -6179,7 +6194,6 @@ function applyWebTranslations() {
   setTextById("addTodoListBtn", "layout.widgets.add_todo");
   setTextById("addMediaPlayerBtn", "layout.widgets.add_media_player");
   setTextById("addRoborockTileBtn", "layout.widgets.add_roborock");
-  setTextById("addCoverBtn", "layout.widgets.add_cover");
   setTextById("addLockBtn", "layout.widgets.add_lock");
   setTextById("addFanBtn", "layout.widgets.add_fan");
   setTextById("addSelectBtn", "layout.widgets.add_select");
@@ -10338,6 +10352,8 @@ function bindWasteEntityAutocomplete() {
   const inputs = [];
   for (let i = 0; i < WASTE_SLOT_COUNT; i++) inputs.push(document.getElementById(`settingsWasteEntity${i}`));
   for (let i = 0; i < 4; i++) inputs.push(document.getElementById(`settingsAlertEntity${i}`));
+  /* The chart tile's sensor fields use the same HA search. */
+  for (let i = 0; i < 4; i++) inputs.push(document.getElementById(`fChartEntity${i}`));
   for (const input of inputs) {
     if (!input) continue;
     let timer = null;
@@ -11071,6 +11087,7 @@ function allowedEntityDomainsForWidgetType(
 ) {
   if (type === "empty_tile") return [];
   if (type === "clock_alarm") return [];
+  if (type === "chart") return [];
   if (type === "sensor" || type === "graph") return ["sensor"];
   if (type === "binary_sensor") return ["binary_sensor"];
   if (type === "presence") return ["device_tracker", "person"];
@@ -11160,6 +11177,7 @@ function entityMatchesWidgetType(
 ) {
   if (type === "empty_tile") return true;
   if (type === "clock_alarm") return true;
+  if (type === "chart") return true;
 
   const id = typeof entity?.id === "string" ? entity.id : "";
   /* These tiles also work without an entity and bind one when it is set. */
@@ -11195,6 +11213,7 @@ function pickDefaultEntityForWidgetType(
 ) {
   if (type === "empty_tile") return "";
   if (type === "clock_alarm") return "";
+  if (type === "chart") return "";
   /* A timer tile is standalone (local countdown) unless an entity is picked. */
   if (type === "timer_tile") return "";
   const matching = listEntitiesForWidgetType(type, sliderDomain, buttonMode);
@@ -11949,7 +11968,7 @@ function renderEntityOptions() {
     el.fSecondaryEntity.value = "";
   }
 
-  const primaryEnabled = inspectorType !== "empty_tile" && inspectorType !== "clock_alarm";
+  const primaryEnabled = inspectorType !== "empty_tile" && inspectorType !== "clock_alarm" && inspectorType !== "chart";
   if (el.fEntityWrap) {
     el.fEntityWrap.classList.toggle("hidden", !primaryEnabled);
   }
@@ -12200,7 +12219,7 @@ function renderWidgets() {
     el.addWeather3DayBtn,
     el.addTodoListBtn,
     el.addMediaPlayerBtn,
-    el.addCoverBtn,
+    el.addChartBtn,
     el.addLockBtn,
     el.addFanBtn,
     el.addSelectBtn,
@@ -12876,6 +12895,10 @@ function renderCanvas() {
       }
     }
     let extraHint = "";
+    if (widget.type === "chart") {
+      previewState = "";
+      extraHint = chartPreviewSvg(widget);
+    }
     if (widget.type === "weather_3day") {
       /* Mirrors the firmware layout in w_weather_tile.c:
        *   compact/panels3: ROWS_TOP=108, BOTTOM_PAD=12, ROW_HEIGHT=36, ROW_GAP=2
@@ -13049,6 +13072,7 @@ function renderInspector() {
   if (el.graphOptions) {
     el.graphOptions.classList.toggle("hidden", !isGraph);
   }
+  fillChartInspector(widget);
   if (el.heatingOptions) {
     el.heatingOptions.classList.toggle("hidden", !isHeating);
   }
@@ -13570,6 +13594,7 @@ function addWidget(type, options = {}) {
       : type === "alarm_tile" ? 220
       : type === "clock_alarm" ? 220
       : type === "cover_tile" ? 180
+      : type === "chart" ? 300
       : type === "scene_tile" ? 140
       : type === "person_tile" ? 150
       : type === "timer_tile" ? 150
@@ -13585,6 +13610,7 @@ function addWidget(type, options = {}) {
       : type === "alarm_tile" ? 300
       : type === "clock_alarm" ? 300
       : type === "cover_tile" ? 220
+      : type === "chart" ? 400
       : type === "scene_tile" ? 160
       : type === "person_tile" ? 180
       : type === "timer_tile" ? 180
@@ -13601,6 +13627,7 @@ function addWidget(type, options = {}) {
       : type === "alarm_tile" ? 220
       : type === "clock_alarm" ? 220
       : type === "cover_tile" ? 150
+      : type === "chart" ? 180
       : type === "scene_tile" ? 130
       : type === "person_tile" ? 100
       : type === "timer_tile" ? 120
@@ -13616,6 +13643,7 @@ function addWidget(type, options = {}) {
       : type === "alarm_tile" ? 260
       : type === "clock_alarm" ? 260
       : type === "cover_tile" ? 180
+      : type === "chart" ? 240
       : type === "scene_tile" ? 150
       : type === "person_tile" ? 120
       : type === "timer_tile" ? 140
@@ -13645,6 +13673,13 @@ function addWidget(type, options = {}) {
   if (type === "graph") {
     widget.graph_line_color = DEFAULT_GRAPH_LINE_COLOR;
     widget.graph_time_window_min = DEFAULT_GRAPH_TIME_WINDOW_MIN;
+  }
+  if (type === "chart") {
+    widget.title = typeof options.title === "string" && options.title.trim() ? options.title.trim() : "";
+    widget.chart_type = "bar";
+    widget.chart_hours = 24;
+    widget.chart_series = [];
+    delete widget.secondary_entity_id;
   }
   if (type === "binary_sensor") {
     widget.binary_show_title = true;
@@ -13747,6 +13782,90 @@ function scheduleIconSuggestions(immediate = false) {
   }, 200);
 }
 
+/* ---- Chart tile ---- */
+function fillChartInspector(widget) {
+  const box = document.getElementById("chartOptions");
+  const isChart = widget?.type === "chart";
+  if (box) box.classList.toggle("hidden", !isChart);
+  if (!isChart) return;
+  const type = CHART_TYPES.includes(widget.chart_type) ? widget.chart_type : "bar";
+  document.getElementById("fChartType").value = type;
+  document.getElementById("fChartHours").value = String(widget.chart_hours || 24);
+  document.getElementById("fChartHoursWrap")?.classList.toggle("hidden", type !== "line");
+  const series = Array.isArray(widget.chart_series) ? widget.chart_series : [];
+  for (let i = 0; i < 4; i++) {
+    const s = series[i] || {};
+    document.getElementById(`fChartEntity${i}`).value = s.entity_id || "";
+    document.getElementById(`fChartColor${i}`).value = normalizeHexColor(s.color, CHART_DEFAULT_COLORS[i]);
+    document.getElementById(`fChartName${i}`).value = s.name || "";
+  }
+}
+
+function readChartInspector(widget) {
+  const type = document.getElementById("fChartType")?.value;
+  widget.chart_type = CHART_TYPES.includes(type) ? type : "bar";
+  widget.chart_hours = Math.min(168, Math.max(1, Math.round(Number(document.getElementById("fChartHours")?.value) || 24)));
+  const series = [];
+  for (let i = 0; i < 4; i++) {
+    const id = (document.getElementById(`fChartEntity${i}`)?.value || "").trim();
+    if (!/^[a-z0-9_]+\.[a-z0-9_]+$/.test(id)) continue;
+    const item = { entity_id: id, color: normalizeHexColor(document.getElementById(`fChartColor${i}`)?.value, CHART_DEFAULT_COLORS[i]) };
+    const name = (document.getElementById(`fChartName${i}`)?.value || "").trim();
+    if (name) item.name = name.slice(0, 40);
+    series.push(item);
+  }
+  widget.chart_series = series;
+  widget.entity_id = "";
+  document.getElementById("fChartHoursWrap")?.classList.toggle("hidden", widget.chart_type !== "line");
+}
+
+/* Small SVG sketch of the chart in the editor canvas, with the live values
+ * the editor knows (bars / columns / ring) or a dummy curve (line). */
+function chartPreviewSvg(widget) {
+  const series = Array.isArray(widget.chart_series) ? widget.chart_series : [];
+  if (!series.length) {
+    return `<div class="w-hint">${L("Keine Sensoren gewählt", "No sensors selected")}</div>`;
+  }
+  const colors = series.map((s, i) => normalizeHexColor(s.color, CHART_DEFAULT_COLORS[i]));
+  const values = series.map((s) => {
+    const v = parseFloat(editor.states.get(s.entity_id));
+    return Number.isFinite(v) ? v : 1;
+  });
+  const max = Math.max(...values.map((v) => Math.abs(v)), 1e-9);
+  let body = "";
+  if (widget.chart_type === "column") {
+    const w = 100 / series.length;
+    values.forEach((v, i) => {
+      const hgt = (Math.abs(v) / max) * 40;
+      body += `<rect x="${i * w + w * 0.2}" y="${44 - hgt}" width="${w * 0.6}" height="${hgt}" rx="1.5" fill="${colors[i]}"/>`;
+    });
+  } else if (widget.chart_type === "pie") {
+    const total = values.reduce((a, v) => a + Math.max(v, 0), 0) || 1;
+    let a0 = -Math.PI / 2;
+    values.forEach((v, i) => {
+      const a1 = a0 + (Math.max(v, 0) / total) * Math.PI * 2;
+      const large = a1 - a0 > Math.PI ? 1 : 0;
+      const p = (a, rr) => `${50 + rr * Math.cos(a)} ${24 + rr * Math.sin(a)}`;
+      body += `<path d="M ${p(a0, 20)} A 20 20 0 ${large} 1 ${p(a1 - 0.0001, 20)}" stroke="${colors[i]}" stroke-width="7" fill="none"/>`;
+      a0 = a1;
+    });
+  } else if (widget.chart_type === "line") {
+    colors.forEach((c, i) => {
+      const pts = [];
+      for (let x = 0; x <= 10; x++) {
+        pts.push(`${x * 10},${24 + Math.sin((x + i * 3) / 2) * (8 + i * 2) - i * 4}`);
+      }
+      body += `<polyline points="${pts.join(" ")}" fill="none" stroke="${c}" stroke-width="1.5"/>`;
+    });
+  } else {
+    const hgt = 44 / series.length;
+    values.forEach((v, i) => {
+      body += `<rect x="0" y="${i * hgt + hgt * 0.25}" width="${(Math.abs(v) / max) * 100}" height="${hgt * 0.5}" rx="1.5" fill="${colors[i]}"/>`;
+    });
+  }
+  return `<svg class="chart-preview" viewBox="0 0 100 48" preserveAspectRatio="none">${body}</svg>`;
+}
+
 function applyInspector(options = {}) {
   const widget = selectedWidget();
   if (!widget) return false;
@@ -13817,6 +13936,13 @@ function applyInspector(options = {}) {
     delete widget.slider_entity_domain;
     delete widget.slider_direction;
     delete widget.slider_accent_color;
+  }
+  if (widgetType === "chart") {
+    readChartInspector(widget);
+  } else {
+    delete widget.chart_type;
+    delete widget.chart_hours;
+    delete widget.chart_series;
   }
   if (widgetType === "graph") {
     widget.graph_line_color = normalizeHexColor(el.fGraphLineColor?.value, DEFAULT_GRAPH_LINE_COLOR);
@@ -14261,8 +14387,8 @@ function bindUi() {
   if (el.addRoborockTileBtn) {
     el.addRoborockTileBtn.onclick = () => openLightEntityPicker("roborock_tile");
   }
-  if (el.addCoverBtn) {
-    el.addCoverBtn.onclick = () => openLightEntityPicker("cover");
+  if (el.addChartBtn) {
+    el.addChartBtn.onclick = () => addWidget("chart");
   }
   if (el.addLockBtn) {
     el.addLockBtn.onclick = () => openLightEntityPicker("lock");
@@ -14654,6 +14780,13 @@ function bindUi() {
   bindInspectorAutoApply(el.fSliderDirection, ["change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fSliderAccentColor, ["input", "change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fGraphLineColor, ["input", "change"], { softEntityValidation: true });
+  bindInspectorAutoApply(document.getElementById("fChartType"), ["change"], { refreshInspector: true, softEntityValidation: true });
+  bindInspectorAutoApply(document.getElementById("fChartHours"), ["change"], { softEntityValidation: true });
+  for (let i = 0; i < 4; i++) {
+    bindInspectorAutoApply(document.getElementById(`fChartEntity${i}`), ["change"], { softEntityValidation: true });
+    bindInspectorAutoApply(document.getElementById(`fChartColor${i}`), ["input", "change"], { softEntityValidation: true });
+    bindInspectorAutoApply(document.getElementById(`fChartName${i}`), ["change"], { softEntityValidation: true });
+  }
   bindInspectorAutoApply(el.fGraphTimeWindowMin, ["change"], { refreshInspector: true, softEntityValidation: true });
   bindInspectorAutoApply(el.fGraphPointCount, ["change"], { refreshInspector: true, softEntityValidation: true });
   bindInspectorAutoApply(el.fGraphDisplayMode, ["change"], { refreshInspector: true, softEntityValidation: true });

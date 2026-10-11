@@ -111,7 +111,8 @@ static bool is_supported_widget_type(const char *type)
            (strcmp(type, "cover") == 0) || (strcmp(type, "cover_tile") == 0) ||
            (strcmp(type, "scene_tile") == 0) || (strcmp(type, "person_tile") == 0) ||
            (strcmp(type, "timer_tile") == 0) || (strcmp(type, "lock") == 0) ||
-           (strcmp(type, "fan") == 0) || (strcmp(type, "select") == 0) || (strcmp(type, "number") == 0);
+           (strcmp(type, "fan") == 0) || (strcmp(type, "select") == 0) || (strcmp(type, "number") == 0) ||
+           (strcmp(type, "chart") == 0);
 }
 
 static bool is_supported_page_type(const char *type)
@@ -198,7 +199,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #else
         limits.min_h = 100;
 #endif
-    } else if (strcmp(type, "graph") == 0) {
+    } else if (strcmp(type, "graph") == 0 || strcmp(type, "chart") == 0) {
 #if APP_LAYOUT_COMPACT
         limits.min_w = 150;
         limits.min_h = 100;
@@ -510,7 +511,9 @@ static bool widget_entity_domain_valid(const char *type, const char *entity_id)
 
 static bool widget_requires_primary_entity(const char *type)
 {
-    return type == NULL || (strcmp(type, "empty_tile") != 0 && strcmp(type, "clock_alarm") != 0);
+    /* chart: its entities are in "chart_series". */
+    return type == NULL ||
+           (strcmp(type, "empty_tile") != 0 && strcmp(type, "clock_alarm") != 0 && strcmp(type, "chart") != 0);
 }
 
 static bool is_hex_digit_char(char c)
@@ -1320,6 +1323,50 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
                     cJSON_IsString(id) ? id->valuestring : "?",
                     button_mode->valuestring);
                 layout_validation_add(result, msg);
+            }
+        }
+    }
+
+    if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "chart") == 0) {
+        const char *wid = cJSON_IsString(id) ? id->valuestring : "?";
+        cJSON *chart_type = cJSON_GetObjectItemCaseSensitive(widget, "chart_type");
+        if (chart_type != NULL &&
+            (!cJSON_IsString(chart_type) || chart_type->valuestring == NULL ||
+                (strcmp(chart_type->valuestring, "bar") != 0 && strcmp(chart_type->valuestring, "column") != 0 &&
+                    strcmp(chart_type->valuestring, "pie") != 0 && strcmp(chart_type->valuestring, "line") != 0))) {
+            snprintf(msg, sizeof(msg), "widget %s: chart_type must be bar, column, pie or line", wid);
+            layout_validation_add(result, msg);
+        }
+        cJSON *chart_hours = cJSON_GetObjectItemCaseSensitive(widget, "chart_hours");
+        if (chart_hours != NULL &&
+            (!cJSON_IsNumber(chart_hours) || chart_hours->valueint < 1 || chart_hours->valueint > 168)) {
+            snprintf(msg, sizeof(msg), "widget %s: chart_hours must be 1..168", wid);
+            layout_validation_add(result, msg);
+        }
+        cJSON *chart_series = cJSON_GetObjectItemCaseSensitive(widget, "chart_series");
+        if (chart_series != NULL) {
+            if (!cJSON_IsArray(chart_series) || cJSON_GetArraySize(chart_series) > 4) {
+                snprintf(msg, sizeof(msg), "widget %s: chart_series must be a list of up to 4", wid);
+                layout_validation_add(result, msg);
+            } else {
+                cJSON *series = NULL;
+                cJSON_ArrayForEach(series, chart_series)
+                {
+                    cJSON *eid = cJSON_GetObjectItemCaseSensitive(series, "entity_id");
+                    cJSON *color = cJSON_GetObjectItemCaseSensitive(series, "color");
+                    cJSON *name = cJSON_GetObjectItemCaseSensitive(series, "name");
+                    if (!cJSON_IsObject(series) || !cJSON_IsString(eid) || !is_valid_entity_id(eid->valuestring)) {
+                        snprintf(msg, sizeof(msg), "widget %s: chart_series entries need a valid entity_id", wid);
+                        layout_validation_add(result, msg);
+                    } else if (color != NULL && (!cJSON_IsString(color) || !is_valid_hex_rgb_color(color->valuestring))) {
+                        snprintf(msg, sizeof(msg), "widget %s: chart_series color must be hex RGB", wid);
+                        layout_validation_add(result, msg);
+                    } else if (name != NULL &&
+                               (!cJSON_IsString(name) || strlen(name->valuestring) >= APP_MAX_NAME_LEN)) {
+                        snprintf(msg, sizeof(msg), "widget %s: chart_series name too long", wid);
+                        layout_validation_add(result, msg);
+                    }
+                }
             }
         }
     }

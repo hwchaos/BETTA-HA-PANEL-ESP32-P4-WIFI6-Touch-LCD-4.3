@@ -65,9 +65,9 @@ esp_err_t w_presence_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_wid
 void w_presence_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
 void w_presence_mark_unavailable(ui_widget_instance_t *instance);
 
-esp_err_t w_cover_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_instance_t *out_instance);
-void w_cover_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
-void w_cover_mark_unavailable(ui_widget_instance_t *instance);
+esp_err_t w_chart_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_instance_t *out_instance);
+void w_chart_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
+void w_chart_mark_unavailable(ui_widget_instance_t *instance);
 
 esp_err_t w_lock_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_instance_t *out_instance);
 void w_lock_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
@@ -369,33 +369,27 @@ esp_err_t ui_widget_factory_create(const ui_widget_def_t *def, lv_obj_t *parent,
         err = w_person_tile_create(def, parent, out_instance);
     } else if (strcmp(def->type, "timer_tile") == 0) {
         err = w_timer_tile_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "presence") == 0) {
+        err = w_presence_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "chart") == 0) {
+        err = w_chart_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "lock") == 0) {
+        err = w_lock_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "fan") == 0) {
+        err = w_fan_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "select") == 0) {
+        err = w_select_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "number") == 0) {
+        err = w_number_create(def, parent, out_instance);
     } else {
+        /* These types used to sit in a block after this chain that the
+         * "not supported" return never let them reach: presence, lock, fan,
+         * select and number tiles stayed blank. */
         return ESP_ERR_NOT_SUPPORTED;
     }
 
     if (err == ESP_OK && out_instance->obj != NULL) {
         ui_widget_factory_apply_tile_style(out_instance);
-    }
-    if (strcmp(def->type, "binary_sensor") == 0) {
-        return w_binary_sensor_create(def, parent, out_instance);
-    }
-    if (strcmp(def->type, "presence") == 0) {
-        return w_presence_create(def, parent, out_instance);
-    }
-    if (strcmp(def->type, "cover") == 0) {
-        return w_cover_create(def, parent, out_instance);
-    }
-    if (strcmp(def->type, "lock") == 0) {
-        return w_lock_create(def, parent, out_instance);
-    }
-    if (strcmp(def->type, "fan") == 0) {
-        return w_fan_create(def, parent, out_instance);
-    }
-    if (strcmp(def->type, "select") == 0) {
-        return w_select_create(def, parent, out_instance);
-    }
-    if (strcmp(def->type, "number") == 0) {
-        return w_number_create(def, parent, out_instance);
     }
     return err;
 }
@@ -431,8 +425,8 @@ void ui_widget_factory_apply_state(ui_widget_instance_t *instance, const ha_stat
         w_binary_sensor_apply_state(instance, state);
     } else if (strcmp(instance->type, "presence") == 0) {
         w_presence_apply_state(instance, state);
-    } else if (strcmp(instance->type, "cover") == 0) {
-        w_cover_apply_state(instance, state);
+    } else if (strcmp(instance->type, "chart") == 0) {
+        w_chart_apply_state(instance, state);
     } else if (strcmp(instance->type, "lock") == 0) {
         w_lock_apply_state(instance, state);
     } else if (strcmp(instance->type, "fan") == 0) {
@@ -490,8 +484,8 @@ void ui_widget_factory_mark_unavailable(ui_widget_instance_t *instance)
         w_binary_sensor_mark_unavailable(instance);
     } else if (strcmp(instance->type, "presence") == 0) {
         w_presence_mark_unavailable(instance);
-    } else if (strcmp(instance->type, "cover") == 0) {
-        w_cover_mark_unavailable(instance);
+    } else if (strcmp(instance->type, "chart") == 0) {
+        w_chart_mark_unavailable(instance);
     } else if (strcmp(instance->type, "lock") == 0) {
         w_lock_mark_unavailable(instance);
     } else if (strcmp(instance->type, "fan") == 0) {

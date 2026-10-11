@@ -2519,3 +2519,27 @@ input[type="radio"] {
 .radar-dot.ok { background: #43a047; }
 .radar-dot.near { background: #ffb300; }
 .radar-dot.err { background: #e53935; }
+
+/* Chart tile inspector + canvas preview */
+.chart-series-head {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+.chart-series-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px minmax(0, 0.8fr);
+  gap: 6px;
+  align-items: center;
+}
+.chart-series-row input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 2px;
+}
+.widget-box .chart-preview {
+  width: 92%;
+  height: 55%;
+  margin: 4px auto 0;
+  display: block;
+}

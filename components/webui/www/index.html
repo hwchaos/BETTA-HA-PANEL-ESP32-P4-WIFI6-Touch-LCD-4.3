@@ -258,7 +258,6 @@
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addHeatingTileBtn">Heating Tile</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addMediaPlayerBtn">Media Player</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addRoborockTileBtn">Roborock</button>
-                    <button data-en="Cover (with buttons)" class="dropdown-item" type="button" role="menuitem" data-add-target="addCoverBtn">Cover (mit Tasten)</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addLockBtn">Lock</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addFanBtn">Fan</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addSelectBtn">Select</button>
@@ -276,6 +275,7 @@
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addBinarySensorBtn">Binary Sensor</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addPresenceBtn">Presence</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addGraphBtn">Graph</button>
+                    <button data-en="Chart" class="dropdown-item" type="button" role="menuitem" data-add-target="addChartBtn">Diagramm</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addTodoListBtn">Todo List</button>
                   </div>
                   <div class="dropdown-group">
@@ -299,6 +299,7 @@
               <button id="addButtonBtn" type="button">+ Button</button>
               <button id="addSliderBtn" type="button">+ Slider</button>
               <button id="addGraphBtn" type="button">+ Graph</button>
+              <button id="addChartBtn" type="button">+ Chart</button>
               <button id="addEmptyTileBtn" type="button">+ Empty Tile</button>
               <button id="addLightTileBtn" type="button">+ Light Tile</button>
               <button id="addHeatingTileBtn" type="button">+ Heating Tile</button>
@@ -307,7 +308,6 @@
               <button id="addTodoListBtn" type="button">+ Todo List</button>
               <button id="addMediaPlayerBtn" type="button">+ Media Player</button>
               <button id="addRoborockTileBtn" type="button">+ Roborock</button>
-              <button id="addCoverBtn" type="button">+ Cover</button>
               <button id="addLockBtn" type="button">+ Lock</button>
               <button id="addFanBtn" type="button">+ Fan</button>
               <button id="addSelectBtn" type="button">+ Select</button>
@@ -344,6 +344,7 @@
                     <option value="button">button</option>
                     <option value="slider">slider</option>
                     <option value="graph">graph</option>
+                    <option value="chart">chart</option>
                     <option value="empty_tile">empty_tile</option>
                     <option value="light_tile">light_tile</option>
                     <option value="heating_tile">heating_tile</option>
@@ -352,7 +353,6 @@
                     <option value="todo_list">todo_list</option>
                     <option value="media_player">media_player</option>
                     <option value="roborock_tile">roborock_tile</option>
-                    <option value="cover">cover</option>
                     <option value="lock">lock</option>
                     <option value="fan">fan</option>
                     <option value="select">select</option>
@@ -457,6 +457,41 @@
                     <label id="fGraphPointCountWrap"><span id="fGraphPointCountLabel">Render points (empty = auto)</span>
                       <input id="fGraphPointCount" type="number" min="16" max="64" step="1" placeholder="auto" />
                     </label>
+                  </div>
+                  <div id="chartOptions" class="slider-options hidden">
+                    <label><span data-en="Chart type">Diagrammtyp</span>
+                      <select id="fChartType">
+                        <option value="bar" data-en="Bars (horizontal)">Balken (waagerecht)</option>
+                        <option value="column" data-en="Columns">Säulen</option>
+                        <option value="pie" data-en="Ring (shares)">Kreis (Anteile)</option>
+                        <option value="line" data-en="Line (history)">Kurve (Verlauf)</option>
+                      </select>
+                    </label>
+                    <label id="fChartHoursWrap"><span data-en="History (hours)">Verlauf (Stunden)</span>
+                      <input id="fChartHours" type="number" min="1" max="168" step="1" value="24" />
+                    </label>
+                    <div class="chart-series-head"><span data-en="Sensors (up to 4): entity, colour, name">Sensoren (bis zu 4): Entität, Farbe, Name</span></div>
+                      <div class="chart-series-row">
+                        <input id="fChartEntity0" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                        <input id="fChartColor0" type="color" value="#03a9f4" data-en-title="Colour" title="Farbe" />
+                        <input id="fChartName0" type="text" maxlength="40" data-en-placeholder="Name (optional)" placeholder="Name (optional)" />
+                      </div>
+                      <div class="chart-series-row">
+                        <input id="fChartEntity1" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                        <input id="fChartColor1" type="color" value="#ff9800" data-en-title="Colour" title="Farbe" />
+                        <input id="fChartName1" type="text" maxlength="40" data-en-placeholder="Name (optional)" placeholder="Name (optional)" />
+                      </div>
+                      <div class="chart-series-row">
+                        <input id="fChartEntity2" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                        <input id="fChartColor2" type="color" value="#4caf50" data-en-title="Colour" title="Farbe" />
+                        <input id="fChartName2" type="text" maxlength="40" data-en-placeholder="Name (optional)" placeholder="Name (optional)" />
+                      </div>
+                      <div class="chart-series-row">
+                        <input id="fChartEntity3" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                        <input id="fChartColor3" type="color" value="#e91e63" data-en-title="Colour" title="Farbe" />
+                        <input id="fChartName3" type="text" maxlength="40" data-en-placeholder="Name (optional)" placeholder="Name (optional)" />
+                      </div>
+                    <div class="meta" data-en="Numeric sensors. Bars, columns and ring show the current values; the line loads the history from Home Assistant.">Sensoren mit Zahlenwerten. Balken, Säulen und Kreis zeigen die aktuellen Werte, die Kurve lädt den Verlauf aus Home Assistant.</div>
                   </div>
                   <div id="heatingOptions" class="slider-options hidden">
                     <label><span id="fHeatingStyleVariantLabel">Heating style</span>

@@ -86,6 +86,12 @@ Both boards need an ESP32-P4 chip revision 1.x and ESP-IDF **5.5**.
     `main/audio/panel_audio.c`.
   - The editor's automatic update URL, which pointed at firmware for the upstream boards.
   - Prebuilt upstream release images.
+- **Chart tile:** up to four sensors, each with its own colour and name, as horizontal bars,
+  columns, a ring (shares) or a line with the Home Assistant history (1-168 h).
+- **Tile fixes:** presence, lock, fan, select and number tiles were never created (they stayed
+  blank); the plain "cover" tile is retired and older layouts show the cover tile with popup.
+- **Full-screen messages from Home Assistant** (MQTT or HTTP), e.g. for the doorbell; see
+  [below](#full-screen-messages-from-home-assistant).
 - **Robustness:**
   - The layout is validated against the largest canvas.
   - A rejected layout is kept as `layout.json.bad` instead of being lost.
@@ -116,6 +122,43 @@ Both boards need an ESP32-P4 chip revision 1.x and ESP-IDF **5.5**.
 - **Rollback guard:** the firmware marks itself as good only once the network is up. Without
   network for four minutes, or after a crash during start-up, the kit falls back to the previous
   firmware - it has no USB access once mounted, so this is the safety net for updates.
+
+## Full-screen messages from Home Assistant
+
+Home Assistant can put a message on the panel, for example when the doorbell rings. The text is
+shown as large as fits, white on black alternating with black on white, above everything else
+(screensaver and "display off" included). A tap on the panel ends it early.
+
+**Payload** (MQTT or HTTP):
+
+| Payload | Meaning |
+|---|---|
+| `Front door` | plain text: 10 s, colours swap every 0.5 s |
+| `{"text":"Front door","duration":15,"interval":400}` | 15 s, swap every 400 ms |
+| `{"text":"Front door","count":6}` | blink 6 times, then end |
+| `{"text":"Parcel at the garage","interval":0}` | steady text, no blinking |
+| `{"text":"Front door","color":"red","background":"black"}` | red on black, alternating with black on red |
+| `{"text":"Alarm","color":"#FF0000","background":"black","color2":"black","background2":"yellow"}` | own colours for both phases |
+| `{"stop":true}` | end a running message |
+
+Colours are `#RRGGBB`, `RRGGBB` or a name (`white`, `black`, `red`, `green`, `blue`, `yellow`,
+`orange`, `purple`, `cyan`, `grey`, also in German). Without `color2`/`background2` the blink
+phase swaps text and background colour.
+
+**MQTT:** topic `betta_panel/<id>/set/notify`, where `<id>` is the last six hex digits of the
+panel's MAC address (shown in the MQTT device in Home Assistant). With MQTT discovery the panel
+also offers a **Display Message** text entity and a **Clear Display Message** button.
+
+```yaml
+# Automation action: doorbell
+action: mqtt.publish
+data:
+  topic: betta_panel/<id>/set/notify
+  payload: '{"text":"Front door","count":8,"interval":500}'
+```
+
+**HTTP:** `POST http://<panel-ip>/api/notify` with the same JSON, e.g. as a `rest_command`
+(add a `username`/`password` when the web password is set).
 
 ## Building
 

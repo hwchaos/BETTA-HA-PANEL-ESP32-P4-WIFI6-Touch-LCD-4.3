@@ -242,6 +242,7 @@ static void boot_guard_confirm_task(void *arg)
         esp_err_t err = boot_guard_read_ota_state(&state);
         if (err == ESP_OK && state != ESP_OTA_IMG_PENDING_VERIFY) {
             /* Nothing to confirm (image already valid, or no rollback armed). */
+            s_info.ota_state = state;
             s_info.rollback_pending = false;
             break;
         }
@@ -287,6 +288,9 @@ static void boot_guard_confirm_task(void *arg)
             s_confirmed = true;
             s_info.confirmed = true;
             s_info.rollback_pending = false;
+            /* The boot-time snapshot said "pending_verify"; keep the reported
+             * image state in step with what was just written. */
+            s_info.ota_state = ESP_OTA_IMG_VALID;
 #if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101
             boot_guard_nvs_write_stage("confirmed");
 #endif

@@ -30,6 +30,7 @@ esp_err_t api_sd_file_get_handler(httpd_req_t *req);
 esp_err_t api_sd_file_delete_handler(httpd_req_t *req);
 esp_err_t api_sd_logs_export_post_handler(httpd_req_t *req);
 esp_err_t api_display_activity_post_handler(httpd_req_t *req);
+esp_err_t api_notify_post_handler(httpd_req_t *req);
 esp_err_t api_display_wallpaper_post_handler(httpd_req_t *req);
 esp_err_t api_display_wallpaper_get_handler(httpd_req_t *req);
 esp_err_t api_display_wallpaper_delete_handler(httpd_req_t *req);
