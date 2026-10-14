@@ -1781,6 +1781,15 @@ textarea {
 aside.actions-panel {
   position: sticky;
   top: 18px;
+  /* Actions + page look can be taller than the window: scroll inside. */
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+}
+
+aside.actions-panel section.page-look-options {
+  margin-top: 12px;
+  border-top: 0;
+  padding-top: 0;
 }
 
 aside.actions-panel section {
@@ -1979,6 +1988,8 @@ aside.actions-panel section {
   }
   aside.actions-panel {
     position: static;
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
@@ -2543,3 +2554,42 @@ input[type="radio"] {
   margin: 4px auto 0;
   display: block;
 }
+
+/* Screensaver layout preview */
+.saver-layout {
+  margin: 10px 0;
+}
+.saver-preview {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  background: #000;
+  border: 1px solid #2f4960;
+  border-radius: 8px;
+  overflow: hidden;
+  touch-action: none;
+  margin: 6px 0 10px;
+}
+.saver-preview-block {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
+  font-family: Poppins, system-ui, sans-serif;
+  line-height: 1.15;
+}
+.saver-preview-block:active {
+  cursor: grabbing;
+}
+.saver-preview-clock {
+  outline: 1px dashed rgba(111, 232, 255, 0.5);
+  padding: 0 4px;
+}
+.saver-preview-date:empty {
+  display: none;
+}
+

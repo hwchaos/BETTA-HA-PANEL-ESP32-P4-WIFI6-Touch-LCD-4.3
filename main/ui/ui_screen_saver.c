@@ -21,10 +21,14 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "ha/ha_cards.h"
 #include "ui/fonts/app_text_fonts.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_cameras_page.h"
 #include "ui/ui_page_style.h"
+#include "ui/ui_pages.h"
+#include "ui/ui_saver_cards.h"
+#include "esp_random.h"
 
 #define TAG_SCREEN_SAVER "screen_saver"
 
@@ -95,6 +99,82 @@ static bool s_show_seconds = APP_DISPLAY_SAVER_SHOW_SECONDS;
 static bool s_show_date = APP_DISPLAY_SAVER_SHOW_DATE;
 static uint32_t s_clock_color = APP_DISPLAY_SAVER_CLOCK_COLOR;
 static uint32_t s_date_color = APP_DISPLAY_SAVER_DATE_COLOR;
+/* Layout: clock centre in permille (-1 = classic bottom centre), size in
+ * percent (the date follows), date above/below, drift against burn-in. */
+static int s_clock_x = -1;
+static int s_clock_y = -1;
+static int s_clock_scale = 100;
+static bool s_date_below = false;
+static char s_date_format[24] = "DD.MM.YYYY";
+static bool s_drift = false;
+static int32_t s_drift_dx = 0;
+static int32_t s_drift_dy = 0;
+static int64_t s_drift_next_us = 0;
+static int32_t s_layout_shift = 0;
+/* Clock / date at a size other than 100 %: Poppins from the embedded TTF (the
+ * built-in 84 px digits are Poppins too, so every size looks the same). */
+extern const uint8_t saver_poppins_start[] asm("_binary_Poppins_Regular_ttf_start");
+extern const uint8_t saver_poppins_end[] asm("_binary_Poppins_Regular_ttf_end");
+static lv_font_t *s_clock_ttf = NULL;
+static int32_t s_clock_ttf_px = 0;
+static lv_font_t *s_date_ttf = NULL;
+static int32_t s_date_ttf_px = 0;
+#define SAVER_SCALED(v) ((((int32_t)(v)) * (int32_t)s_clock_scale + 50) / 100)
+#define SAVER_FLIP_W SAVER_SCALED(APP_DISPLAY_SAVER_FLIP_CARD_W)
+#define SAVER_FLIP_H SAVER_SCALED(APP_DISPLAY_SAVER_FLIP_CARD_H)
+#define SAVER_FLIP_GAP SAVER_SCALED(APP_DISPLAY_SAVER_FLIP_CARD_GAP)
+#define SAVER_FLIP_RADIUS SAVER_SCALED(APP_DISPLAY_SAVER_FLIP_CARD_RADIUS)
+
+/* Fonts are kept until the size changes; the overlay that used the old one is
+ * always destroyed before a new size is built. */
+static const lv_font_t *ui_screen_saver_ttf(lv_font_t **slot, int32_t *slot_px, int32_t px)
+{
+    if (*slot == NULL || *slot_px != px) {
+        if (*slot != NULL) {
+            lv_tiny_ttf_destroy(*slot);
+        }
+        *slot = lv_tiny_ttf_create_data_ex(saver_poppins_start, (size_t)(saver_poppins_end - saver_poppins_start),
+            px, LV_FONT_KERNING_NONE, 24);
+        *slot_px = *slot != NULL ? px : 0;
+    }
+    return *slot;
+}
+
+static const lv_font_t *ui_screen_saver_clock_font(void)
+{
+    if (s_clock_scale == 100) {
+        return APP_FONT_CLOCK_84;
+    }
+    const lv_font_t *f = ui_screen_saver_ttf(&s_clock_ttf, &s_clock_ttf_px, SAVER_SCALED(84));
+    return f != NULL ? f : APP_FONT_CLOCK_84;
+}
+
+/* Top of a flip card's digit label. The built-in 84 px digits have their own
+ * fixed offset; for the TTF sizes the digit "0" is centred on the card from
+ * its real glyph box, since the TTF line box is much taller. */
+static int32_t ui_screen_saver_flip_label_y(void)
+{
+    if (s_clock_scale == 100) {
+        return APP_DISPLAY_SAVER_FLIP_LABEL_Y;
+    }
+    const lv_font_t *font = ui_screen_saver_clock_font();
+    lv_font_glyph_dsc_t glyph;
+    if (!lv_font_get_glyph_dsc(font, &glyph, '0', 0)) {
+        return SAVER_SCALED(APP_DISPLAY_SAVER_FLIP_LABEL_Y);
+    }
+    const int32_t glyph_top = font->line_height - font->base_line - (glyph.ofs_y + glyph.box_h);
+    return SAVER_FLIP_H / 2 - (glyph_top + glyph.box_h / 2);
+}
+
+static const lv_font_t *ui_screen_saver_date_font(void)
+{
+    if (s_clock_scale == 100) {
+        return APP_FONT_TEXT_22;
+    }
+    const int32_t px = SAVER_SCALED(22) < 12 ? 12 : SAVER_SCALED(22);
+    const lv_font_t *f = ui_screen_saver_ttf(&s_date_ttf, &s_date_ttf_px, px);
+    return f != NULL ? f : APP_FONT_TEXT_22;
+}
 static bool s_night_enabled = false;
 static uint16_t s_night_start_min = APP_DISPLAY_NIGHT_START_MIN;
 static uint16_t s_night_end_min = APP_DISPLAY_NIGHT_END_MIN;
@@ -112,6 +192,9 @@ static int64_t s_forced_off_ms = 0;
  * swallows the waking touch so it cannot press a tile underneath. */
 static lv_obj_t *s_blackout = NULL;
 static bool s_overlay_shown = false;
+/* Clock block (clock + date) on screen, for the cards next to it. */
+static int32_t s_block_top = 0;
+static int32_t s_block_bottom = 0;
 /* Last strings written into the clock/date labels.  lv_label_set_text() with an
  * identical string still frees and rebuilds the text and repaints the label, and
  * the saver tick calls the clock update once a second: keeping the rendered text
@@ -334,19 +417,19 @@ static lv_obj_t *ui_screen_saver_flip_create_half(lv_obj_t *card, int32_t clip_y
 {
     lv_obj_t *clip = lv_obj_create(card);
     lv_obj_remove_style_all(clip);
-    lv_obj_set_size(clip, APP_DISPLAY_SAVER_FLIP_CARD_W, APP_DISPLAY_SAVER_FLIP_CARD_H / 2);
+    lv_obj_set_size(clip, SAVER_FLIP_W, SAVER_FLIP_H / 2);
     lv_obj_set_pos(clip, 0, clip_y);
     lv_obj_clear_flag(clip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *label = lv_label_create(clip);
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
     lv_label_set_text(label, "0");
-    lv_obj_set_style_text_font(label, APP_FONT_CLOCK_84, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, ui_screen_saver_clock_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(label, lv_color_hex(s_clock_color), LV_PART_MAIN);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     /* A full card tall label inside a half card tall clip: the clip cuts it on
      * the seam, which is what makes the two halves of one digit line up. */
-    lv_obj_set_size(label, APP_DISPLAY_SAVER_FLIP_CARD_W, APP_DISPLAY_SAVER_FLIP_CARD_H);
+    lv_obj_set_size(label, SAVER_FLIP_W, SAVER_FLIP_H);
     lv_obj_set_pos(label, 0, label_y);
     lv_obj_clear_flag(label, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -356,31 +439,31 @@ static lv_obj_t *ui_screen_saver_flip_create_half(lv_obj_t *card, int32_t clip_y
 
 static void ui_screen_saver_flip_create_card(uint32_t index, int32_t x)
 {
-    const int32_t half_h = APP_DISPLAY_SAVER_FLIP_CARD_H / 2;
+    const int32_t half_h = SAVER_FLIP_H / 2;
 
     lv_obj_t *card = lv_obj_create(s_flip_row);
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, APP_DISPLAY_SAVER_FLIP_CARD_W, APP_DISPLAY_SAVER_FLIP_CARD_H);
+    lv_obj_set_size(card, SAVER_FLIP_W, SAVER_FLIP_H);
     lv_obj_set_pos(card, x, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_radius(card, APP_DISPLAY_SAVER_FLIP_CARD_RADIUS, LV_PART_MAIN);
+    lv_obj_set_style_radius(card, SAVER_FLIP_RADIUS, LV_PART_MAIN);
     lv_obj_set_style_bg_color(card, lv_color_hex(APP_DISPLAY_SAVER_FLIP_CARD_COLOR), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
 
     flip_digit_t *digit = &s_flip_digits[index];
     digit->shown = FLIP_DIGIT_UNSET; /* the first fill must not animate */
-    digit->top_clip = ui_screen_saver_flip_create_half(card, 0, APP_DISPLAY_SAVER_FLIP_LABEL_Y,
+    digit->top_clip = ui_screen_saver_flip_create_half(card, 0, ui_screen_saver_flip_label_y(),
         &digit->top_label);
     /* Fold line: the bottom edge of the upper flap. */
-    lv_obj_set_style_transform_pivot_x(digit->top_clip, APP_DISPLAY_SAVER_FLIP_CARD_W / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_x(digit->top_clip, SAVER_FLIP_W / 2, LV_PART_MAIN);
     lv_obj_set_style_transform_pivot_y(digit->top_clip, half_h, LV_PART_MAIN);
-    ui_screen_saver_flip_create_half(card, half_h, APP_DISPLAY_SAVER_FLIP_LABEL_Y - half_h,
+    ui_screen_saver_flip_create_half(card, half_h, ui_screen_saver_flip_label_y() - half_h,
         &digit->bottom_label);
 
     /* Seam between the two halves, like the hinge of a real flip card. */
     lv_obj_t *seam = lv_obj_create(card);
     lv_obj_remove_style_all(seam);
-    lv_obj_set_size(seam, APP_DISPLAY_SAVER_FLIP_CARD_W, 2);
+    lv_obj_set_size(seam, SAVER_FLIP_W, 2);
     lv_obj_set_pos(seam, 0, half_h - 1);
     lv_obj_clear_flag(seam, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(seam, lv_color_hex(0x000000), LV_PART_MAIN);
@@ -389,17 +472,16 @@ static void ui_screen_saver_flip_create_card(uint32_t index, int32_t x)
 
 static void ui_screen_saver_flip_build(lv_obj_t *parent)
 {
-    const int32_t card_w = APP_DISPLAY_SAVER_FLIP_CARD_W;
-    const int32_t gap = APP_DISPLAY_SAVER_FLIP_CARD_GAP;
+    const int32_t card_w = SAVER_FLIP_W;
+    const int32_t gap = SAVER_FLIP_GAP;
     const int32_t row_w = (card_w * FLIP_DIGIT_COUNT) + (gap * (FLIP_DIGIT_COUNT - 1));
-    const int32_t row_y = APP_SCREEN_HEIGHT - APP_DISPLAY_SAVER_CLOCK_BOTTOM_GAP -
-        APP_DISPLAY_SAVER_FLIP_CARD_H;
 
     s_flip_row = lv_obj_create(parent);
     lv_obj_remove_style_all(s_flip_row);
-    lv_obj_set_size(s_flip_row, row_w, APP_DISPLAY_SAVER_FLIP_CARD_H);
+    lv_obj_set_size(s_flip_row, row_w, SAVER_FLIP_H);
     s_flip_row_w = row_w;
-    lv_obj_set_pos(s_flip_row, (APP_SCREEN_WIDTH - row_w) / 2, row_y);
+    /* Placed by ui_screen_saver_layout(). */
+    lv_obj_set_pos(s_flip_row, (APP_SCREEN_WIDTH - row_w) / 2, 0);
     lv_obj_clear_flag(s_flip_row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     for (uint32_t i = 0; i < FLIP_DIGIT_COUNT; i++) {
@@ -430,16 +512,6 @@ static void ui_screen_saver_flip_update(int hour, int minute)
     for (uint32_t i = 0; i < FLIP_DIGIT_COUNT; i++) {
         ui_screen_saver_flip_set_digit(&s_flip_digits[i], digits[i]);
     }
-}
-
-/* Height of the clock block on the overlay, used to stack the date caption
- * above it. */
-static uint32_t ui_screen_saver_clock_block_height(void)
-{
-    if (s_clock_style == APP_DISPLAY_SAVER_CLOCK_STYLE_FLIP) {
-        return APP_DISPLAY_SAVER_FLIP_CARD_H;
-    }
-    return lv_font_get_line_height(APP_FONT_CLOCK_84);
 }
 
 /* Backlight target for the current screensaver state. While the clock overlay
@@ -718,6 +790,7 @@ void ui_screen_saver_handle_screen_clean(void)
      * objects that are about to disappear.
      * The wallpaper buffer/dsc survive: they are owned by this module. */
     ui_screen_saver_flip_reset();
+    ui_saver_cards_detach();
     s_overlay = NULL;
     s_time_label = NULL;
     s_date_label = NULL;
@@ -737,17 +810,74 @@ void ui_screen_saver_handle_screen_clean(void)
     ui_cameras_page_set_suspended(false);
 }
 
-/* Centres the clock block horizontally, optionally pulled left by half of the
- * AM/PM badge so that the "HH:MM PM" group as a whole stays centred. */
+/* Places clock and date around the configured centre (default: the classic
+ * bottom-centre spot), keeps the block on screen and applies the drift.
+ * `shift` pulls the digits left by half of the AM/PM badge so the
+ * "HH:MM PM" group as a whole stays centred. */
+static void ui_screen_saver_layout(int32_t shift)
+{
+    lv_obj_t *clock = (s_clock_style == APP_DISPLAY_SAVER_CLOCK_STYLE_FLIP) ? s_flip_row : s_time_label;
+    if (s_overlay == NULL || clock == NULL) {
+        return;
+    }
+    s_layout_shift = shift;
+    lv_obj_update_layout(clock);
+    const int32_t cw = lv_obj_get_width(clock);
+    int32_t ch = lv_obj_get_height(clock);
+    /* A TTF clock label carries the font's full line box (room for accents
+     * above the digits); lay out by the visible digits instead. */
+    int32_t inset_top = 0;
+    if (clock == s_time_label && s_clock_scale != 100) {
+        const lv_font_t *font = ui_screen_saver_clock_font();
+        lv_font_glyph_dsc_t glyph;
+        if (lv_font_get_glyph_dsc(font, &glyph, '0', 0)) {
+            inset_top = font->line_height - font->base_line - (glyph.ofs_y + glyph.box_h);
+            ch = glyph.box_h;
+        }
+    }
+    const bool date = s_date_label != NULL && !lv_obj_has_flag(s_date_label, LV_OBJ_FLAG_HIDDEN);
+    int32_t dw = 0;
+    int32_t dh = 0;
+    if (date) {
+        lv_obj_update_layout(s_date_label);
+        dw = lv_obj_get_width(s_date_label);
+        dh = lv_obj_get_height(s_date_label);
+    }
+    const int32_t gap = SAVER_SCALED(APP_DISPLAY_SAVER_DATE_GAP);
+
+    int32_t cx = s_clock_x >= 0 ? APP_SCREEN_WIDTH * s_clock_x / 1000 : APP_SCREEN_WIDTH / 2;
+    int32_t cy = s_clock_y >= 0 ? APP_SCREEN_HEIGHT * s_clock_y / 1000
+                                : APP_SCREEN_HEIGHT - APP_DISPLAY_SAVER_CLOCK_BOTTOM_GAP - ch / 2;
+    cx += s_drift_dx;
+    cy += s_drift_dy;
+
+    /* Keep the whole block (clock, badge, date) on screen. */
+    const int32_t half_w = LV_MAX(cw / 2 + shift, dw / 2);
+    if (cx - half_w < 0) {
+        cx = half_w;
+    } else if (cx + half_w > APP_SCREEN_WIDTH) {
+        cx = APP_SCREEN_WIDTH - half_w;
+    }
+    const int32_t above = (date && !s_date_below) ? dh + gap : 0;
+    const int32_t below = (date && s_date_below) ? dh + gap : 0;
+    if (cy - ch / 2 - above < 0) {
+        cy = ch / 2 + above;
+    } else if (cy + ch / 2 + below > APP_SCREEN_HEIGHT) {
+        cy = APP_SCREEN_HEIGHT - ch / 2 - below;
+    }
+
+    lv_obj_set_pos(clock, cx - cw / 2 - shift, cy - ch / 2 - inset_top);
+    s_block_top = cy - ch / 2 - above;
+    s_block_bottom = cy + ch / 2 + below;
+    if (date) {
+        const int32_t dy = s_date_below ? cy + ch / 2 + gap : cy - ch / 2 - gap - dh;
+        lv_obj_set_pos(s_date_label, cx - dw / 2, dy);
+    }
+}
+
 static void ui_screen_saver_align_clock(int32_t shift)
 {
-    if (s_clock_style == APP_DISPLAY_SAVER_CLOCK_STYLE_FLIP) {
-        if (s_flip_row != NULL) {
-            lv_obj_set_x(s_flip_row, (APP_SCREEN_WIDTH - s_flip_row_w) / 2 - shift);
-        }
-    } else if (s_time_label != NULL) {
-        lv_obj_align(s_time_label, LV_ALIGN_BOTTOM_MID, -shift, -APP_DISPLAY_SAVER_CLOCK_BOTTOM_GAP);
-    }
+    ui_screen_saver_layout(shift);
 }
 
 /* One badge copy: same black plate, so the five of them overlap into a single
@@ -863,13 +993,7 @@ static void ui_screen_saver_update_clock(void)
 
     if (s_show_date) {
         char date_buf[32] = {0};
-        snprintf(
-            date_buf,
-            sizeof(date_buf),
-            "%02d.%02d.%04d",
-            info.tm_mday,
-            info.tm_mon + 1,
-            info.tm_year + 1900);
+        ui_format_date(date_buf, sizeof(date_buf), &info, s_date_format);
         if (strcmp(date_buf, s_date_rendered) != 0) {
             snprintf(s_date_rendered, sizeof(s_date_rendered), "%s", date_buf);
             lv_label_set_text(s_date_label, date_buf);
@@ -884,6 +1008,19 @@ static void ui_screen_saver_update_clock(void)
         lv_obj_set_style_text_color(s_time_label, lv_color_hex(s_clock_color), LV_PART_MAIN);
     }
     lv_obj_set_style_text_color(s_date_label, lv_color_hex(s_date_color), LV_PART_MAIN);
+
+    /* Burn-in protection: wander a few pixels every three minutes. */
+    const int64_t now_us = esp_timer_get_time();
+    if (s_drift && now_us >= s_drift_next_us) {
+        const int32_t range = LV_MAX(APP_SCREEN_WIDTH / 80, 4);
+        s_drift_dx = (int32_t)(esp_random() % (uint32_t)(2 * range + 1)) - range;
+        s_drift_dy = (int32_t)(esp_random() % (uint32_t)(2 * range + 1)) - range;
+        s_drift_next_us = now_us + 180LL * 1000 * 1000;
+    } else if (!s_drift) {
+        s_drift_dx = 0;
+        s_drift_dy = 0;
+    }
+    ui_screen_saver_layout(s_layout_shift);
     ui_screen_saver_update_ampm(info.tm_hour);
 }
 
@@ -891,6 +1028,7 @@ static void ui_screen_saver_update_clock(void)
 static void ui_screen_saver_destroy_overlay(void)
 {
     ui_screen_saver_flip_reset();
+    ui_saver_cards_detach();
     if (s_overlay != NULL) {
         lv_obj_delete(s_overlay);
     }
@@ -1319,12 +1457,10 @@ static void ui_screen_saver_ensure_overlay(void)
         ui_screen_saver_flip_build(s_overlay);
     } else {
         s_time_label = lv_label_create(s_overlay);
-        lv_obj_set_style_text_font(s_time_label, APP_FONT_CLOCK_84, LV_PART_MAIN);
+        lv_obj_set_style_text_font(s_time_label, ui_screen_saver_clock_font(), LV_PART_MAIN);
         lv_obj_set_style_text_color(s_time_label, lv_color_hex(s_clock_color), LV_PART_MAIN);
         lv_obj_set_style_text_align(s_time_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_set_width(s_time_label, LV_SIZE_CONTENT);
-        /* Clock sits near the bottom edge with the date stacked above it. */
-        lv_obj_align(s_time_label, LV_ALIGN_BOTTOM_MID, 0, -APP_DISPLAY_SAVER_CLOCK_BOTTOM_GAP);
     }
 
     /* 12 hour format badge; positioned and shown by the clock tick. Five copies
@@ -1340,13 +1476,12 @@ static void ui_screen_saver_ensure_overlay(void)
     s_ampm_state = 2;
 
     s_date_label = lv_label_create(s_overlay);
-    lv_obj_set_style_text_font(s_date_label, APP_FONT_TEXT_22, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_date_label, ui_screen_saver_date_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(s_date_label, lv_color_hex(s_date_color), LV_PART_MAIN);
     lv_obj_set_style_text_align(s_date_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_set_width(s_date_label, LV_SIZE_CONTENT);
-    lv_obj_align(s_date_label, LV_ALIGN_BOTTOM_MID, 0,
-        -APP_DISPLAY_SAVER_CLOCK_BOTTOM_GAP - ui_screen_saver_clock_block_height() -
-            APP_DISPLAY_SAVER_DATE_GAP);
+    ui_screen_saver_layout(0);
+    ui_saver_cards_attach(s_overlay);
 
     /* Building the overlay is the expensive part (objects, fonts, the 1.2 MB
      * wallpaper source).  It used to happen inside the saver timer callback on
@@ -1423,6 +1558,20 @@ static void ui_screen_saver_show_overlay(void)
  * brightness restore; this module restores it once the menu is painted. */
 static bool ui_screen_saver_on_activity(void)
 {
+    /* A finger on a media card works its buttons: the clock stays up, as
+     * after a motion wake, until the next touch elsewhere. */
+    if (s_overlay_shown && !s_screen_off) {
+        lv_indev_t *indev = lv_indev_active();
+        if (indev != NULL) {
+            lv_point_t p;
+            lv_indev_get_point(indev, &p);
+            if (ui_saver_cards_hit(p.x, p.y)) {
+                s_wake_to_screensaver = true;
+                return true;
+            }
+        }
+    }
+
     s_wake_to_screensaver = false;
 
     if (!s_overlay_shown || s_screen_off) {
@@ -1499,6 +1648,7 @@ static void ui_screen_saver_set_blackout(bool on)
 static void ui_screen_saver_timer_cb(lv_timer_t *timer)
 {
     system_log_note_lvgl_cb("ui_screen_saver_timer_cb");
+    ha_cards_tick();
     (void)timer;
 
     if (s_style_pending) {
@@ -1514,6 +1664,8 @@ static void ui_screen_saver_timer_cb(lv_timer_t *timer)
         s_wallpaper_dim_pending = false;
         ui_screen_saver_apply_wallpaper_dim();
     }
+
+    ui_saver_cards_tick(s_overlay_shown && !s_screen_off, s_block_top, s_block_bottom);
 
     int64_t idle_ms = display_ms_since_activity();
     bool activity_recent = idle_ms < SCREEN_SAVER_TICK_MS;
@@ -1647,7 +1799,11 @@ void ui_screen_saver_apply_settings(const runtime_settings_t *settings)
     bool brightness_changed = (settings->display_brightness != s_brightness);
     bool saver_brightness_changed = (settings->display_saver_brightness != s_saver_brightness);
     bool off_just_disabled = (s_screen_off_enabled && !settings->display_screen_off_enabled);
-    bool style_changed = (settings->display_saver_clock_style != s_clock_style);
+    bool style_changed = (settings->display_saver_clock_style != s_clock_style) ||
+                         settings->display_saver_clock_scale != s_clock_scale ||
+                         settings->display_saver_clock_x != s_clock_x || settings->display_saver_clock_y != s_clock_y ||
+                         settings->display_saver_date_below != s_date_below ||
+                         strcmp(settings->display_saver_date_format, s_date_format) != 0;
     const bool wallpaper_dim_changed = (settings->display_saver_wallpaper_dim != s_wallpaper_dim);
 
     s_brightness = settings->display_brightness;
@@ -1662,6 +1818,15 @@ void ui_screen_saver_apply_settings(const runtime_settings_t *settings)
     s_clock_style = settings->display_saver_clock_style;
     s_clock_color = settings->display_saver_clock_color;
     s_date_color = settings->display_saver_date_color;
+    s_clock_x = settings->display_saver_clock_x;
+    s_clock_y = settings->display_saver_clock_y;
+    s_clock_scale = (settings->display_saver_clock_scale >= 40 && settings->display_saver_clock_scale <= 300)
+        ? settings->display_saver_clock_scale
+        : 100;
+    s_date_below = settings->display_saver_date_below;
+    snprintf(s_date_format, sizeof(s_date_format), "%s", settings->display_saver_date_format);
+    s_drift = settings->display_saver_drift;
+    ha_cards_configure(settings->display_cards_label, settings->display_saver_cards);
     s_wallpaper_dim = (settings->display_saver_wallpaper_dim > APP_DISPLAY_SAVER_WALLPAPER_DIM_MAX)
         ? APP_DISPLAY_SAVER_WALLPAPER_DIM_MAX
         : settings->display_saver_wallpaper_dim;
@@ -1764,6 +1929,15 @@ void ui_screen_saver_init(void)
     s_clock_style = settings.display_saver_clock_style;
     s_clock_color = settings.display_saver_clock_color;
     s_date_color = settings.display_saver_date_color;
+    s_clock_x = settings.display_saver_clock_x;
+    s_clock_y = settings.display_saver_clock_y;
+    s_clock_scale = (settings.display_saver_clock_scale >= 40 && settings.display_saver_clock_scale <= 300)
+        ? settings.display_saver_clock_scale
+        : 100;
+    s_date_below = settings.display_saver_date_below;
+    snprintf(s_date_format, sizeof(s_date_format), "%s", settings.display_saver_date_format);
+    s_drift = settings.display_saver_drift;
+    ha_cards_configure(settings.display_cards_label, settings.display_saver_cards);
     s_night_enabled = settings.display_night_mode_enabled;
     s_night_start_min = settings.display_night_start_min;
     s_night_end_min = settings.display_night_end_min;

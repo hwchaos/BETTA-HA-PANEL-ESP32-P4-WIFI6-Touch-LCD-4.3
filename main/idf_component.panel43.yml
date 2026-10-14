@@ -9,9 +9,12 @@ dependencies:
     rules:
       - if: "target in [esp32p4]"
   lvgl/lvgl:
-    version: "9.5.0"
+    version: "9.6.0~1"
+  # Local copy of the registry BSP 1.0.1: the release pins LVGL to exactly
+  # 9.5.0, the copy allows the 9.6.0~1 both panels run (see its manifest).
   waveshare/esp32_p4_wifi6_touch_lcd_4_3:
     version: "1.0.1"
+    override_path: "../bsp/esp32_p4_wifi6_touch_lcd_4_3"
     rules:
       - if: "target in [esp32p4]"
   espressif/esp_lvgl_port:

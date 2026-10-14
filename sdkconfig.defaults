@@ -145,6 +145,8 @@ CONFIG_LV_USE_THORVG=y
 CONFIG_LV_USE_THORVG_INTERNAL=y
 CONFIG_LV_USE_LOTTIE=y
 CONFIG_LV_USE_LODEPNG=y
+# Vector maps of robot mowers (camera proxy delivers SVG), rendered by ThorVG.
+CONFIG_LV_USE_SVG=y
 
 # Display/LVGL performance profile for ESP32-P4 + DSI
 CONFIG_LVGL_PORT_ENABLE_PPA=y
@@ -164,6 +166,18 @@ CONFIG_LV_FONT_FMT_TXT_LARGE=y
 CONFIG_LV_TXT_BREAK_CHARS=" ,.;:-_"
 CONFIG_LV_USE_SNAPSHOT=y
 
+# Same LVGL configuration on both panels (both run LVGL 9.6, RGB565). Set
+# explicitly: an sdkconfig created under another LVGL release otherwise keeps
+# that release's defaults.
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_OBJ_STYLE_CACHE=y
+# CONFIG_LV_USE_ASSERT is not set
+# CONFIG_LV_USE_ASSERT_NULL is not set
+# CONFIG_LV_USE_ASSERT_MALLOC is not set
+CONFIG_LV_ASSERT_HANDLER_INCLUDE="assert.h"
+CONFIG_LV_COLOR_MIX_ROUND_OFS=128
+CONFIG_LV_USE_THEME_MONO=y
+
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360
 
@@ -172,3 +186,5 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360
 # log-export feature, and user-copied wallpapers cannot keep their PC file names.
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
+# Cache blurred shadow corners (tile shadows; energy page 17 % -> 11 % load).
+CONFIG_LV_DRAW_SW_SHADOW_CACHE_SIZE=112

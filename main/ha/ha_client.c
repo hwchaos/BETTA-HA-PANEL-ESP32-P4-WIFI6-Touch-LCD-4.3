@@ -1415,6 +1415,7 @@ static bool ha_client_discovery_domain_supported(const char *domain)
            strcmp(domain, "todo") == 0 ||
            strcmp(domain, "media_player") == 0 ||
            strcmp(domain, "vacuum") == 0 ||
+           strcmp(domain, "lawn_mower") == 0 ||
            strcmp(domain, "image") == 0 ||
            strcmp(domain, "cover") == 0 ||
            strcmp(domain, "fan") == 0 ||
@@ -4162,6 +4163,9 @@ static size_t ha_client_collect_layout_entity_ids(char *entity_ids, size_t max_c
                 }
                 ha_client_collect_entity_id(widget, "entity_id", entity_ids, &count, max_count);
                 ha_client_collect_entity_id(widget, "secondary_entity_id", entity_ids, &count, max_count);
+                ha_client_collect_entity_id(widget, "mower_battery_entity_id", entity_ids, &count, max_count);
+                ha_client_collect_entity_id(widget, "mower_progress_entity_id", entity_ids, &count, max_count);
+                ha_client_collect_entity_id(widget, "mower_task_entity_id", entity_ids, &count, max_count);
                 cJSON *chart_series = cJSON_GetObjectItemCaseSensitive(widget, "chart_series");
                 cJSON *series = NULL;
                 cJSON_ArrayForEach(series, chart_series)
@@ -9057,15 +9061,18 @@ void ha_client_assist_detach(void)
     xSemaphoreGive(s_client.mutex);
 }
 
-/* ---- Generic WS subscriptions (e.g. persistent notifications) ---- */
+/* ---- Generic WS subscriptions (persistent notifications, templates) ---- */
 
-#define HA_CLIENT_WS_SUBS 2
+#define HA_CLIENT_WS_SUBS 4
 
 typedef struct {
+    char key[48];
     char type[48];
+    char *body; /* extra request fields as a JSON object string, or NULL */
     ha_client_event_cb_t cb;
     void *user;
     uint32_t req_id;
+    uint32_t unsub_id; /* replaced subscription still open on HA */
     bool pending;
 } ha_client_ws_sub_t;
 
@@ -9079,25 +9086,114 @@ static void ha_client_ws_sub_result_cb(bool success, cJSON *result, void *user)
     }
 }
 
+static void ha_client_ws_unsub_result_cb(bool success, cJSON *result, void *user)
+{
+    (void)success;
+    (void)result;
+    (void)user;
+}
+
+esp_err_t ha_client_ws_subscribe_ex(
+    const char *key, const char *type, const char *body_json, ha_client_event_cb_t cb, void *user)
+{
+    if (key == NULL || type == NULL || cb == NULL || s_client.mutex == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char *body = NULL;
+    if (body_json != NULL && body_json[0] != '\0') {
+        body = strdup(body_json);
+        if (body == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+    int slot = -1;
+    for (int i = 0; i < HA_CLIENT_WS_SUBS; i++) {
+        if (s_ws_subs[i].cb != NULL && strcmp(s_ws_subs[i].key, key) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    for (int i = 0; i < HA_CLIENT_WS_SUBS && slot < 0; i++) {
+        if (s_ws_subs[i].cb == NULL && s_ws_subs[i].unsub_id == 0) {
+            slot = i;
+        }
+    }
+    if (slot < 0) {
+        xSemaphoreGive(s_client.mutex);
+        free(body);
+        return ESP_ERR_NO_MEM;
+    }
+    ha_client_ws_sub_t *sub = &s_ws_subs[slot];
+    const bool same = sub->cb != NULL && strcmp(sub->type, type) == 0 &&
+                      ((sub->body == NULL && body == NULL) ||
+                          (sub->body != NULL && body != NULL && strcmp(sub->body, body) == 0));
+    if (same) {
+        sub->cb = cb;
+        sub->user = user;
+        xSemaphoreGive(s_client.mutex);
+        free(body);
+        return ESP_OK;
+    }
+    if (sub->cb != NULL && sub->req_id != 0) {
+        sub->unsub_id = sub->req_id; /* the old one is cancelled by the client task */
+    }
+    safe_copy_cstr(sub->key, sizeof(sub->key), key);
+    safe_copy_cstr(sub->type, sizeof(sub->type), type);
+    free(sub->body);
+    sub->body = body;
+    sub->cb = cb;
+    sub->user = user;
+    sub->req_id = 0;
+    sub->pending = true; /* sent by the client task once authenticated */
+    xSemaphoreGive(s_client.mutex);
+    return ESP_OK;
+}
+
 esp_err_t ha_client_ws_subscribe(const char *type, ha_client_event_cb_t cb, void *user)
 {
-    if (type == NULL || cb == NULL || s_client.mutex == NULL) {
-        return ESP_ERR_INVALID_ARG;
+    return ha_client_ws_subscribe_ex(type, type, NULL, cb, user);
+}
+
+void ha_client_ws_unsubscribe(const char *key)
+{
+    if (key == NULL || s_client.mutex == NULL) {
+        return;
     }
     xSemaphoreTake(s_client.mutex, portMAX_DELAY);
     for (int i = 0; i < HA_CLIENT_WS_SUBS; i++) {
-        if (s_ws_subs[i].cb == NULL || strcmp(s_ws_subs[i].type, type) == 0) {
-            safe_copy_cstr(s_ws_subs[i].type, sizeof(s_ws_subs[i].type), type);
-            s_ws_subs[i].cb = cb;
-            s_ws_subs[i].user = user;
-            s_ws_subs[i].req_id = 0;
-            s_ws_subs[i].pending = true; /* sent by the client task once authenticated */
-            xSemaphoreGive(s_client.mutex);
-            return ESP_OK;
+        ha_client_ws_sub_t *sub = &s_ws_subs[i];
+        if (sub->cb != NULL && strcmp(sub->key, key) == 0) {
+            /* The slot stays reserved until the client task has sent the
+             * unsubscribe (cb NULL, unsub_id set). */
+            sub->unsub_id = sub->req_id;
+            sub->req_id = 0;
+            sub->cb = NULL;
+            sub->user = NULL;
+            sub->pending = false;
+            free(sub->body);
+            sub->body = NULL;
+            sub->key[0] = '\0';
         }
     }
     xSemaphoreGive(s_client.mutex);
-    return ESP_ERR_NO_MEM;
+}
+
+static void ha_client_ws_send_unsubscribe(uint32_t subscription)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return;
+    }
+    const uint32_t req_id = ha_client_next_message_id();
+    cJSON_AddNumberToObject(root, "id", (double)req_id);
+    cJSON_AddStringToObject(root, "type", "unsubscribe_events");
+    cJSON_AddNumberToObject(root, "subscription", (double)subscription);
+    xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+    (void)ha_client_pending_response_register_locked(req_id, ha_client_ws_unsub_result_cb, NULL, ha_client_now_ms());
+    xSemaphoreGive(s_client.mutex);
+    (void)ha_client_send_json(root);
+    cJSON_Delete(root);
 }
 
 /* Client task: send subscriptions that are due (new, or after a re-login). */
@@ -9105,20 +9201,43 @@ static void ha_client_ws_subs_send_pending(void)
 {
     for (int i = 0; i < HA_CLIENT_WS_SUBS; i++) {
         char type[48] = {0};
+        char *body = NULL;
         xSemaphoreTake(s_client.mutex, portMAX_DELAY);
+        const uint32_t unsub_id = s_ws_subs[i].unsub_id;
+        s_ws_subs[i].unsub_id = 0;
         const bool due = s_ws_subs[i].cb != NULL && s_ws_subs[i].pending;
         if (due) {
             safe_copy_cstr(type, sizeof(type), s_ws_subs[i].type);
+            if (s_ws_subs[i].body != NULL) {
+                body = strdup(s_ws_subs[i].body);
+            }
         }
         xSemaphoreGive(s_client.mutex);
+        if (unsub_id != 0) {
+            ha_client_ws_send_unsubscribe(unsub_id);
+        }
         if (!due) {
+            free(body);
             continue;
         }
-        cJSON *root = cJSON_CreateObject();
+        cJSON *root = NULL;
+        if (body != NULL) {
+            root = cJSON_Parse(body);
+            free(body);
+            if (!cJSON_IsObject(root)) {
+                cJSON_Delete(root);
+                root = NULL;
+            }
+        }
+        if (root == NULL) {
+            root = cJSON_CreateObject();
+        }
         if (root == NULL) {
             return;
         }
         const uint32_t req_id = ha_client_next_message_id();
+        cJSON_DeleteItemFromObjectCaseSensitive(root, "id");
+        cJSON_DeleteItemFromObjectCaseSensitive(root, "type");
         cJSON_AddNumberToObject(root, "id", (double)req_id);
         cJSON_AddStringToObject(root, "type", type);
         xSemaphoreTake(s_client.mutex, portMAX_DELAY);
@@ -9141,6 +9260,8 @@ static void ha_client_ws_subs_send_pending(void)
 static void ha_client_ws_subs_mark_all_pending_locked(void)
 {
     for (int i = 0; i < HA_CLIENT_WS_SUBS; i++) {
+        /* A new connection has no subscriptions left to cancel. */
+        s_ws_subs[i].unsub_id = 0;
         if (s_ws_subs[i].cb != NULL) {
             s_ws_subs[i].pending = true;
             s_ws_subs[i].req_id = 0;

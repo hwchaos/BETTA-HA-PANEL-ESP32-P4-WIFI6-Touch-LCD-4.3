@@ -56,6 +56,10 @@ esp_err_t w_roborock_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_wid
 void w_roborock_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
 void w_roborock_mark_unavailable(ui_widget_instance_t *instance);
 void w_roborock_set_visible(ui_widget_instance_t *instance, bool visible);
+esp_err_t w_mower_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_instance_t *out_instance);
+void w_mower_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
+void w_mower_mark_unavailable(ui_widget_instance_t *instance);
+void w_mower_set_visible(ui_widget_instance_t *instance, bool visible);
 
 esp_err_t w_binary_sensor_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget_instance_t *out_instance);
 void w_binary_sensor_apply_state(ui_widget_instance_t *instance, const ha_state_t *state);
@@ -355,6 +359,8 @@ esp_err_t ui_widget_factory_create(const ui_widget_def_t *def, lv_obj_t *parent,
         err = w_media_player_create(def, parent, out_instance);
     } else if (strcmp(def->type, "roborock_tile") == 0) {
         err = w_roborock_create(def, parent, out_instance);
+    } else if (strcmp(def->type, "mower_tile") == 0) {
+        err = w_mower_create(def, parent, out_instance);
     } else if (strcmp(def->type, "binary_sensor") == 0) {
         err = w_binary_sensor_create(def, parent, out_instance);
     } else if (strcmp(def->type, "alarm_tile") == 0) {
@@ -421,6 +427,8 @@ void ui_widget_factory_apply_state(ui_widget_instance_t *instance, const ha_stat
         w_media_player_apply_state(instance, state);
     } else if (strcmp(instance->type, "roborock_tile") == 0) {
         w_roborock_apply_state(instance, state);
+    } else if (strcmp(instance->type, "mower_tile") == 0) {
+        w_mower_apply_state(instance, state);
     } else if (strcmp(instance->type, "binary_sensor") == 0) {
         w_binary_sensor_apply_state(instance, state);
     } else if (strcmp(instance->type, "presence") == 0) {
@@ -480,6 +488,8 @@ void ui_widget_factory_mark_unavailable(ui_widget_instance_t *instance)
         w_media_player_mark_unavailable(instance);
     } else if (strcmp(instance->type, "roborock_tile") == 0) {
         w_roborock_mark_unavailable(instance);
+    } else if (strcmp(instance->type, "mower_tile") == 0) {
+        w_mower_mark_unavailable(instance);
     } else if (strcmp(instance->type, "binary_sensor") == 0) {
         w_binary_sensor_mark_unavailable(instance);
     } else if (strcmp(instance->type, "presence") == 0) {
@@ -526,5 +536,7 @@ void ui_widget_factory_set_visible(ui_widget_instance_t *instance, bool visible)
         w_media_player_set_visible(instance, visible);
     } else if (strcmp(instance->type, "roborock_tile") == 0) {
         w_roborock_set_visible(instance, visible);
+    } else if (strcmp(instance->type, "mower_tile") == 0) {
+        w_mower_set_visible(instance, visible);
     }
 }

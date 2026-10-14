@@ -65,6 +65,19 @@ typedef struct {
     uint8_t display_saver_wallpaper_dim; /* darkening of the saver wallpaper, 0..APP_DISPLAY_SAVER_WALLPAPER_DIM_MAX */
     uint32_t display_saver_clock_color;
     uint32_t display_saver_date_color;
+    /* Screensaver layout: clock centre in permille of the screen (-1 = the
+     * classic bottom-centre spot), clock size in percent (date follows), date
+     * above or below the clock with its own format, slow drift against
+     * burn-in. */
+    int display_saver_clock_x;
+    int display_saver_clock_y;
+    int display_saver_clock_scale;
+    bool display_saver_date_below;
+    char display_saver_date_format[24];
+    bool display_saver_drift;
+    /* Cards on the screensaver, fed by the entities with this HA label. */
+    bool display_saver_cards;
+    char display_cards_label[48];
     bool display_night_mode_enabled;
     uint16_t display_night_start_min;  /* minutes since midnight, 0..1439 */
     uint16_t display_night_end_min;    /* minutes since midnight, 0..1439 */

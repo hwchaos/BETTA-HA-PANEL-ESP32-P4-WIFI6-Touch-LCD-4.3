@@ -205,6 +205,17 @@ const ENTITY_PICKER_CONFIGS = {
     widgetFallback: "Media Player tile",
     itemsFallback: "media players",
   },
+  mower_tile: {
+    domain: "lawn_mower",
+    titleKey: "entity_picker.title_mower",
+    blankKey: "entity_picker.blank_mower",
+    widgetKey: "entity_picker.widget_mower",
+    itemsKey: "entity_picker.items_mower",
+    titleFallback: "Choose Lawn Mower",
+    blankFallback: "Blank Mower Tile",
+    widgetFallback: "Mower tile",
+    itemsFallback: "lawn mowers",
+  },
   roborock_tile: {
     domain: "vacuum",
     titleKey: "entity_picker.title_roborock",
@@ -527,6 +538,11 @@ const WEB_I18N_BUILTIN = {
     "entity_picker.title_weather": "Choose Weather",
     "entity_picker.title_climate": "Choose Heating",
     "entity_picker.title_roborock": "Choose Roborock",
+    "entity_picker.title_mower": "Choose Lawn Mower",
+    "entity_picker.blank_mower": "Blank Mower Tile",
+    "entity_picker.widget_mower": "Mower tile",
+    "entity_picker.items_mower": "lawn mowers",
+    "layout.widgets.add_mower": "+ Mower",
     "entity_picker.title_alarm": "Choose Alarm Panel",
     "entity_picker.title_scene": "Choose Scene",
     "entity_picker.title_person": "Choose Person",
@@ -1408,6 +1424,11 @@ const WEB_I18N_BUILTIN = {
     "entity_picker.title_weather": "Wetter auswaehlen",
     "entity_picker.title_climate": "Heizung auswaehlen",
     "entity_picker.title_roborock": "Roborock auswaehlen",
+    "entity_picker.title_mower": "Rasenmäher auswählen",
+    "entity_picker.blank_mower": "Leere Rasenmäher-Kachel",
+    "entity_picker.widget_mower": "Rasenmäher-Kachel",
+    "entity_picker.items_mower": "Rasenmäher",
+    "layout.widgets.add_mower": "+ Rasenmäher",
     "entity_picker.refresh": "Aktualisieren",
     "entity_picker.search": "Suchen",
     "entity_picker.close": "Schliessen",
@@ -3995,6 +4016,7 @@ function widgetSizeLimits(type) {
         ? { minW: 200, minH: 170, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT }
         : { minW: 260, minH: 220, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT };
     case "roborock_tile":
+    case "mower_tile":
       return compact
         ? { minW: 220, minH: 190, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT }
         : { minW: 240, minH: 220, maxW: CANVAS_WIDTH, maxH: CANVAS_HEIGHT };
@@ -4235,6 +4257,7 @@ const el = {
   addTodoListBtn: document.getElementById("addTodoListBtn"),
   addMediaPlayerBtn: document.getElementById("addMediaPlayerBtn"),
   addRoborockTileBtn: document.getElementById("addRoborockTileBtn"),
+  addMowerTileBtn: document.getElementById("addMowerTileBtn"),
   addChartBtn: document.getElementById("addChartBtn"),
   addLockBtn: document.getElementById("addLockBtn"),
   addFanBtn: document.getElementById("addFanBtn"),
@@ -6194,6 +6217,7 @@ function applyWebTranslations() {
   setTextById("addTodoListBtn", "layout.widgets.add_todo");
   setTextById("addMediaPlayerBtn", "layout.widgets.add_media_player");
   setTextById("addRoborockTileBtn", "layout.widgets.add_roborock");
+  setTextById("addMowerTileBtn", "layout.widgets.add_mower");
   setTextById("addLockBtn", "layout.widgets.add_lock");
   setTextById("addFanBtn", "layout.widgets.add_fan");
   setTextById("addSelectBtn", "layout.widgets.add_select");
@@ -7645,6 +7669,7 @@ function renderSettings() {
   }
   if (el.settingsDateColor) {
     el.settingsDateColor.value = rgbIntToHex(display.saver_date_color);
+    applySaverLayoutSettings(display);
   }
   if (el.settingsNightModeEnabled) {
     el.settingsNightModeEnabled.checked = display.night_mode_enabled === true;
@@ -8356,6 +8381,179 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btn) btn.addEventListener("click", () => void applyWebPassword());
 });
 
+/* ---- Screensaver layout (clock position / size, date) ---- */
+const SAVER_BOTTOM_GAP = 26; /* APP_DISPLAY_SAVER_CLOCK_BOTTOM_GAP */
+const SAVER_CLOCK_PX = 84;
+const SAVER_DATE_PX = 22;
+
+function saverScreenSize() {
+  return {
+    w: editor.appScreenW || 800,
+    h: editor.appScreenH || 480,
+  };
+}
+
+function saverFormatDate(fmt) {
+  const now = new Date();
+  const wd = L(["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"], ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"])[now.getDay()];
+  const pad = (n) => String(n).padStart(2, "0");
+  let out = (fmt || "DD.MM.YYYY")
+    .replace("WD", wd)
+    .replace("YYYY", String(now.getFullYear()))
+    .replace("DD", pad(now.getDate()))
+    .replace("MM", pad(now.getMonth() + 1));
+  if (!fmt.includes("YYYY") && fmt.includes(".") && !out.endsWith(".")) out += ".";
+  return out;
+}
+
+function renderSaverPreview() {
+  const preview = document.getElementById("saverPreview");
+  const block = document.getElementById("saverPreviewBlock");
+  if (!preview || !block) return;
+  const screen = saverScreenSize();
+  preview.style.aspectRatio = `${screen.w} / ${screen.h}`;
+  const pw = preview.clientWidth || 320;
+  const k = pw / screen.w;
+  const scale = Number(document.getElementById("settingsSaverClockScale")?.value || 100) / 100;
+  const clock = document.getElementById("saverPreviewClock");
+  clock.style.fontSize = `${SAVER_CLOCK_PX * scale * k}px`;
+  clock.style.color = document.getElementById("settingsClockColor")?.value || "#ffffff";
+  const showDate = document.getElementById("settingsShowDate")?.checked !== false;
+  const below = document.getElementById("settingsSaverDatePos")?.value === "below";
+  const dateText = showDate ? saverFormatDate(document.getElementById("settingsSaverDateFormat")?.value) : "";
+  for (const [id, on] of [["saverPreviewDateAbove", !below], ["saverPreviewDateBelow", below]]) {
+    const node = document.getElementById(id);
+    node.textContent = on ? dateText : "";
+    node.style.fontSize = `${Math.max(12, SAVER_DATE_PX * scale) * k}px`;
+    node.style.color = document.getElementById("settingsDateColor")?.value || "#c8c8c8";
+  }
+  let x = Number(document.getElementById("settingsSaverClockX")?.value);
+  let y = Number(document.getElementById("settingsSaverClockY")?.value);
+  if (!(x >= 0)) x = 500;
+  if (!(y >= 0)) {
+    const clockH = SAVER_CLOCK_PX * scale * 1.2;
+    y = Math.round(((screen.h - SAVER_BOTTOM_GAP - clockH / 2) / screen.h) * 1000);
+  }
+  /* The block is positioned by the clock's centre, like on the panel. */
+  const clockRect = clock.getBoundingClientRect();
+  const blockRect = block.getBoundingClientRect();
+  const clockCenterInBlock = clockRect.top - blockRect.top + clockRect.height / 2;
+  block.style.left = `${(x / 1000) * 100}%`;
+  block.style.top = `calc(${(y / 1000) * 100}% - ${clockCenterInBlock}px)`;
+  const value = document.getElementById("settingsSaverClockScaleValue");
+  if (value) value.textContent = String(Math.round(scale * 100));
+}
+
+function applySaverLayoutSettings(display) {
+  const set = (id, v) => {
+    const node = document.getElementById(id);
+    if (node) node.value = String(v);
+  };
+  set("settingsSaverClockX", Number.isFinite(display.saver_clock_x) ? display.saver_clock_x : -1);
+  set("settingsSaverClockY", Number.isFinite(display.saver_clock_y) ? display.saver_clock_y : -1);
+  set("settingsSaverClockScale", Number.isFinite(display.saver_clock_scale) ? display.saver_clock_scale : 100);
+  set("settingsSaverDatePos", display.saver_date_below ? "below" : "above");
+  set("settingsSaverDateFormat", display.saver_date_format || "DD.MM.YYYY");
+  const drift = document.getElementById("settingsSaverDrift");
+  if (drift) drift.checked = display.saver_drift === true;
+  const cards = document.getElementById("settingsSaverCards");
+  if (cards) cards.checked = display.saver_cards !== false;
+  set("settingsCardsLabel", typeof display.cards_label === "string" ? display.cards_label : "Panel");
+  renderSaverPreview();
+  refreshCardsStatus();
+}
+
+/* What the panel found under the cards label (GET /api/cards). */
+async function refreshCardsStatus(demo) {
+  const status = document.getElementById("cardsStatus");
+  if (!status) return;
+  try {
+    const response = await fetch(demo ? "/api/cards?demo=1" : "/api/cards", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data.enabled) {
+      status.textContent = L("Karten sind aus.", "Cards are off.");
+    } else if (data.error) {
+      status.textContent = L(`Fehler von Home Assistant: ${data.error}`, `Error from Home Assistant: ${data.error}`);
+    } else if (!Array.isArray(data.entities)) {
+      status.textContent = L("Noch keine Antwort von Home Assistant.", "No answer from Home Assistant yet.");
+    } else {
+      const n = data.entities.length;
+      status.textContent = L(
+        `${n} Entitäten mit dem Label „${data.label}“ gefunden.`,
+        `${n} entities with the label “${data.label}” found.`
+      );
+      status.title = data.entities.map((e) => `${e.i} (${e.s})`).join("\n");
+    }
+  } catch (err) {
+    status.textContent = L(`Status nicht lesbar: ${err.message}`, `Status unavailable: ${err.message}`);
+  }
+}
+
+function collectSaverLayoutPayload() {
+  const num = (id, def) => {
+    const v = Math.round(Number(document.getElementById(id)?.value));
+    return Number.isFinite(v) ? v : def;
+  };
+  if (!document.getElementById("saverPreview")) return {};
+  return {
+    saver_clock_x: Math.min(1000, Math.max(-1, num("settingsSaverClockX", -1))),
+    saver_clock_y: Math.min(1000, Math.max(-1, num("settingsSaverClockY", -1))),
+    saver_clock_scale: Math.min(300, Math.max(40, num("settingsSaverClockScale", 100))),
+    saver_date_below: document.getElementById("settingsSaverDatePos")?.value === "below",
+    saver_date_format: document.getElementById("settingsSaverDateFormat")?.value || "DD.MM.YYYY",
+    saver_drift: document.getElementById("settingsSaverDrift")?.checked === true,
+    saver_cards: document.getElementById("settingsSaverCards")?.checked !== false,
+    cards_label: (document.getElementById("settingsCardsLabel")?.value || "").trim(),
+  };
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const preview = document.getElementById("saverPreview");
+  const block = document.getElementById("saverPreviewBlock");
+  if (!preview || !block) return;
+  /* Drag: the clock's centre follows the pointer. */
+  let dragging = false;
+  const moveTo = (ev) => {
+    const r = preview.getBoundingClientRect();
+    const x = Math.min(1000, Math.max(0, Math.round(((ev.clientX - r.left) / r.width) * 1000)));
+    const y = Math.min(1000, Math.max(0, Math.round(((ev.clientY - r.top) / r.height) * 1000)));
+    document.getElementById("settingsSaverClockX").value = String(x);
+    document.getElementById("settingsSaverClockY").value = String(y);
+    renderSaverPreview();
+  };
+  block.addEventListener("pointerdown", (ev) => {
+    dragging = true;
+    block.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  block.addEventListener("pointermove", (ev) => {
+    if (dragging) moveTo(ev);
+  });
+  block.addEventListener("pointerup", () => {
+    dragging = false;
+  });
+  preview.addEventListener("click", (ev) => {
+    if (ev.target === preview) moveTo(ev);
+  });
+  for (const id of ["settingsSaverClockScale", "settingsSaverDatePos", "settingsSaverDateFormat", "settingsShowDate",
+    "settingsClockColor", "settingsDateColor"]) {
+    document.getElementById(id)?.addEventListener("input", renderSaverPreview);
+    document.getElementById(id)?.addEventListener("change", renderSaverPreview);
+  }
+  document.getElementById("saverLayoutResetBtn")?.addEventListener("click", () => {
+    document.getElementById("settingsSaverClockX").value = "-1";
+    document.getElementById("settingsSaverClockY").value = "-1";
+    document.getElementById("settingsSaverClockScale").value = "100";
+    renderSaverPreview();
+  });
+  window.addEventListener("resize", renderSaverPreview);
+  document.getElementById("cardsDemoBtn")?.addEventListener("click", () => refreshCardsStatus(true));
+  document.getElementById("cardsRefreshBtn")?.addEventListener("click", () => refreshCardsStatus(false));
+  /* The section is hidden while another one is open: size it when shown. */
+  new ResizeObserver(() => renderSaverPreview()).observe(preview);
+});
+
 async function putSettings(payload) {
   const response = await fetch("/api/settings", {
     method: "PUT",
@@ -8916,6 +9114,7 @@ function collectDisplayPayload() {
   if (el.settingsShowDate) display.saver_show_date = el.settingsShowDate.checked;
   if (el.settingsClockColor) display.saver_clock_color = hexToRgbInt(el.settingsClockColor.value);
   if (el.settingsDateColor) display.saver_date_color = hexToRgbInt(el.settingsDateColor.value);
+  Object.assign(display, collectSaverLayoutPayload());
   if (el.settingsNightModeEnabled) display.night_mode_enabled = el.settingsNightModeEnabled.checked;
   if (el.settingsNightStart) {
     display.night_start_min = timeStringToMinutes(el.settingsNightStart.value, 22 * 60);
@@ -10354,6 +10553,8 @@ function bindWasteEntityAutocomplete() {
   for (let i = 0; i < 4; i++) inputs.push(document.getElementById(`settingsAlertEntity${i}`));
   /* The chart tile's sensor fields use the same HA search. */
   for (let i = 0; i < 4; i++) inputs.push(document.getElementById(`fChartEntity${i}`));
+  /* ...and so do the mower tile's sensors. */
+  for (const id of ["fMowerBattery", "fMowerProgress", "fMowerTask"]) inputs.push(document.getElementById(id));
   for (const input of inputs) {
     if (!input) continue;
     let timer = null;
@@ -11105,6 +11306,7 @@ function allowedEntityDomainsForWidgetType(
   if (type === "todo_list") return ["todo"];
   if (type === "media_player") return ["media_player"];
   if (type === "roborock_tile") return ["vacuum"];
+  if (type === "mower_tile") return ["lawn_mower"];
   if (type === "cover") return ["cover"];
   if (type === "lock") return ["lock"];
   if (type === "fan") return ["fan"];
@@ -11142,6 +11344,16 @@ function secondaryEntityConfigForWidgetType(type) {
       labelKey: "layout.inspector.secondary_entity",
       labelFallback: "Actual entity (sensor)",
       invalidStatusKey: "layout.status.secondary_sensor_required",
+    };
+  }
+  if (type === "mower_tile") {
+    return {
+      enabled: true,
+      domain: "camera",
+      optional: true,
+      labelKey: "layout.inspector.secondary_entity_mower",
+      labelFallback: L("Karte (Kamera, optional)", "Map (camera, optional)"),
+      invalidStatusKey: "layout.status.secondary_camera_required",
     };
   }
   if (type === "roborock_tile") {
@@ -12439,8 +12651,9 @@ function energyPreviewNodeMarkup(id, label, value, style = "") {
   return `<div class="energy-preview-node ${id}"${styleAttr}><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
 }
 
-function energyPreviewLabelMarkup(id, title, detail) {
-  return `<div class="energy-preview-label ${id}"><strong>${escapeHtml(title)}</strong><small>${energyPreviewEntityLabel(detail)}</small></div>`;
+function energyPreviewLabelMarkup(id, title, detail, style = "") {
+  const styleAttr = style ? ` style="${escapeHtml(style)}"` : "";
+  return `<div class="energy-preview-label ${id}"${styleAttr}><strong>${escapeHtml(title)}</strong><small>${energyPreviewEntityLabel(detail)}</small></div>`;
 }
 
 function energyPreviewNumber(value) {
@@ -12548,6 +12761,89 @@ function energyPreviewFlowMarkup(id, visible, path, dot) {
   return `<path class="flow ${id}" d="${path}" />${dotMarkup}`;
 }
 
+/* Large panels: same geometry as the firmware's large layout in
+ * main/ui/ui_energy_page.c (diagram centred in the content box, spread by a
+ * share of its size; nodes 150 px, home 164 px, bend radius 50). */
+const ENERGY_LARGE_BOTTOM_GUTTER = 14; /* APP_CONTENT_BOX_BOTTOM_GUTTER */
+function energyPreviewLargeGeometry(w, h) {
+  const usableH = h - ENERGY_LARGE_BOTTOM_GUTTER;
+  const cx = Math.floor(w / 2);
+  const cy = Math.floor(usableH / 2);
+  const sx = Math.floor((w * 27) / 100);
+  const sy = Math.floor((usableH * 28) / 100);
+  const node = 150;
+  const home = 164;
+  const pos = {
+    grid: [cx - sx, cy],
+    solar: [cx, cy - sy],
+    home: [cx + sx, cy],
+    battery: [cx, cy + sy],
+    gas: [cx + sx, cy - sy],
+    water: [cx + sx, cy + sy],
+    "low-carbon": [cx - sx, cy - sy],
+  };
+  return { w, h, node, home, radius: 50, gap: 30, pos };
+}
+
+/* Vertical run from p0 to the corner p1, bend with radius r, horizontal run to x2. */
+function energyPreviewLPath(p0, p1, x2, r) {
+  r = Math.min(r, Math.abs(p1[1] - p0[1]), Math.abs(x2 - p1[0]));
+  const dirY = Math.sign(p1[1] - p0[1]) || 1;
+  const dirX = Math.sign(x2 - p1[0]) || 1;
+  const sweep = dirY * dirX > 0 ? 0 : 1;
+  return `M${p0[0]} ${p0[1]} V${p1[1] - dirY * r} A${r} ${r} 0 0 ${sweep} ${p1[0] + dirX * r} ${p1[1]} H${x2}`;
+}
+
+function energyPreviewLargeFlows(g, nodes) {
+  const n2 = g.node / 2;
+  const h2 = g.home / 2;
+  const [gx, gy] = g.pos.grid;
+  const [sx, sy] = g.pos.solar;
+  const [hx, hy] = g.pos.home;
+  const [bx, by] = g.pos.battery;
+  const r = g.radius;
+  const o = g.gap / 2; /* the lines leaving solar / battery */
+  const q = g.gap;     /* the lines arriving at grid / home */
+  const mid = (a, b) => Math.round((a + b) / 2);
+  return [
+    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid,
+      energyPreviewLPath([sx - o, sy + n2], [sx - o, gy - q], gx + n2, r), [mid(gx + n2, sx - o - r), gy - q]),
+    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home,
+      energyPreviewLPath([sx + o, sy + n2], [sx + o, hy - q], hx - h2, r), [mid(sx + o + r, hx - h2), hy - q]),
+    energyPreviewFlowMarkup("battery-in", nodes.solar && nodes.battery,
+      `M${sx} ${sy + n2} V${by - n2}`, [sx, mid(sy + n2, by - n2)]),
+    energyPreviewFlowMarkup("grid", nodes.grid && nodes.home,
+      `M${gx + n2} ${gy} H${hx - h2}`, [mid(gx + n2, hx - h2), gy]),
+    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home,
+      energyPreviewLPath([bx + o, by - n2], [bx + o, hy + q], hx - h2, r), [mid(bx + o + r, hx - h2), hy + q]),
+    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery,
+      energyPreviewLPath([bx - o, by - n2], [bx - o, gy + q], gx + n2, r), [mid(gx + n2, bx - o - r), gy + q]),
+    energyPreviewFlowMarkup("gas", nodes.gas && nodes.home,
+      `M${hx} ${g.pos.gas[1] + n2} V${hy - h2}`, [hx, mid(g.pos.gas[1] + n2, hy - h2)]),
+    energyPreviewFlowMarkup("water", nodes.water && nodes.home,
+      `M${hx} ${g.pos.water[1] - n2} V${hy + h2}`, [hx, mid(g.pos.water[1] - n2, hy + h2)]),
+  ].join("");
+}
+
+/* Inline position of a node / its label in the large layout. */
+function energyPreviewLargeNodeStyle(g, id) {
+  const size = id === "home" ? g.home : g.node;
+  const [x, y] = g.pos[id];
+  /* A thin ring like the panel's, whatever the circle size. */
+  const ring = id === "home"
+    ? "background:radial-gradient(circle closest-side,#1d1f24 0,#1d1f24 calc(100% - 7px),transparent calc(100% - 6px),transparent 100%),conic-gradient(var(--energy-home-ring,#435566 0deg 360deg));"
+    : "";
+  return `left:${x}px;top:${y}px;width:${size}px;height:${size}px;margin:${-size / 2}px 0 0 ${-size / 2}px;${ring}`;
+}
+
+function energyPreviewLargeLabelStyle(g, id) {
+  const size = id === "home" ? g.home : g.node;
+  const [x, y] = g.pos[id];
+  const above = y < g.pos.home[1];
+  const top = above ? y - size / 2 - 44 : y + size / 2 + 8;
+  return `left:${x}px;top:${top}px;`;
+}
+
 function renderEnergyCanvasPreview(page) {
   const compact = isCompactCanvas();
   const energy = page.energy || {};
@@ -12606,59 +12902,52 @@ function renderEnergyCanvasPreview(page) {
    * wide compact layout in main/ui/ui_energy_page.c (grid 160/184, solar 400/86,
    * home 640/184, battery 400/271, all circles 118 px + 5 px ring, bend radius 16). */
   const wide = compact && CANVAS_WIDTH >= 700;
+  const large = compact ? null : energyPreviewLargeGeometry(CANVAS_WIDTH, CANVAS_HEIGHT);
   const flows = (wide ? [
-    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M385 145 V156 A16 16 0 0 1 369 172 H219", [295, 172]),
-    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M415 145 V156 A16 16 0 0 0 431 172 H581", [505, 172]),
+    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M389 145 V146 A16 16 0 0 1 373 162 H219", [295, 162]),
+    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M411 145 V146 A16 16 0 0 0 427 162 H581", [505, 162]),
     energyPreviewFlowMarkup("battery-in", nodes.solar && nodes.battery, "M400 145 V212", [400, 178]),
     energyPreviewFlowMarkup("grid", nodes.grid && nodes.home, "M219 184 H581", [300, 184]),
-    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home, "M415 212 A16 16 0 0 1 431 196 H581", [505, 196]),
-    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery, "M219 196 H369 A16 16 0 0 1 385 212", [295, 196]),
+    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home, "M411 212 A6 6 0 0 1 417 206 H581", [505, 206]),
+    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery, "M219 206 H383 A6 6 0 0 1 389 212", [295, 206]),
     energyPreviewFlowMarkup("gas", nodes.gas && nodes.home, "M640 145 V125", [640, 135]),
     energyPreviewFlowMarkup("water", nodes.water && nodes.home, "M640 212 V243", [640, 228]),
   ] : compact ? [
     energyPreviewFlowMarkup("low-carbon", nodes.lowCarbon && nodes.grid, "M76 126 V162", [76, 150]),
-    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M225 125 V169 A24 24 0 0 1 201 193 H119", [174, 193]),
-    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M255 125 V169 A24 24 0 0 0 279 193 H356", [318, 193]),
+    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M230 125 V161 A24 24 0 0 1 206 185 H119", [174, 185]),
+    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M250 125 V161 A24 24 0 0 0 274 185 H356", [318, 185]),
     energyPreviewFlowMarkup("battery-in", nodes.solar && nodes.battery, "M240 125 V247", [240, 186]),
     energyPreviewFlowMarkup("grid", nodes.grid && nodes.home, "M119 205 H356", [238, 205]),
-    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home, "M255 247 V241 A24 24 0 0 0 279 217 H356", [310, 217]),
-    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery, "M119 217 H201 A24 24 0 0 1 225 241 V247", [176, 217]),
+    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home, "M250 247 A22 22 0 0 1 272 225 H356", [310, 225]),
+    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery, "M119 225 H208 A22 22 0 0 1 230 247", [176, 225]),
     energyPreviewFlowMarkup("gas", nodes.gas && nodes.home, "M404 125 V157", [404, 145]),
     energyPreviewFlowMarkup("water", nodes.water && nodes.home, "M404 247 V253", [404, 250]),
-  ] : [
-    energyPreviewFlowMarkup("low-carbon", nodes.lowCarbon && nodes.grid, "M96 190 V282", [96, 254]),
-    energyPreviewFlowMarkup("solar-return", nodes.solar && nodes.grid, "M312 190 V286 A40 40 0 0 1 272 326 H150", [250, 326]),
-    energyPreviewFlowMarkup("solar", nodes.solar && nodes.home, "M312 190 V286 A40 40 0 0 0 352 326 H522", [402, 326]),
-    energyPreviewFlowMarkup("battery-in", nodes.solar && nodes.battery, "M312 190 V452", [312, 312]),
-    energyPreviewFlowMarkup("grid", nodes.grid && nodes.home, "M150 346 H522", [244, 346]),
-    energyPreviewFlowMarkup("battery-out", nodes.battery && nodes.home, "M336 452 V386 A40 40 0 0 1 376 346 H522", [394, 346]),
-    energyPreviewFlowMarkup("return", nodes.grid && nodes.battery, "M150 368 H272 A40 40 0 0 1 312 408 V452", [216, 368]),
-    energyPreviewFlowMarkup("gas", nodes.gas && nodes.home, "M528 190 V282", [528, 254]),
-    energyPreviewFlowMarkup("water", nodes.water && nodes.home, "M528 452 V402", [528, 426]),
-  ]).join("");
+  ] : []).join("") + (large ? energyPreviewLargeFlows(large, nodes) : "");
+  const largeNodeStyle = (id, extra = "") => (large ? energyPreviewLargeNodeStyle(large, id) : "") + extra;
+
   const nodeMarkup = [
-    nodes.lowCarbon ? energyPreviewNodeMarkup("low-carbon", "LC", "-- kWh") : "",
-    nodes.solar ? energyPreviewNodeMarkup("solar", "PV", solarValue) : "",
-    nodes.gas ? energyPreviewNodeMarkup("gas", "GAS", gasValue) : "",
-    nodes.grid ? energyPreviewNodeMarkup("grid", "GRID", gridValue) : "",
-    nodes.home ? energyPreviewNodeMarkup("home", "HOME", homeValue, homeRingStyle) : "",
-    nodes.battery ? energyPreviewNodeMarkup("battery", "BAT", batteryValue) : "",
-    nodes.water ? energyPreviewNodeMarkup("water", "H2O", waterValue) : "",
+    nodes.lowCarbon ? energyPreviewNodeMarkup("low-carbon", "LC", "-- kWh", largeNodeStyle("low-carbon")) : "",
+    nodes.solar ? energyPreviewNodeMarkup("solar", "PV", solarValue, largeNodeStyle("solar")) : "",
+    nodes.gas ? energyPreviewNodeMarkup("gas", "GAS", gasValue, largeNodeStyle("gas")) : "",
+    nodes.grid ? energyPreviewNodeMarkup("grid", "GRID", gridValue, largeNodeStyle("grid")) : "",
+    nodes.home ? energyPreviewNodeMarkup("home", "HOME", homeValue, largeNodeStyle("home", homeRingStyle)) : "",
+    nodes.battery ? energyPreviewNodeMarkup("battery", "BAT", batteryValue, largeNodeStyle("battery")) : "",
+    nodes.water ? energyPreviewNodeMarkup("water", "H2O", waterValue, largeNodeStyle("water")) : "",
   ].join("");
   const labelMarkup = [
-    nodes.lowCarbon ? energyPreviewLabelMarkup("low-carbon", t("layout.energy.low_carbon"), autoLabel) : "",
-    nodes.solar ? energyPreviewLabelMarkup("solar", t("layout.energy.solar"), solarEntity) : "",
-    nodes.gas ? energyPreviewLabelMarkup("gas", t("layout.energy.gas"), autoLabel) : "",
-    nodes.grid ? energyPreviewLabelMarkup("grid", t("layout.energy.grid"), gridEntity) : "",
-    nodes.home ? energyPreviewLabelMarkup("home", t("layout.energy.home"), homeEntity) : "",
-    nodes.battery ? energyPreviewLabelMarkup("battery", t("layout.energy.battery"), batteryEntity) : "",
-    nodes.water ? energyPreviewLabelMarkup("water", t("layout.energy.water"), autoLabel) : "",
+    nodes.lowCarbon ? energyPreviewLabelMarkup("low-carbon", t("layout.energy.low_carbon"), autoLabel, large ? energyPreviewLargeLabelStyle(large, "low-carbon") : "") : "",
+    nodes.solar ? energyPreviewLabelMarkup("solar", t("layout.energy.solar"), solarEntity, large ? energyPreviewLargeLabelStyle(large, "solar") : "") : "",
+    nodes.gas ? energyPreviewLabelMarkup("gas", t("layout.energy.gas"), autoLabel, large ? energyPreviewLargeLabelStyle(large, "gas") : "") : "",
+    nodes.grid ? energyPreviewLabelMarkup("grid", t("layout.energy.grid"), gridEntity, large ? energyPreviewLargeLabelStyle(large, "grid") : "") : "",
+    nodes.home ? energyPreviewLabelMarkup("home", t("layout.energy.home"), homeEntity, large ? energyPreviewLargeLabelStyle(large, "home") : "") : "",
+    nodes.battery ? energyPreviewLabelMarkup("battery", t("layout.energy.battery"), batteryEntity, large ? energyPreviewLargeLabelStyle(large, "battery") : "") : "",
+    nodes.water ? energyPreviewLabelMarkup("water", t("layout.energy.water"), autoLabel, large ? energyPreviewLargeLabelStyle(large, "water") : "") : "",
   ].join("");
   const node = document.createElement("div");
   node.className = wide
     ? "energy-page-preview compact wide"
     : (compact ? "energy-page-preview compact" : "energy-page-preview");
-  const viewBox = wide ? "0 0 800 360" : (compact ? "0 0 480 360" : "0 0 720 600");
+  const viewBox = wide ? "0 0 800 360" : (compact ? "0 0 480 360" : `0 0 ${large.w} ${large.h}`);
   node.innerHTML = `
     <div class="energy-preview-card">
       <div class="energy-preview-heading">
@@ -13073,6 +13362,7 @@ function renderInspector() {
     el.graphOptions.classList.toggle("hidden", !isGraph);
   }
   fillChartInspector(widget);
+  fillMowerInspector(widget);
   if (el.heatingOptions) {
     el.heatingOptions.classList.toggle("hidden", !isHeating);
   }
@@ -13590,6 +13880,7 @@ function addWidget(type, options = {}) {
       : type === "todo_list" ? 300
       : type === "media_player" ? 300
       : type === "roborock_tile" ? 460
+      : type === "mower_tile" ? 300
       : type === "weather_tile" ? 220
       : type === "alarm_tile" ? 220
       : type === "clock_alarm" ? 220
@@ -13607,6 +13898,7 @@ function addWidget(type, options = {}) {
       : type === "todo_list" ? 360
       : type === "media_player" ? 360
       : type === "roborock_tile" ? 360
+      : type === "mower_tile" ? 360
       : type === "alarm_tile" ? 300
       : type === "clock_alarm" ? 300
       : type === "cover_tile" ? 220
@@ -13623,6 +13915,7 @@ function addWidget(type, options = {}) {
       : type === "todo_list" ? 220
       : type === "media_player" ? 220
       : type === "roborock_tile" ? 300
+      : type === "mower_tile" ? 260
       : type === "weather_tile" ? 180
       : type === "alarm_tile" ? 220
       : type === "clock_alarm" ? 220
@@ -13640,6 +13933,7 @@ function addWidget(type, options = {}) {
       : type === "todo_list" ? 360
       : type === "media_player" ? 280
       : type === "roborock_tile" ? 300
+      : type === "mower_tile" ? 320
       : type === "alarm_tile" ? 260
       : type === "clock_alarm" ? 260
       : type === "cover_tile" ? 180
@@ -13673,6 +13967,14 @@ function addWidget(type, options = {}) {
   if (type === "graph") {
     widget.graph_line_color = DEFAULT_GRAPH_LINE_COLOR;
     widget.graph_time_window_min = DEFAULT_GRAPH_TIME_WINDOW_MIN;
+  }
+  if (type === "mower_tile") {
+    widget.mower_battery_entity_id = "";
+    widget.mower_progress_entity_id = "";
+    widget.mower_task_entity_id = "";
+    if (widget.entity_id) {
+      void suggestMowerEntities(widget, { onlyEmpty: true });
+    }
   }
   if (type === "chart") {
     widget.title = typeof options.title === "string" && options.title.trim() ? options.title.trim() : "";
@@ -13780,6 +14082,83 @@ function scheduleIconSuggestions(immediate = false) {
     iconSuggestTimer = null;
     void run();
   }, 200);
+}
+
+/* ---- Mower tile ---- */
+const MOWER_FIELDS = [
+  ["fMowerBattery", "mower_battery_entity_id"],
+  ["fMowerProgress", "mower_progress_entity_id"],
+  ["fMowerTask", "mower_task_entity_id"],
+];
+
+function fillMowerInspector(widget) {
+  const box = document.getElementById("mowerOptions");
+  const isMower = widget?.type === "mower_tile";
+  if (box) box.classList.toggle("hidden", !isMower);
+  if (!isMower) return;
+  for (const [id, key] of MOWER_FIELDS) {
+    const input = document.getElementById(id);
+    if (input) input.value = typeof widget[key] === "string" ? widget[key] : "";
+  }
+}
+
+function readMowerInspector(widget) {
+  for (const [id, key] of MOWER_FIELDS) {
+    const value = (document.getElementById(id)?.value || "").trim();
+    widget[key] = /^[a-z0-9_]+\.[a-z0-9_]+$/.test(value) ? value : "";
+  }
+}
+
+/* HA entities of one domain whose id or name contains `search`, through the
+ * panel's discovery (it answers "pending" while HA is still being asked). */
+async function discoverEntities(domain, search) {
+  const params = new URLSearchParams({ domain, search, limit: "60" });
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      const data = await apiGet(`/api/ha/light_entities?${params.toString()}`);
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!data.pending) return items.map((it) => ({ id: it.id || it.entity_id || "", name: it.name || "" }));
+    } catch (_) {
+      return [];
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+  }
+  return [];
+}
+
+/* Fills battery, progress, task and map from the entities that share the
+ * mower's name (lawn_mower.garden -> sensor.garden_*). */
+async function suggestMowerEntities(widget, { onlyEmpty }) {
+  const objectId = String(widget.entity_id || "").split(".")[1] || "";
+  if (!objectId) return;
+  const hint = document.getElementById("fMowerHint");
+  if (hint) hint.textContent = L("Suche Sensoren und Karte …", "Looking for sensors and map …");
+  const sensors = await discoverEntities("sensor", objectId);
+  const cameras = await discoverEntities("camera", objectId);
+  const find = (re) => sensors.find((e) => re.test(`${e.id} ${e.name}`.toLowerCase()))?.id || "";
+  const picks = {
+    mower_battery_entity_id: find(/batter|akku/),
+    mower_progress_entity_id: find(/fortschritt|progress/),
+    mower_task_entity_id: find(/aufgabe|task|activity|t(a|ä)tigkeit/),
+  };
+  let changed = 0;
+  for (const [key, value] of Object.entries(picks)) {
+    if (value && (!onlyEmpty || !widget[key])) {
+      widget[key] = value;
+      changed++;
+    }
+  }
+  const map = cameras.find((e) => /karte|map/.test(`${e.id} ${e.name}`.toLowerCase()))?.id || cameras[0]?.id || "";
+  if (map && (!onlyEmpty || !widget.secondary_entity_id)) {
+    widget.secondary_entity_id = map;
+    changed++;
+  }
+  if (hint) {
+    hint.textContent = changed
+      ? L(`${changed} Entitäten übernommen.`, `${changed} entities filled in.`)
+      : L("Nichts Passendes gefunden.", "Nothing matching found.");
+  }
+  if (selectedWidget() === widget) renderAll();
 }
 
 /* ---- Chart tile ---- */
@@ -13936,6 +14315,13 @@ function applyInspector(options = {}) {
     delete widget.slider_entity_domain;
     delete widget.slider_direction;
     delete widget.slider_accent_color;
+  }
+  if (widgetType === "mower_tile") {
+    readMowerInspector(widget);
+  } else {
+    delete widget.mower_battery_entity_id;
+    delete widget.mower_progress_entity_id;
+    delete widget.mower_task_entity_id;
   }
   if (widgetType === "chart") {
     readChartInspector(widget);
@@ -14384,6 +14770,9 @@ function bindUi() {
   if (el.addMediaPlayerBtn) {
     el.addMediaPlayerBtn.onclick = () => openLightEntityPicker("media_player");
   }
+  if (el.addMowerTileBtn) {
+    el.addMowerTileBtn.onclick = () => openLightEntityPicker("mower_tile");
+  }
   if (el.addRoborockTileBtn) {
     el.addRoborockTileBtn.onclick = () => openLightEntityPicker("roborock_tile");
   }
@@ -14781,6 +15170,13 @@ function bindUi() {
   bindInspectorAutoApply(el.fSliderAccentColor, ["input", "change"], { softEntityValidation: true });
   bindInspectorAutoApply(el.fGraphLineColor, ["input", "change"], { softEntityValidation: true });
   bindInspectorAutoApply(document.getElementById("fChartType"), ["change"], { refreshInspector: true, softEntityValidation: true });
+  for (const id of ["fMowerBattery", "fMowerProgress", "fMowerTask"]) {
+    bindInspectorAutoApply(document.getElementById(id), ["change"], { softEntityValidation: true });
+  }
+  document.getElementById("fMowerSuggestBtn")?.addEventListener("click", () => {
+    const widget = selectedWidget();
+    if (widget?.type === "mower_tile") void suggestMowerEntities(widget, { onlyEmpty: false });
+  });
   bindInspectorAutoApply(document.getElementById("fChartHours"), ["change"], { softEntityValidation: true });
   for (let i = 0; i < 4; i++) {
     bindInspectorAutoApply(document.getElementById(`fChartEntity${i}`), ["change"], { softEntityValidation: true });

@@ -338,6 +338,14 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(display, "saver_wallpaper_dim", (double)settings->display_saver_wallpaper_dim);
     cJSON_AddNumberToObject(display, "saver_clock_color", (double)(settings->display_saver_clock_color & 0xFFFFFF));
     cJSON_AddNumberToObject(display, "saver_date_color", (double)(settings->display_saver_date_color & 0xFFFFFF));
+    cJSON_AddNumberToObject(display, "saver_clock_x", settings->display_saver_clock_x);
+    cJSON_AddNumberToObject(display, "saver_clock_y", settings->display_saver_clock_y);
+    cJSON_AddNumberToObject(display, "saver_clock_scale", settings->display_saver_clock_scale);
+    cJSON_AddBoolToObject(display, "saver_date_below", settings->display_saver_date_below);
+    cJSON_AddStringToObject(display, "saver_date_format", settings->display_saver_date_format);
+    cJSON_AddBoolToObject(display, "saver_drift", settings->display_saver_drift);
+    cJSON_AddBoolToObject(display, "saver_cards", settings->display_saver_cards);
+    cJSON_AddStringToObject(display, "cards_label", settings->display_cards_label);
     cJSON_AddBoolToObject(display, "night_mode_enabled", settings->display_night_mode_enabled);
     cJSON_AddNumberToObject(display, "night_start_min", (double)settings->display_night_start_min);
     cJSON_AddNumberToObject(display, "night_end_min", (double)settings->display_night_end_min);
@@ -804,6 +812,17 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         }
         (void)update_color_setting(display, "saver_clock_color", &settings->display_saver_clock_color, &invalid_type);
         (void)update_color_setting(display, "saver_date_color", &settings->display_saver_date_color, &invalid_type);
+        (void)update_int_setting(display, "saver_clock_x", &settings->display_saver_clock_x, -1, 1000, &invalid_type);
+        (void)update_int_setting(display, "saver_clock_y", &settings->display_saver_clock_y, -1, 1000, &invalid_type);
+        (void)update_int_setting(
+            display, "saver_clock_scale", &settings->display_saver_clock_scale, 40, 300, &invalid_type);
+        (void)update_bool_setting(display, "saver_date_below", &settings->display_saver_date_below, &invalid_type);
+        (void)update_string_setting(display, "saver_date_format", settings->display_saver_date_format,
+            sizeof(settings->display_saver_date_format), &invalid_type, &too_long);
+        (void)update_bool_setting(display, "saver_drift", &settings->display_saver_drift, &invalid_type);
+        (void)update_bool_setting(display, "saver_cards", &settings->display_saver_cards, &invalid_type);
+        (void)update_string_setting(display, "cards_label", settings->display_cards_label,
+            sizeof(settings->display_cards_label), &invalid_type, &too_long);
         (void)update_bool_setting(display, "night_mode_enabled", &settings->display_night_mode_enabled, &invalid_type);
 
         cJSON *night_start = cJSON_GetObjectItemCaseSensitive(display, "night_start_min");

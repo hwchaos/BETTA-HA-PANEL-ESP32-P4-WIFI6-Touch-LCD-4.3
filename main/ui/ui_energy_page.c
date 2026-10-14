@@ -103,6 +103,9 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_HOME_ARC_PAD 10
 #define ENERGY_HOME_ARC_WIDTH 5
 #define ENERGY_FLOW_LINE_WIDTH 3
+/* Spacing of neighbouring flow lines, the same where they leave a node
+ * (solar, battery) and where they arrive (grid, home). */
+#define ENERGY_FLOW_GAP 22
 #define ENERGY_VALUE_FONT APP_FONT_TEXT_14
 #define ENERGY_TITLE_FONT APP_FONT_TEXT_14
 #define ENERGY_STATS_FONT APP_FONT_TEXT_14
@@ -133,6 +136,9 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_HOME_ARC_PAD 10
 #define ENERGY_HOME_ARC_WIDTH 4
 #define ENERGY_FLOW_LINE_WIDTH 2
+/* Spacing of neighbouring flow lines, the same where they leave a node
+ * (solar, battery) and where they arrive (grid, home). */
+#define ENERGY_FLOW_GAP 20
 #define ENERGY_VALUE_FONT APP_FONT_TEXT_14
 #define ENERGY_TITLE_FONT APP_FONT_TEXT_14
 #define ENERGY_STATS_FONT APP_FONT_TEXT_14
@@ -141,28 +147,40 @@ static bool s_arrow_value_font_ready = false;
 #define ENERGY_STATS_TODAY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 52)
 #define ENERGY_STATS_AUTARKY_Y (APP_CONTENT_BOX_USABLE_HEIGHT - 28)
 #else
-#define ENERGY_NODE_GRID_X 130
-#define ENERGY_NODE_GRID_Y 300
-#define ENERGY_NODE_SOLAR_X 360
-#define ENERGY_NODE_SOLAR_Y 100
-#define ENERGY_NODE_HOME_X 560
-#define ENERGY_NODE_HOME_Y 300
-#define ENERGY_NODE_BATTERY_X 360
-#define ENERGY_NODE_BATTERY_Y 500
-#define ENERGY_NODE_SIZE 128
-#define ENERGY_HOME_SIZE 139
+/* Large content box (10.1": 1070x740 with the side bar, 1280x666 with the
+ * bottom bar): the diagram is centred in the box and spread by a share of its
+ * size, so it fills the page whatever the navigation layout. Must match the
+ * editor preview (energyPreviewLargeGeometry() in app.js). */
+#define ENERGY_LAYOUT_CX (APP_CONTENT_BOX_WIDTH / 2)
+#define ENERGY_LAYOUT_CY (APP_CONTENT_BOX_USABLE_HEIGHT / 2)
+#define ENERGY_LAYOUT_SX (APP_CONTENT_BOX_WIDTH * 27 / 100)
+#define ENERGY_LAYOUT_SY (APP_CONTENT_BOX_USABLE_HEIGHT * 28 / 100)
+#define ENERGY_NODE_GRID_X (ENERGY_LAYOUT_CX - ENERGY_LAYOUT_SX)
+#define ENERGY_NODE_GRID_Y ENERGY_LAYOUT_CY
+#define ENERGY_NODE_SOLAR_X ENERGY_LAYOUT_CX
+#define ENERGY_NODE_SOLAR_Y (ENERGY_LAYOUT_CY - ENERGY_LAYOUT_SY)
+#define ENERGY_NODE_HOME_X (ENERGY_LAYOUT_CX + ENERGY_LAYOUT_SX)
+#define ENERGY_NODE_HOME_Y ENERGY_LAYOUT_CY
+#define ENERGY_NODE_BATTERY_X ENERGY_LAYOUT_CX
+#define ENERGY_NODE_BATTERY_Y (ENERGY_LAYOUT_CY + ENERGY_LAYOUT_SY)
+#define ENERGY_NODE_SIZE 150
+#define ENERGY_HOME_SIZE 164
 #define ENERGY_DOT_SIZE 16
 #define ENERGY_ARC_RADIUS 50.0f
-#define ENERGY_NODE_TITLE_WIDTH 146
-#define ENERGY_NODE_TITLE_TOP_OFFSET 26
+#define ENERGY_NODE_TITLE_WIDTH 180
+#define ENERGY_NODE_TITLE_TOP_OFFSET 30
 #define ENERGY_NODE_TITLE_BOTTOM_OFFSET 8
 #define ENERGY_NODE_BORDER_WIDTH 3
 #define ENERGY_VALUE_INSET 18
 #define ENERGY_HOME_ARC_PAD 14
 #define ENERGY_HOME_ARC_WIDTH 6
 #define ENERGY_FLOW_LINE_WIDTH 3
-#define ENERGY_VALUE_FONT APP_FONT_TEXT_18
-#define ENERGY_TITLE_FONT APP_FONT_TEXT_18
+/* Spacing of neighbouring flow lines, the same where they leave a node
+ * (solar, battery) and where they arrive (grid, home). */
+#define ENERGY_FLOW_GAP 30
+/* The APP_FONT_TEXT_* names run one step large: _24 is 22 px, _22 is 20 px. */
+#define ENERGY_VALUE_FONT APP_FONT_TEXT_24
+#define ENERGY_TITLE_FONT APP_FONT_TEXT_22
 #define ENERGY_STATS_FONT APP_FONT_TEXT_18
 #define ENERGY_STATS_X 24
 #define ENERGY_STATS_WIDTH 300
@@ -247,6 +265,11 @@ typedef struct {
     float phase;
     float length;
     lv_color_t color;
+    /* What the line objects were last styled with: the lines span most of the
+     * page, and re-applying an unchanged style repaints all of it. */
+    bool styled;
+    bool styled_active;
+    uint32_t styled_color;
 } energy_flow_t;
 
 typedef struct {
@@ -463,7 +486,9 @@ static bool energy_has_battery_config(const energy_page_ctx_t *ctx)
 
 static void energy_set_obj_hidden(lv_obj_t *obj, bool hidden)
 {
-    if (obj == NULL) {
+    /* Only on change: un-hiding a visible object still invalidates it, and the
+     * flow lines are as large as the page. */
+    if (obj == NULL || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) == hidden) {
         return;
     }
     if (hidden) {
@@ -563,6 +588,16 @@ static void energy_create_node(energy_page_ctx_t *ctx, int node_id, int cx, int 
     const lv_font_t *value_font = ENERGY_VALUE_FONT;
 #endif
     energy_style_text(value, theme_default_color_text_primary(), value_font, LV_TEXT_ALIGN_CENTER);
+#if APP_HAVE_MDI_ARROWS_FONT_20
+    /* The arrow font sets the line height; a taller text fallback would make
+     * the two lines (import / export) overlap and climb into the icon. */
+    if (value_font == &s_arrow_value_font) {
+        const int32_t extra = lv_font_get_line_height(ENERGY_VALUE_FONT) - lv_font_get_line_height(value_font);
+        if (extra > 0) {
+            lv_obj_set_style_text_line_space(value, extra, LV_PART_MAIN);
+        }
+    }
+#endif
     /* Battery and Grid values use per-line recolor markup to color the
      * direction arrow + value independently (HA-style). */
     if (node_id == ENERGY_NODE_BATTERY || node_id == ENERGY_NODE_GRID) {
@@ -638,6 +673,9 @@ static void energy_set_flow_points(energy_flow_t *flow, lv_point_precise_t p0, l
 }
 
 #define ENERGY_ARC_STEPS 16
+#ifndef ENERGY_ARC_SIZE_ADJ
+#define ENERGY_ARC_SIZE_ADJ 2
+#endif
 
 static void energy_set_L_path(energy_flow_t *flow,
     lv_point_precise_t start, lv_point_precise_t corner, lv_point_precise_t end, float radius)
@@ -654,6 +692,8 @@ static void energy_set_L_path(energy_flow_t *flow,
     if (len_in < 1.0f || len_out < 1.0f) {
         return;
     }
+    /* A short leg (wide flow gap next to a close node) gets a tighter bend. */
+    radius = fminf(radius, fminf(len_in, len_out));
     float nx_in = dx_in / len_in;
     float ny_in = dy_in / len_in;
     float nx_out = dx_out / len_out;
@@ -676,10 +716,8 @@ static void energy_set_L_path(energy_flow_t *flow,
     while (diff > (float)M_PI) { diff -= 2.0f * (float)M_PI; }
     while (diff < -(float)M_PI) { diff += 2.0f * (float)M_PI; }
 
-    /* Tessellated points[] stays populated for the dot animation which walks
-     * along the flow by arc-length.  The visual line however is split into
-     * (straight -> lv_arc -> straight) so the corner is a mathematically
-     * perfect arc rather than a faceted polyline. */
+    /* Tessellated points[]: drawn as the line and walked by the dot
+     * animation by arc-length. */
     int idx = 0;
     flow->points[idx++] = start;
     for (int i = 0; i <= ENERGY_ARC_STEPS; i++) {
@@ -694,12 +732,8 @@ static void energy_set_L_path(energy_flow_t *flow,
     flow->point_count = (uint8_t)idx;
     flow->has_arc = true;
 
-    /* Pre-arc straight segment uses points[0] (= start) and points[1] (= arc
-     * entry).  The tessellation loop above already populated those two slots
-     * with the correct coordinates (points[1] == first arc sample == asx,asy
-     * by construction), so we just tell the line widget to render only the
-     * first two points.  lv_line stores the pointer, not a copy, but the
-     * remaining tessellated entries follow in memory and are not touched. */
+    /* Pre-arc straight segment: points[0] (start) .. points[1] (arc entry);
+     * lv_line keeps the pointer, the rest of points[] is not drawn here. */
     if (flow->line != NULL) {
         lv_line_set_points(flow->line, flow->points, 2);
     }
@@ -711,23 +745,21 @@ static void energy_set_L_path(energy_flow_t *flow,
         lv_obj_clear_flag(flow->post_line, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Configure the lv_arc widget to render the corner.
-     *
-     * LVGL computes the drawn arc radius as (min(w,h) - arc_width) / 2 using
-     * integer math, and places the arc center at the widget's pixel center
-     * (pos + size/2 with integer division).  To get pixel-perfect alignment
-     * with the straight line endpoints (asx/asy, aex/aey), we therefore need
-     *   size       = 2*radius + arc_width           (odd => clean center)
-     *   pos        = center_pixel - size/2          (integer math, same as LVGL)
-     * For axis-aligned L-corners cx/cy are integer, so the arc's drawn ends
-     * land exactly on asx/asy and aex/aey. */
+    /* The corner is a real lv_arc: without antialiasing a tessellated
+     * polyline shows its facets on the large radius. lv_arc puts the centre
+     * at pos + size/2 and draws the stroke inwards from that radius; the
+     * size is chosen so the stroke's centre pixel lies on the straight lines'
+     * centre pixel (ENERGY_ARC_SIZE_ADJ, measured on the panel). */
     if (flow->arc != NULL) {
-        const int stroke_w = ENERGY_FLOW_LINE_WIDTH;
-        int s = 2 * (int)lroundf(radius) + stroke_w;  /* odd */
+        int s_px = 2 * (int)lroundf(radius) + ENERGY_FLOW_LINE_WIDTH + ENERGY_ARC_SIZE_ADJ;
         int cxi = (int)lroundf(cx);
         int cyi = (int)lroundf(cy);
-        lv_obj_set_size(flow->arc, s, s);
-        lv_obj_set_pos(flow->arc, cxi - s / 2, cyi - s / 2);
+        /* LVGL's circle is one pixel wider on its left / top half than on
+         * the right / bottom: a corner in those halves moves by one. */
+        const int shift_x = ((asx + aex) / 2.0f < cx) ? 1 : 0;
+        const int shift_y = ((asy + aey) / 2.0f < cy) ? 1 : 0;
+        lv_obj_set_size(flow->arc, s_px, s_px);
+        lv_obj_set_pos(flow->arc, cxi - s_px / 2 + shift_x, cyi - s_px / 2 + shift_y);
 
         const float rad_to_deg = 57.29577951308232f;
         float start_rad = (diff >= 0.0f) ? sa : ea;
@@ -780,7 +812,8 @@ static void energy_create_flow(energy_page_ctx_t *ctx, int flow_id, lv_color_t c
     lv_obj_set_style_arc_width(arc, ENERGY_FLOW_LINE_WIDTH, LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, color, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(arc, LV_OPA_40, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(arc, false, LV_PART_MAIN);
+    /* Round ends like the straight segments, so the joins close up. */
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
     lv_obj_set_style_arc_width(arc, 0, LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
@@ -799,9 +832,13 @@ static void energy_create_flow(energy_page_ctx_t *ctx, int flow_id, lv_color_t c
     lv_obj_set_style_border_width(dot, 2, LV_PART_MAIN);
     lv_obj_set_style_border_color(dot, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_border_opa(dot, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(dot, 10, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(dot, color, LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(dot, LV_OPA_70, LV_PART_MAIN);
+    /* Glow as a translucent outline, not a shadow: the dots move 20 times a
+     * second and LVGL blurs a shadow in software on every redraw (~40 % of
+     * the render time of this page on the 10.1"). */
+    lv_obj_set_style_outline_width(dot, ENERGY_DOT_SIZE / 3, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(dot, color, LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(dot, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_outline_pad(dot, 0, LV_PART_MAIN);
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
@@ -851,16 +888,16 @@ static void energy_apply_static_flow_paths(energy_page_ctx_t *ctx)
 
     flow = &ctx->flows[ENERGY_FLOW_SOLAR_HOME];
     energy_set_L_path(flow,
-        (lv_point_precise_t){ENERGY_NODE_SOLAR_X + 15, ENERGY_NODE_SOLAR_Y + (ENERGY_NODE_SIZE / 2)},
-        (lv_point_precise_t){ENERGY_NODE_SOLAR_X + 15, ENERGY_NODE_HOME_Y - 12},
-        (lv_point_precise_t){ENERGY_NODE_HOME_X - (ENERGY_HOME_SIZE / 2), ENERGY_NODE_HOME_Y - 12},
+        (lv_point_precise_t){ENERGY_NODE_SOLAR_X + (ENERGY_FLOW_GAP / 2), ENERGY_NODE_SOLAR_Y + (ENERGY_NODE_SIZE / 2)},
+        (lv_point_precise_t){ENERGY_NODE_SOLAR_X + (ENERGY_FLOW_GAP / 2), ENERGY_NODE_HOME_Y - ENERGY_FLOW_GAP},
+        (lv_point_precise_t){ENERGY_NODE_HOME_X - (ENERGY_HOME_SIZE / 2), ENERGY_NODE_HOME_Y - ENERGY_FLOW_GAP},
         ENERGY_ARC_RADIUS);
 
     flow = &ctx->flows[ENERGY_FLOW_SOLAR_GRID];
     energy_set_L_path(flow,
-        (lv_point_precise_t){ENERGY_NODE_SOLAR_X - 15, ENERGY_NODE_SOLAR_Y + (ENERGY_NODE_SIZE / 2)},
-        (lv_point_precise_t){ENERGY_NODE_SOLAR_X - 15, ENERGY_NODE_GRID_Y - 12},
-        (lv_point_precise_t){ENERGY_NODE_GRID_X + (ENERGY_NODE_SIZE / 2), ENERGY_NODE_GRID_Y - 12},
+        (lv_point_precise_t){ENERGY_NODE_SOLAR_X - (ENERGY_FLOW_GAP / 2), ENERGY_NODE_SOLAR_Y + (ENERGY_NODE_SIZE / 2)},
+        (lv_point_precise_t){ENERGY_NODE_SOLAR_X - (ENERGY_FLOW_GAP / 2), ENERGY_NODE_GRID_Y - ENERGY_FLOW_GAP},
+        (lv_point_precise_t){ENERGY_NODE_GRID_X + (ENERGY_NODE_SIZE / 2), ENERGY_NODE_GRID_Y - ENERGY_FLOW_GAP},
         ENERGY_ARC_RADIUS);
 
     flow = &ctx->flows[ENERGY_FLOW_SOLAR_BATTERY];
@@ -872,16 +909,16 @@ static void energy_apply_static_flow_paths(energy_page_ctx_t *ctx)
 
     flow = &ctx->flows[ENERGY_FLOW_BATTERY_HOME];
     energy_set_L_path(flow,
-        (lv_point_precise_t){ENERGY_NODE_BATTERY_X + 15, ENERGY_NODE_BATTERY_Y - (ENERGY_NODE_SIZE / 2)},
-        (lv_point_precise_t){ENERGY_NODE_BATTERY_X + 15, ENERGY_NODE_HOME_Y + 12},
-        (lv_point_precise_t){ENERGY_NODE_HOME_X - (ENERGY_HOME_SIZE / 2), ENERGY_NODE_HOME_Y + 12},
+        (lv_point_precise_t){ENERGY_NODE_BATTERY_X + (ENERGY_FLOW_GAP / 2), ENERGY_NODE_BATTERY_Y - (ENERGY_NODE_SIZE / 2)},
+        (lv_point_precise_t){ENERGY_NODE_BATTERY_X + (ENERGY_FLOW_GAP / 2), ENERGY_NODE_HOME_Y + ENERGY_FLOW_GAP},
+        (lv_point_precise_t){ENERGY_NODE_HOME_X - (ENERGY_HOME_SIZE / 2), ENERGY_NODE_HOME_Y + ENERGY_FLOW_GAP},
         ENERGY_ARC_RADIUS);
 
     flow = &ctx->flows[ENERGY_FLOW_BATTERY_GRID];
     energy_set_L_path(flow,
-        (lv_point_precise_t){ENERGY_NODE_BATTERY_X - 15, ENERGY_NODE_BATTERY_Y - (ENERGY_NODE_SIZE / 2)},
-        (lv_point_precise_t){ENERGY_NODE_BATTERY_X - 15, ENERGY_NODE_GRID_Y + 12},
-        (lv_point_precise_t){ENERGY_NODE_GRID_X + (ENERGY_NODE_SIZE / 2), ENERGY_NODE_GRID_Y + 12},
+        (lv_point_precise_t){ENERGY_NODE_BATTERY_X - (ENERGY_FLOW_GAP / 2), ENERGY_NODE_BATTERY_Y - (ENERGY_NODE_SIZE / 2)},
+        (lv_point_precise_t){ENERGY_NODE_BATTERY_X - (ENERGY_FLOW_GAP / 2), ENERGY_NODE_GRID_Y + ENERGY_FLOW_GAP},
+        (lv_point_precise_t){ENERGY_NODE_GRID_X + (ENERGY_NODE_SIZE / 2), ENERGY_NODE_GRID_Y + ENERGY_FLOW_GAP},
         ENERGY_ARC_RADIUS);
 
     /* Gas → Home: vertical line down */
@@ -1101,23 +1138,40 @@ static void energy_set_flow_active(energy_flow_t *flow, bool line_visible, float
     flow->color = color;
 
     bool active = flow->visible;
-    lv_opa_t line_opa = active ? LV_OPA_80 : LV_OPA_30;
+    /* Active lines opaque, in the shade 80 % used to give over the dark page:
+     * a corner is three objects (line, arc, line) whose round ends overlap,
+     * and translucent overlaps showed as darker specks at every join. */
+    lv_opa_t line_opa = active ? LV_OPA_COVER : LV_OPA_30;
+    const lv_color_t line_color = active ? lv_color_mix(color, lv_color_hex(ENERGY_NODE_FILL_BASE), LV_OPA_80) : color;
+    const uint32_t color_u32 = lv_color_to_u32(color);
+    const bool restyle = !flow->styled || flow->styled_active != active || flow->styled_color != color_u32;
+    flow->styled = true;
+    flow->styled_active = active;
+    flow->styled_color = color_u32;
 
     energy_set_obj_hidden(flow->line, !active);
-    lv_obj_set_style_line_color(flow->line, color, LV_PART_MAIN);
+    if (!restyle) {
+        energy_set_obj_hidden(flow->dot, !active);
+        if (flow->has_arc) {
+            energy_set_obj_hidden(flow->arc, !active);
+            energy_set_obj_hidden(flow->post_line, !active);
+        }
+        return;
+    }
+    lv_obj_set_style_line_color(flow->line, line_color, LV_PART_MAIN);
     lv_obj_set_style_line_opa(flow->line, line_opa, LV_PART_MAIN);
     lv_obj_set_style_bg_color(flow->dot, color, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(flow->dot, color, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(flow->dot, color, LV_PART_MAIN);
 
     if (flow->has_arc) {
         if (flow->arc != NULL) {
             energy_set_obj_hidden(flow->arc, !active);
-            lv_obj_set_style_arc_color(flow->arc, color, LV_PART_MAIN);
+            lv_obj_set_style_arc_color(flow->arc, line_color, LV_PART_MAIN);
             lv_obj_set_style_arc_opa(flow->arc, line_opa, LV_PART_MAIN);
         }
         if (flow->post_line != NULL) {
             energy_set_obj_hidden(flow->post_line, !active);
-            lv_obj_set_style_line_color(flow->post_line, color, LV_PART_MAIN);
+            lv_obj_set_style_line_color(flow->post_line, line_color, LV_PART_MAIN);
             lv_obj_set_style_line_opa(flow->post_line, line_opa, LV_PART_MAIN);
         }
     }
@@ -1486,7 +1540,13 @@ static void energy_update_dot_position(energy_flow_t *flow)
         target = 1.0f;
     }
 
+    /* Travel between the glows only: a dot inside a ring's glow makes LVGL
+     * redraw (and re-blur) that big shadow on every step. */
+    const float margin = (float)(ENERGY_GLOW_WIDTH + ENERGY_DOT_SIZE);
     float distance = target * flow->length;
+    if (flow->length > 3.0f * margin) {
+        distance = margin + target * (flow->length - 2.0f * margin);
+    }
     lv_point_precise_t p = flow->points[0];
     for (uint8_t i = 0; i + 1 < flow->point_count; i++) {
         lv_point_precise_t a = flow->points[i];
@@ -1518,7 +1578,8 @@ static void energy_anim_timer_cb(lv_timer_t *timer)
         return;
     }
     lv_obj_t *parent = lv_obj_get_parent(ctx->root);
-    if (parent != NULL && lv_obj_has_flag(parent, LV_OBJ_FLAG_HIDDEN)) {
+    if (lv_obj_has_flag(ctx->root, LV_OBJ_FLAG_HIDDEN) ||
+        (parent != NULL && lv_obj_has_flag(parent, LV_OBJ_FLAG_HIDDEN))) {
         return;
     }
 
@@ -1681,6 +1742,9 @@ static energy_page_ctx_t *energy_view_create(const ui_energy_page_config_t *conf
 #define ENERGY_SOURCE_HA_LIVE "ha_energy_live"
 #define ENERGY_PAGER_MAX_VIEWS 2
 #define ENERGY_PAGER_DOT 9
+/* The large panel slides a full page at ~10 frames/s: there a swipe switches
+ * between "Today" and "Live" at once instead of sliding. */
+#define ENERGY_PAGER_INSTANT (APP_SCREEN_WIDTH >= 1000)
 
 typedef struct {
     energy_page_ctx_t *views[ENERGY_PAGER_MAX_VIEWS];
@@ -1688,6 +1752,7 @@ typedef struct {
     lv_obj_t *pager;
     lv_obj_t *dots[ENERGY_PAGER_MAX_VIEWS];
     lv_obj_t *badge;
+    uint8_t index; /* instant mode: the view in front */
 } energy_pager_t;
 
 static void energy_pager_update_dots(energy_pager_t *pg)
@@ -1696,7 +1761,8 @@ static void energy_pager_update_dots(energy_pager_t *pg)
         return;
     }
     const lv_coord_t w = lv_obj_get_width(pg->pager);
-    const int index = (w > 0) ? (int)((lv_obj_get_scroll_x(pg->pager) + w / 2) / w) : 0;
+    const int index = ENERGY_PAGER_INSTANT ? (int)pg->index
+                                           : ((w > 0) ? (int)((lv_obj_get_scroll_x(pg->pager) + w / 2) / w) : 0);
     for (uint8_t i = 0; i < pg->count; i++) {
         lv_obj_set_style_bg_opa(pg->dots[i], ((int)i == index) ? LV_OPA_COVER : LV_OPA_30, LV_PART_MAIN);
     }
@@ -1718,6 +1784,53 @@ static void energy_pager_event_cb(lv_event_t *event)
     } else if (code == LV_EVENT_DELETE) {
         free(pg);
     }
+}
+
+/* Instant mode: the pager takes horizontal swipes as gestures. LVGL fires a gesture
+ * only when nothing scrolls, and a drag that the pager cannot scroll is
+ * passed on to scrollable parents (the page) or picked up by scrollable
+ * children - so nothing below scrolls, nothing above is asked, and every
+ * child hands the gesture up. */
+static void energy_pager_take_swipes_descendants(lv_obj_t *obj)
+{
+    const uint32_t n = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(obj, (int32_t)i);
+        lv_obj_add_flag(child, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_clear_flag(child, LV_OBJ_FLAG_SCROLLABLE);
+        energy_pager_take_swipes_descendants(child);
+    }
+}
+
+static void energy_pager_take_swipes(lv_obj_t *target)
+{
+    lv_obj_clear_flag(target, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_add_flag(target, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(target, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    energy_pager_take_swipes_descendants(target);
+}
+
+/* Instant mode: a horizontal swipe flips between the two views. */
+static void energy_pager_gesture_cb(lv_event_t *event)
+{
+    energy_pager_t *pg = (energy_pager_t *)lv_event_get_user_data(event);
+    if (pg == NULL || pg->count < 2) {
+        return;
+    }
+    const lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
+        return;
+    }
+    lv_event_stop_bubbling(event);
+    const uint8_t next = (dir == LV_DIR_LEFT) ? 1 : 0;
+    if (next == pg->index) {
+        return;
+    }
+    pg->index = next;
+    for (uint8_t i = 0; i < pg->count; i++) {
+        energy_set_obj_hidden(pg->views[i]->root, i != pg->index);
+    }
+    energy_pager_update_dots(pg);
 }
 
 static bool energy_config_has_live_entities(const ui_energy_page_config_t *c)
@@ -1760,12 +1873,18 @@ esp_err_t ui_energy_page_create(
         lv_obj_t *pager = lv_obj_create(holder);
         lv_obj_remove_style_all(pager);
         lv_obj_set_size(pager, APP_CONTENT_BOX_WIDTH, APP_CONTENT_BOX_HEIGHT);
-        lv_obj_set_flex_flow(pager, LV_FLEX_FLOW_ROW);
-        lv_obj_set_scroll_dir(pager, LV_DIR_HOR);
-        lv_obj_set_scroll_snap_x(pager, LV_SCROLL_SNAP_START);
-        lv_obj_add_flag(pager, LV_OBJ_FLAG_SCROLL_ONE);
         lv_obj_set_scrollbar_mode(pager, LV_SCROLLBAR_MODE_OFF);
-        lv_obj_clear_flag(pager, LV_OBJ_FLAG_SCROLL_ELASTIC);
+        if (ENERGY_PAGER_INSTANT) {
+            /* Not scrollable, so the press turns into a gesture. */
+            lv_obj_clear_flag(pager, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_event_cb(pager, energy_pager_gesture_cb, LV_EVENT_GESTURE, pg);
+        } else {
+            lv_obj_set_flex_flow(pager, LV_FLEX_FLOW_ROW);
+            lv_obj_set_scroll_dir(pager, LV_DIR_HOR);
+            lv_obj_set_scroll_snap_x(pager, LV_SCROLL_SNAP_START);
+            lv_obj_add_flag(pager, LV_OBJ_FLAG_SCROLL_ONE);
+            lv_obj_clear_flag(pager, LV_OBJ_FLAG_SCROLL_ELASTIC);
+        }
         pg->pager = pager;
 
         ui_energy_page_config_t today = *config;
@@ -1778,6 +1897,14 @@ esp_err_t ui_energy_page_create(
         if (pg->views[0] == NULL && pg->views[1] != NULL) {
             pg->views[0] = pg->views[1];
             pg->views[1] = NULL;
+        }
+        if (ENERGY_PAGER_INSTANT) {
+            /* Both views stacked; the swipe has to reach the pager. */
+            for (uint8_t i = 0; i < pg->count; i++) {
+                lv_obj_clear_flag(pg->views[i]->root, LV_OBJ_FLAG_CLICKABLE);
+                energy_set_obj_hidden(pg->views[i]->root, i != 0);
+            }
+            energy_pager_take_swipes(pager);
         }
 
         /* Page dots (bottom centre) and a small "Today" / "Live" badge. */

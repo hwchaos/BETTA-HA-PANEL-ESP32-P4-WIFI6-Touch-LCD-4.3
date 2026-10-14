@@ -136,9 +136,19 @@ static esp_err_t guarded_api_radar_get(httpd_req_t *req)
     return http_guard_handle(req, api_radar_get_handler);
 }
 
+static esp_err_t guarded_api_cards_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_cards_get_handler);
+}
+
 static esp_err_t guarded_api_debug_activity_get(httpd_req_t *req)
 {
     return http_guard_handle(req, api_debug_activity_get_handler);
+}
+
+static esp_err_t guarded_api_debug_render_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_debug_render_get_handler);
 }
 
 
@@ -425,6 +435,18 @@ esp_err_t api_routes_register(httpd_handle_t server)
         .uri = "/api/radar",
         .method = HTTP_GET,
         .handler = guarded_api_radar_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t get_cards = {
+        .uri = "/api/cards",
+        .method = HTTP_GET,
+        .handler = guarded_api_cards_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t get_debug_render = {
+        .uri = "/api/debug/render",
+        .method = HTTP_GET,
+        .handler = guarded_api_debug_render_get,
         .user_ctx = NULL,
     };
     httpd_uri_t get_debug_activity = {
@@ -761,8 +783,11 @@ esp_err_t api_routes_register(httpd_handle_t server)
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_assist_pipelines), "api_routes", "GET /api/assist/pipelines");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_radar), "api_routes", "GET /api/radar");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_cards), "api_routes", "GET /api/cards");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_debug_activity), "api_routes", "GET /api/debug/activity");
+    ESP_RETURN_ON_ERROR(
+        httpd_register_uri_handler(server, &get_debug_render), "api_routes", "GET /api/debug/render");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_light_entities), "api_routes", "GET /api/ha/light_entities");
     ESP_RETURN_ON_ERROR(

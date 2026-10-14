@@ -106,6 +106,7 @@ static bool is_supported_widget_type(const char *type)
            (strcmp(type, "heating_tile") == 0) || (strcmp(type, "weather_tile") == 0) ||
            (strcmp(type, "weather_3day") == 0) || (strcmp(type, "todo_list") == 0) ||
            (strcmp(type, "media_player") == 0) || (strcmp(type, "roborock_tile") == 0) ||
+           (strcmp(type, "mower_tile") == 0) ||
            (strcmp(type, "binary_sensor") == 0) || (strcmp(type, "presence") == 0) ||
            (strcmp(type, "alarm_tile") == 0) || (strcmp(type, "clock_alarm") == 0) ||
            (strcmp(type, "cover") == 0) || (strcmp(type, "cover_tile") == 0) ||
@@ -284,7 +285,7 @@ static widget_size_limits_t widget_size_limits_for_type(const char *type)
 #endif
         limits.max_w = LAYOUT_CANVAS_MAX_W;
         limits.max_h = LAYOUT_CANVAS_MAX_H;
-    } else if (strcmp(type, "roborock_tile") == 0) {
+    } else if (strcmp(type, "roborock_tile") == 0 || strcmp(type, "mower_tile") == 0) {
 #if APP_LAYOUT_COMPACT
         limits.min_w = 220;
         limits.min_h = 190;
@@ -414,6 +415,9 @@ static const char *required_domain_for_widget_type(const char *type)
     if (strcmp(type, "roborock_tile") == 0) {
         return "vacuum";
     }
+    if (strcmp(type, "mower_tile") == 0) {
+        return "lawn_mower";
+    }
     if (strcmp(type, "lock") == 0) {
         return "lock";
     }
@@ -490,6 +494,9 @@ static bool widget_entity_domain_valid(const char *type, const char *entity_id)
     }
     if (strcmp(type, "roborock_tile") == 0) {
         return entity_in_domain(entity_id, "vacuum");
+    }
+    if (strcmp(type, "mower_tile") == 0) {
+        return entity_in_domain(entity_id, "lawn_mower");
     }
     if (strcmp(type, "empty_tile") == 0) {
         return true;
@@ -1110,6 +1117,27 @@ static bool validate_widget(cJSON *widget, const char *known_widget_ids, size_t 
             if (strcmp(v, "left") != 0 && strcmp(v, "right") != 0 && strcmp(v, "top") != 0 && strcmp(v, "bottom") != 0) {
                 snprintf(msg, sizeof(msg), "widget %s: arc_opening must be left|right|top|bottom",
                     cJSON_IsString(id) ? id->valuestring : "?");
+                layout_validation_add(result, msg);
+            }
+        }
+    }
+
+    if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, "mower_tile") == 0) {
+        const char *wid = cJSON_IsString(id) ? id->valuestring : "?";
+        if (cJSON_IsString(secondary_entity_id) && secondary_entity_id->valuestring != NULL &&
+            secondary_entity_id->valuestring[0] != '\0' &&
+            (!is_valid_entity_id(secondary_entity_id->valuestring) ||
+                !entity_in_domain(secondary_entity_id->valuestring, "camera"))) {
+            snprintf(msg, sizeof(msg), "widget %s: secondary_entity_id must be camera.*", wid);
+            layout_validation_add(result, msg);
+        }
+        static const char *const mower_keys[] = {
+            "mower_battery_entity_id", "mower_progress_entity_id", "mower_task_entity_id"};
+        for (size_t k = 0; k < sizeof(mower_keys) / sizeof(mower_keys[0]); k++) {
+            cJSON *v = cJSON_GetObjectItemCaseSensitive(widget, mower_keys[k]);
+            if (v != NULL && (!cJSON_IsString(v) || v->valuestring == NULL ||
+                                 (v->valuestring[0] != '\0' && !is_valid_entity_id(v->valuestring)))) {
+                snprintf(msg, sizeof(msg), "widget %s: %s must be an entity id", wid, mower_keys[k]);
                 layout_validation_add(result, msg);
             }
         }

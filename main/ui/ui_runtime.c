@@ -385,7 +385,7 @@ static ui_widget_size_limits_t ui_runtime_widget_size_limits(const char *type)
 #endif
         limits.max_w = APP_CONTENT_BOX_WIDTH;
         limits.max_h = APP_CONTENT_BOX_HEIGHT;
-    } else if (strcmp(type, "roborock_tile") == 0) {
+    } else if (strcmp(type, "roborock_tile") == 0 || strcmp(type, "mower_tile") == 0) {
 #if APP_LAYOUT_COMPACT
         limits.min_w = 220;
         limits.min_h = 190;
@@ -781,11 +781,11 @@ static void ui_runtime_apply_entity_state(const char *entity_id)
         bool is_secondary = (s_widgets[i].secondary_entity_id[0] != '\0') &&
                             (strncmp(entity_id, s_widgets[i].secondary_entity_id, APP_MAX_ENTITY_ID_LEN) == 0);
         if (!is_primary && !is_secondary) {
-            /* Chart tiles follow all of their series, not just the first. */
+            /* Chart series, mower sensors: further entities of a tile. */
             bool is_series = false;
-            for (int c = 0; c < UI_CHART_SERIES_MAX && !is_series; c++) {
-                is_series = s_widgets[i].chart_entities[c][0] != '\0' &&
-                            strncmp(entity_id, s_widgets[i].chart_entities[c], APP_MAX_ENTITY_ID_LEN) == 0;
+            for (int c = 0; c < UI_EXTRA_ENTITIES_MAX && !is_series; c++) {
+                is_series = s_widgets[i].extra_entities[c][0] != '\0' &&
+                            strncmp(entity_id, s_widgets[i].extra_entities[c], APP_MAX_ENTITY_ID_LEN) == 0;
             }
             if (is_series && found) {
                 ui_widget_factory_apply_state(&s_widgets[i], &s_state_scratch);

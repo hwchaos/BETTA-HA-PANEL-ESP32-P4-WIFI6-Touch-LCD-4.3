@@ -14,6 +14,7 @@
 #include "ha/ha_model.h"
 
 #define UI_CHART_SERIES_MAX 4
+#define UI_EXTRA_ENTITIES_MAX 4
 
 typedef struct {
     char id[APP_MAX_WIDGET_ID_LEN];
@@ -135,8 +136,9 @@ typedef struct {
     uint32_t applied_state_sig;
     bool applied_state_sig_valid;
     bool applied_state_missing_marked;
-    /* Chart tile: every series entity, so state changes reach it. */
-    char chart_entities[UI_CHART_SERIES_MAX][APP_MAX_ENTITY_ID_LEN];
+    /* Further entities whose state changes reach this tile besides the
+     * primary / secondary one (chart series, mower sensors). */
+    char extra_entities[UI_EXTRA_ENTITIES_MAX][APP_MAX_ENTITY_ID_LEN];
     void *ctx;
     lv_obj_t *obj;
 } ui_widget_instance_t;

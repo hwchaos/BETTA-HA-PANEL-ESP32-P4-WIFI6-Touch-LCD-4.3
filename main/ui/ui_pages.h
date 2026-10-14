@@ -61,3 +61,8 @@ void ui_pages_apply_topbar_settings(const runtime_settings_t *settings);
  * with them. Safe to call from any task. */
 void ui_pages_refresh_topbar(void);
 void ui_pages_apply_bottom_bar_settings(const runtime_settings_t *settings);
+
+/* Date in a format string (WD, DD, MM, YYYY), e.g. "WD, DD.MM.YYYY". */
+struct tm;
+void ui_format_date(char *out, size_t out_len, const struct tm *t, const char *fmt);
+

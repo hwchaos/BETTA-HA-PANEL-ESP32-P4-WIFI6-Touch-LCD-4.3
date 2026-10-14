@@ -1771,11 +1771,26 @@ void ui_pages_set_topbar_status(
     display_unlock();
 }
 
-/* Date in the configured format: WD = weekday, DD, MM, YYYY; a format without
- * the year ends with a dot when it uses dots ("24.10."). */
-static void ui_topbar_format_date(char *out, size_t out_len, const struct tm *t, const char *weekday)
+/* Date in a format string: WD = weekday, DD, MM, YYYY; a format without the
+ * year ends with a dot when it uses dots ("24.10."). Shared with the
+ * screensaver. */
+void ui_format_date(char *out, size_t out_len, const struct tm *t, const char *fmt)
 {
-    const char *fmt = s_topbar_cfg.date_format[0] != '\0' ? s_topbar_cfg.date_format : "WD, DD.MM.YYYY";
+    static const struct {
+        const char *key;
+        const char *fallback;
+    } WEEKDAYS[7] = {
+        {"weekday.su", "Su"}, {"weekday.mo", "Mo"}, {"weekday.tu", "Tu"}, {"weekday.we", "We"},
+        {"weekday.th", "Th"}, {"weekday.fr", "Fr"}, {"weekday.sa", "Sa"},
+    };
+    if (out == NULL || out_len == 0 || t == NULL) {
+        return;
+    }
+    if (fmt == NULL || fmt[0] == '\0') {
+        fmt = "DD.MM.YYYY";
+    }
+    const int wday = (t->tm_wday >= 0 && t->tm_wday <= 6) ? t->tm_wday : 0;
+    const char *weekday = ui_i18n_get(WEEKDAYS[wday].key, WEEKDAYS[wday].fallback);
     size_t n = 0;
     bool has_year = false;
     bool dotted = false;
@@ -1822,19 +1837,10 @@ void ui_pages_set_topbar_datetime(const struct tm *timeinfo)
         return;
     }
 
-    static const struct {
-        const char *key;
-        const char *fallback;
-    } WEEKDAYS[7] = {
-        {"weekday.su", "Su"}, {"weekday.mo", "Mo"}, {"weekday.tu", "Tu"}, {"weekday.we", "We"},
-        {"weekday.th", "Th"}, {"weekday.fr", "Fr"}, {"weekday.sa", "Sa"},
-    };
-    const int wday = (timeinfo->tm_wday >= 0 && timeinfo->tm_wday <= 6) ? timeinfo->tm_wday : 0;
-
     char date_buf[40] = {0};
     char time_buf[32] = {0};
-    ui_topbar_format_date(date_buf, sizeof(date_buf), timeinfo,
-        ui_i18n_get(WEEKDAYS[wday].key, WEEKDAYS[wday].fallback));
+    ui_format_date(date_buf, sizeof(date_buf), timeinfo,
+        s_topbar_cfg.date_format[0] != '\0' ? s_topbar_cfg.date_format : "WD, DD.MM.YYYY");
     s_topbar_time = *timeinfo;
     s_topbar_have_time = true;
     ui_topbar_clock_text(time_buf, sizeof(time_buf));

@@ -268,6 +268,9 @@ static const char *mdi_default_icon(const char *domain, const char *device_class
     if (strcmp(domain, "vacuum") == 0) {
         return "robot-vacuum";
     }
+    if (strcmp(domain, "lawn_mower") == 0) {
+        return "robot-mower";
+    }
     if (strcmp(domain, "person") == 0 || strcmp(domain, "device_tracker") == 0) {
         return "account";
     }

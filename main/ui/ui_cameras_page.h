@@ -26,6 +26,11 @@ void ui_cameras_page_deinit(void);
 /* Called when the page becomes visible; forces an immediate snapshot refresh. */
 void ui_cameras_page_on_shown(const char *page_id);
 
+/* Diagnostics: swipe the camera carousel to the next camera with the same
+ * snap animation a finger swipe ends in. Caller holds the display lock.
+ * Returns false when no carousel is built. */
+bool ui_cameras_page_debug_swipe(void);
+
 /* Tell the tiles which page is on screen: only that page keeps fetching, every
  * other tile's refresh timer is paused and its in-flight fetch is cancelled. */
 void ui_cameras_page_set_visible_page(const char *page_id);

@@ -28,6 +28,9 @@ typedef struct {
     uint32_t source_w;        /* Original source image width before any downscale */
     uint32_t source_h;        /* Original source image height before any downscale */
     bool valid;               /* true if fetch+decode/prepare succeeded      */
+    bool is_svg;              /* image.data is the raw SVG text (NUL-terminated,
+                               * data_size without the NUL), header.w/h the
+                               * requested size: draw it with LVGL's SVG decoder */
 } ha_cover_result_t;
 
 /* Callback is invoked on the LVGL task via lv_async_call.  Ownership of

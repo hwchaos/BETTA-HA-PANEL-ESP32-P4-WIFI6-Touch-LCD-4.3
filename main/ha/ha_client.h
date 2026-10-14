@@ -57,6 +57,16 @@ typedef void (*ha_client_event_cb_t)(cJSON *event, void *user);
  * are passed to `cb` from the WS receive task. One entry per type. */
 esp_err_t ha_client_ws_subscribe(const char *type, ha_client_event_cb_t cb, void *user);
 
+/* Same with a caller-chosen `key` (one entry per key) and extra request fields
+ * as a JSON object string, e.g. {"template": "..."} for render_template.
+ * Calling it again with a different type/body replaces the subscription; the
+ * old one is cancelled on HA. */
+esp_err_t ha_client_ws_subscribe_ex(
+    const char *key, const char *type, const char *body_json, ha_client_event_cb_t cb, void *user);
+
+/* Drops the subscription with that key (no more callbacks after return). */
+void ha_client_ws_unsubscribe(const char *key);
+
 esp_err_t ha_client_assist_run(const char *pipeline_id, uint32_t sample_rate, ha_client_event_cb_t cb, void *user);
 
 /* Stops forwarding events of the current run. */

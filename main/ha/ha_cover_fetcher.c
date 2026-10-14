@@ -184,6 +184,49 @@ static bool cover_delay_or_cancel(void *user, uint32_t delay_ms)
     return true;
 }
 
+/* SVG text: optional BOM / whitespace, then "<?xml" or "<svg". */
+static bool cover_is_svg(const uint8_t *buf, size_t len)
+{
+    size_t i = 0;
+    if (len >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) {
+        i = 3;
+    }
+    while (i < len && (buf[i] == ' ' || buf[i] == '\t' || buf[i] == '\r' || buf[i] == '\n')) {
+        i++;
+    }
+    return (len - i >= 5 && memcmp(buf + i, "<?xml", 5) == 0) || (len - i >= 4 && memcmp(buf + i, "<svg", 4) == 0);
+}
+
+/* Hands the SVG text over as is; the consumer renders it at the size it
+ * asked for (vector maps of robot mowers / vacuums). */
+static bool cover_pass_svg(const uint8_t *svg, size_t len, int target_w, int target_h, ha_cover_result_t *out)
+{
+    /* LVGL's SVG decoder wants "<svg" / "<?xml" as the very first bytes. */
+    if (len >= 3 && svg[0] == 0xEF && svg[1] == 0xBB && svg[2] == 0xBF) {
+        svg += 3;
+        len -= 3;
+    }
+    while (len > 0 && (*svg == ' ' || *svg == '\t' || *svg == '\r' || *svg == '\n')) {
+        svg++;
+        len--;
+    }
+    uint8_t *copy = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (copy == NULL) {
+        return false;
+    }
+    memcpy(copy, svg, len);
+    copy[len] = 0;
+    memset(out, 0, sizeof(*out));
+    out->image.header.magic = LV_IMAGE_HEADER_MAGIC;
+    out->image.header.w = (uint32_t)(target_w > 0 ? target_w : 256);
+    out->image.header.h = (uint32_t)(target_h > 0 ? target_h : 256);
+    out->image.data_size = (uint32_t)len;
+    out->image.data = copy;
+    out->is_svg = true;
+    out->valid = true;
+    return true;
+}
+
 static bool cover_is_png(const uint8_t *buf, size_t len)
 {
     static const uint8_t magic[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
@@ -1970,8 +2013,16 @@ static void cover_task(void *arg)
 
         /* 3) Decode + color */
         ha_cover_result_t result = {0};
+        /* The first bytes tell the format when neither decoder takes it. */
+        uint8_t head[12] = {0};
+        const size_t head_len = (ok && sink.buf != NULL) ? (sink.len < sizeof(head) ? sink.len : sizeof(head)) : 0;
+        if (head_len > 0) {
+            memcpy(head, sink.buf, head_len);
+        }
         if (ok) {
-            if (cover_is_png(sink.buf, sink.len)) {
+            if (cover_is_svg(sink.buf, sink.len)) {
+                ok = cover_pass_svg(sink.buf, sink.len, req.target_w, req.target_h, &result);
+            } else if (cover_is_png(sink.buf, sink.len)) {
                 ok = cover_decode_png(sink.buf, sink.len, req.target_w, req.target_h, &result);
             } else {
                 sink.len = cover_jpeg_sanitize(sink.buf, sink.len);
@@ -1981,8 +2032,11 @@ static void cover_task(void *arg)
                 ESP_LOGD(TAG, "cover decode ok valid=%d src=%ux%u", (int)result.valid,
                          (unsigned)result.source_w, (unsigned)result.source_h);
             } else {
-                ESP_LOGW(TAG, "cover decode failed valid=%d src=%ux%u", (int)result.valid,
-                         (unsigned)result.source_w, (unsigned)result.source_h);
+                ESP_LOGW(TAG, "cover decode failed valid=%d src=%ux%u, %u bytes starting %02x %02x %02x %02x %02x %02x %02x %02x "
+                              "%02x %02x %02x %02x",
+                         (int)result.valid, (unsigned)result.source_w, (unsigned)result.source_h, (unsigned)sink.len,
+                         head[0], head[1], head[2], head[3], head[4], head[5], head[6], head[7], head[8], head[9],
+                         head[10], head[11]);
             }
         } else {
             ESP_LOGW(TAG, "cover pipeline failed (download_err=%s)",
@@ -2085,7 +2139,10 @@ esp_err_t ha_cover_fetcher_init(void)
      * for the HA WS / LVGL path. */
     BaseType_t ok;
     ok = xTaskCreatePinnedToCore(
-        cover_task, "ha_cover", APP_HA_COVER_TASK_STACK, NULL, APP_HA_COVER_TASK_PRIO, &s_task, 1);
+        /* Core 0: LVGL renders on core 1 at a lower priority, so a decode and
+         * downscale there (a 2560x720 camera frame every 2 s) froze every
+         * animation it overlapped - swiping the camera carousel crawled. */
+        cover_task, "ha_cover", APP_HA_COVER_TASK_STACK, NULL, APP_HA_COVER_TASK_PRIO, &s_task, 0);
     if (ok != pdPASS) return ESP_FAIL;
     return ESP_OK;
 }

@@ -15,6 +15,9 @@
 #include "freertos/semphr.h"
 
 #include "app_config.h"
+#include "ha/ha_cards.h"
+#include "ui/ui_screen_saver.h"
+#include "ui/ui_cameras_page.h"
 #include "ha/ha_client.h"
 #include "ha/ha_model.h"
 #include "ui/ui_mdi_icon.h"
@@ -283,6 +286,69 @@ esp_err_t api_assist_pipelines_get_handler(httpd_req_t *req)
 }
 
 /* GET /api/debug/activity -> what keeps resetting the screensaver's idle timer. */
+/* Render statistics; ?swipe=1 first swipes the camera carousel (benchmark). */
+esp_err_t api_debug_render_get_handler(httpd_req_t *req)
+{
+    char query[32] = {0};
+    bool swiped = false;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK && strstr(query, "swipe=1") != NULL) {
+        if (display_lock(1000)) {
+            swiped = ui_cameras_page_debug_swipe();
+            display_unlock();
+        }
+    }
+    display_render_stats_t st;
+    display_render_stats_get(&st);
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return httpd_resp_send_500(req);
+    }
+    cJSON_AddBoolToObject(root, "swiped", swiped);
+    cJSON_AddNumberToObject(root, "passes", st.passes);
+    cJSON_AddNumberToObject(root, "full_passes", st.full_passes);
+    cJSON_AddNumberToObject(root, "slow_passes", st.slow_passes);
+    cJSON_AddNumberToObject(root, "last_pass_ms", st.last_pass_ms);
+    cJSON_AddNumberToObject(root, "max_pass_ms", st.max_pass_ms);
+    cJSON_AddNumberToObject(root, "total_pass_us", (double)st.total_pass_us);
+    cJSON_AddNumberToObject(root, "flush_us", (double)st.flush_us);
+    cJSON_AddNumberToObject(root, "flush_wait_us", (double)st.flush_wait_us);
+    cJSON_AddNumberToObject(root, "flushes", st.flushes);
+    cJSON_AddNumberToObject(root, "flush_px", (double)st.flush_px);
+    static lv_area_t inv[96];
+    const size_t inv_n = display_recent_invalidations(inv, 96);
+    cJSON *inv_arr = cJSON_AddArrayToObject(root, "invalidated");
+    for (size_t i = 0; i < inv_n && inv_arr != NULL; i++) {
+        if (lv_area_get_size(&inv[i]) < 2000) {
+            continue; /* the big ones are the interesting ones */
+        }
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%d,%d %dx%d", (int)inv[i].x1, (int)inv[i].y1, (int)lv_area_get_width(&inv[i]),
+            (int)lv_area_get_height(&inv[i]));
+        cJSON_AddItemToArray(inv_arr, cJSON_CreateString(buf));
+    }
+    const size_t fl_n = display_recent_flushes(inv, 96);
+    cJSON *fl_arr = cJSON_AddArrayToObject(root, "flushed");
+    for (size_t i = 0; i < fl_n && fl_arr != NULL; i++) {
+        if (lv_area_get_size(&inv[i]) < 2000) {
+            continue;
+        }
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%d,%d %dx%d", (int)inv[i].x1, (int)inv[i].y1, (int)lv_area_get_width(&inv[i]),
+            (int)lv_area_get_height(&inv[i]));
+        cJSON_AddItemToArray(fl_arr, cJSON_CreateString(buf));
+    }
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload == NULL) {
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t err = httpd_resp_sendstr(req, payload);
+    cJSON_free(payload);
+    return err;
+}
+
 esp_err_t api_debug_activity_get_handler(httpd_req_t *req)
 {
     display_activity_source_t sources[12];
@@ -325,6 +391,34 @@ esp_err_t api_debug_activity_get_handler(httpd_req_t *req)
 }
 
 /* GET /api/radar -> live state of the LD2410 presence radar. */
+esp_err_t api_cards_get_handler(httpd_req_t *req)
+{
+    char query[32] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        if (strstr(query, "demo=1") != NULL) {
+            ha_cards_demo(true);
+            ui_screen_saver_wake();
+        } else if (strstr(query, "demo=0") != NULL) {
+            ha_cards_demo(false);
+        }
+    }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return httpd_resp_send_500(req);
+    }
+    ha_cards_status_json(root);
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (payload == NULL) {
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t err = httpd_resp_sendstr(req, payload);
+    cJSON_free(payload);
+    return err;
+}
+
 esp_err_t api_radar_get_handler(httpd_req_t *req)
 {
     char query[32] = {0};

@@ -830,7 +830,7 @@ esp_err_t w_chart_create(const ui_widget_def_t *def, lv_obj_t *parent, ui_widget
 
     /* The runtime routes state changes of every series here. */
     for (int i = 0; i < ctx->n; i++) {
-        snprintf(out_instance->chart_entities[i], sizeof(out_instance->chart_entities[i]), "%s", ctx->entity[i]);
+        snprintf(out_instance->extra_entities[i], sizeof(out_instance->extra_entities[i]), "%s", ctx->entity[i]);
     }
     if (ctx->n > 0 && out_instance->entity_id[0] == '\0') {
         snprintf(out_instance->entity_id, sizeof(out_instance->entity_id), "%s", ctx->entity[0]);

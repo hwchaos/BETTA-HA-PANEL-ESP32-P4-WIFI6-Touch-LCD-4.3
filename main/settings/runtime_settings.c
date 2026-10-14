@@ -286,6 +286,14 @@ cJSON *runtime_settings_public_json(const runtime_settings_t *settings)
     cJSON_AddNumberToObject(display, "saver_wallpaper_dim", settings->display_saver_wallpaper_dim);
     cJSON_AddNumberToObject(display, "saver_clock_color", (double)(settings->display_saver_clock_color & 0xFFFFFF));
     cJSON_AddNumberToObject(display, "saver_date_color", (double)(settings->display_saver_date_color & 0xFFFFFF));
+    cJSON_AddNumberToObject(display, "saver_clock_x", settings->display_saver_clock_x);
+    cJSON_AddNumberToObject(display, "saver_clock_y", settings->display_saver_clock_y);
+    cJSON_AddNumberToObject(display, "saver_clock_scale", settings->display_saver_clock_scale);
+    cJSON_AddBoolToObject(display, "saver_date_below", settings->display_saver_date_below);
+    cJSON_AddStringToObject(display, "saver_date_format", settings->display_saver_date_format);
+    cJSON_AddBoolToObject(display, "saver_drift", settings->display_saver_drift);
+    cJSON_AddBoolToObject(display, "saver_cards", settings->display_saver_cards);
+    cJSON_AddStringToObject(display, "cards_label", settings->display_cards_label);
     cJSON_AddBoolToObject(display, "night_mode_enabled", settings->display_night_mode_enabled);
     cJSON_AddNumberToObject(display, "night_start_min", (double)settings->display_night_start_min);
     cJSON_AddNumberToObject(display, "night_end_min", (double)settings->display_night_end_min);
@@ -688,6 +696,34 @@ static esp_err_t parse_settings_json(
             }
             out->display_saver_date_color = value;
         }
+        cJSON *saver_clock_x = cJSON_GetObjectItemCaseSensitive(display, "saver_clock_x");
+        if (cJSON_IsNumber(saver_clock_x) && saver_clock_x->valueint >= -1 && saver_clock_x->valueint <= 1000) {
+            out->display_saver_clock_x = saver_clock_x->valueint;
+        }
+        cJSON *saver_clock_y = cJSON_GetObjectItemCaseSensitive(display, "saver_clock_y");
+        if (cJSON_IsNumber(saver_clock_y) && saver_clock_y->valueint >= -1 && saver_clock_y->valueint <= 1000) {
+            out->display_saver_clock_y = saver_clock_y->valueint;
+        }
+        cJSON *saver_clock_scale = cJSON_GetObjectItemCaseSensitive(display, "saver_clock_scale");
+        if (cJSON_IsNumber(saver_clock_scale) && saver_clock_scale->valueint >= 40 &&
+            saver_clock_scale->valueint <= 300) {
+            out->display_saver_clock_scale = saver_clock_scale->valueint;
+        }
+        cJSON *saver_date_below = cJSON_GetObjectItemCaseSensitive(display, "saver_date_below");
+        if (cJSON_IsBool(saver_date_below)) {
+            out->display_saver_date_below = cJSON_IsTrue(saver_date_below);
+        }
+        json_copy_string(display, "saver_date_format", out->display_saver_date_format,
+            sizeof(out->display_saver_date_format));
+        cJSON *saver_drift = cJSON_GetObjectItemCaseSensitive(display, "saver_drift");
+        if (cJSON_IsBool(saver_drift)) {
+            out->display_saver_drift = cJSON_IsTrue(saver_drift);
+        }
+        cJSON *saver_cards = cJSON_GetObjectItemCaseSensitive(display, "saver_cards");
+        if (cJSON_IsBool(saver_cards)) {
+            out->display_saver_cards = cJSON_IsTrue(saver_cards);
+        }
+        json_copy_string(display, "cards_label", out->display_cards_label, sizeof(out->display_cards_label));
 
         cJSON *night_enabled = cJSON_GetObjectItemCaseSensitive(display, "night_mode_enabled");
         if (cJSON_IsBool(night_enabled)) {
@@ -1255,6 +1291,14 @@ void runtime_settings_set_defaults(runtime_settings_t *out)
     out->display_saver_wallpaper_dim = APP_DISPLAY_SAVER_WALLPAPER_DIM_PERCENT;
     out->display_saver_clock_color = APP_DISPLAY_SAVER_CLOCK_COLOR;
     out->display_saver_date_color = APP_DISPLAY_SAVER_DATE_COLOR;
+    out->display_saver_clock_x = -1;
+    out->display_saver_clock_y = -1;
+    out->display_saver_clock_scale = 100;
+    out->display_saver_date_below = false;
+    snprintf(out->display_saver_date_format, sizeof(out->display_saver_date_format), "DD.MM.YYYY");
+    out->display_saver_drift = false;
+    out->display_saver_cards = true;
+    snprintf(out->display_cards_label, sizeof(out->display_cards_label), "Panel");
     out->display_night_mode_enabled = APP_DISPLAY_NIGHT_MODE_ENABLED ? true : false;
     out->display_night_start_min = APP_DISPLAY_NIGHT_START_MIN;
     out->display_night_end_min = APP_DISPLAY_NIGHT_END_MIN;

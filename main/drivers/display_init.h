@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "lvgl.h"
 
 esp_err_t display_init(void);
 bool display_is_ready(void);
@@ -117,6 +118,10 @@ typedef struct {
     uint8_t last_dirty_pct;  /* screen area repainted by the newest pass, percent */
     uint8_t max_dirty_pct;   /* worst coverage seen                              */
     uint64_t total_pass_us;  /* summed duration of all passes (render + flush)   */
+    uint64_t flush_us;       /* time inside flush_cb (rotation + hand-off)       */
+    uint64_t flush_wait_us;  /* time waiting for the previous flush to finish     */
+    uint32_t flushes;        /* flush_cb calls                                   */
+    uint64_t flush_px;       /* pixels handed to flush_cb                         */
 } display_render_stats_t;
 
 /* One notable pass (full repaint or slow pass), handed over from the LVGL
@@ -132,6 +137,10 @@ typedef struct {
 } display_render_note_t;
 
 void display_render_stats_get(display_render_stats_t *out);
+
+/* Newest invalidated areas first (diagnostics). */
+size_t display_recent_invalidations(lv_area_t *out, size_t max);
+size_t display_recent_flushes(lv_area_t *out, size_t max);
 /* One-line summary for the periodic heartbeat/log line. */
 void display_render_stats_format(char *out, size_t out_len);
 /* Takes the oldest pending note; returns false when nothing notable happened.

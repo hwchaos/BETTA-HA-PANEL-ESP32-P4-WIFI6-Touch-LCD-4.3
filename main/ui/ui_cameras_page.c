@@ -22,6 +22,10 @@
 #define TAG TAG_CAMERA
 
 #define CAM_GRID_MARGIN 16
+#define CAM_CAROUSEL_BG 0x070A12
+/* The large panel draws a sliding carousel at ~10 frames/s: there a swipe
+ * switches to the next camera at once instead of sliding. */
+#define CAM_CAROUSEL_INSTANT (APP_SCREEN_WIDTH >= 1000)
 #define CAM_GRID_GAP 12
 #define CAM_CHIP_RADIUS 8
 #define CAM_CHIP_PAD 6
@@ -50,11 +54,14 @@ typedef struct {
 } ui_camera_instance_t;
 
 static ui_camera_instance_t s_instances[APP_MAX_CAMERAS];
-/* Carousel mode (short screens, two or more cameras): one camera per swipe
- * position, and only the camera in view fetches snapshots. */
+/* Carousel mode (two or more cameras): one camera per swipe position, and
+ * only the camera in view fetches snapshots. */
 static lv_obj_t *s_carousel = NULL;
 static lv_obj_t *s_carousel_pos_label = NULL;
 static size_t s_carousel_count = 0;
+/* No downloads or decodes while the carousel moves: they compete with the
+ * frame being drawn for PSRAM bandwidth. */
+static bool s_carousel_scrolling = false;
 /* Snapshot fetching is only allowed for the page the user is actually looking
  * at: the refresh timers used to keep downloading and decoding JPEGs on every
  * page and behind the screen saver as well. */
@@ -183,7 +190,13 @@ static void cam_cover_cb(void *user, const ha_cover_result_t *result)
 
     if (inst->image != NULL) {
         lv_image_set_src(inst->image, &inst->image_dsc);
-        lv_image_set_inner_align(inst->image, LV_IMAGE_ALIGN_CONTAIN);
+        /* A frame that fits is drawn 1:1. CONTAIN would scale it up to the
+         * tile, and LVGL does that in software on every frame: a camera
+         * smaller than its tile (896x672 in a 944x708 tile on the 10.1")
+         * made swiping crawl. Only a larger frame is scaled down. */
+        const bool fits = (int32_t)inst->image_dsc.header.w <= lv_obj_get_width(inst->image) &&
+                          (int32_t)inst->image_dsc.header.h <= lv_obj_get_height(inst->image);
+        lv_image_set_inner_align(inst->image, fits ? LV_IMAGE_ALIGN_CENTER : LV_IMAGE_ALIGN_CONTAIN);
     }
 
     char status[48];
@@ -195,7 +208,7 @@ static void cam_cover_cb(void *user, const ha_cover_result_t *result)
  * is not covering the UI. */
 static bool cam_instance_is_live(const ui_camera_instance_t *inst)
 {
-    return !s_suspended && inst->on_screen && s_visible_page_id[0] != '\0' &&
+    return !s_suspended && !s_carousel_scrolling && inst->on_screen && s_visible_page_id[0] != '\0' &&
            strncmp(inst->page_id, s_visible_page_id, sizeof(s_visible_page_id)) == 0;
 }
 
@@ -279,17 +292,27 @@ static void cam_build_tile(ui_camera_instance_t *inst,
     lv_obj_set_size(card, w, h);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     theme_default_style_card(card);
+    /* The picture fills the card edge to edge; the theme's padding would push
+     * it (and the chips sized to the card) past the right border. No
+     * clip_corner: it renders the whole card through a masked layer on every
+     * frame, which made swiping on the 10.1" crawl. The picture is letterboxed
+     * on a transparent image object, so the card's own rounded background
+     * shows in the corners. */
+    lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
+    /* Opaque: no per-pixel blending with what lies underneath while moving. */
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
 
     lv_obj_t *image = lv_image_create(card);
     lv_obj_set_pos(image, 0, 0);
     lv_obj_set_size(image, w, h);
     lv_image_set_inner_align(image, LV_IMAGE_ALIGN_CONTAIN);
-    lv_obj_set_style_bg_color(image, lv_color_hex(APP_UI_COLOR_CARD_BG_OFF), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(image, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(image, LV_OPA_TRANSP, LV_PART_MAIN);
 
     lv_obj_t *name = lv_label_create(card);
     lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_width(name, w - 2 * CAM_GRID_GAP);
+    /* As wide as the name, so the carousel's "1 / 2" stays clear of it. */
+    lv_obj_set_width(name, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(name, w - 2 * CAM_GRID_GAP - 90, LV_PART_MAIN);
     lv_label_set_text(name, inst->cfg.name);
     lv_obj_set_style_text_font(name, CAM_NAME_FONT, LV_PART_MAIN);
     cam_style_chip(name);
@@ -297,7 +320,8 @@ static void cam_build_tile(ui_camera_instance_t *inst,
 
     lv_obj_t *status = lv_label_create(card);
     lv_label_set_long_mode(status, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_width(status, w - 2 * CAM_GRID_GAP);
+    lv_obj_set_width(status, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(status, w - 2 * CAM_GRID_GAP, LV_PART_MAIN);
     lv_label_set_text(status, ui_i18n_get("cameras.connecting", "Verbinde…"));
     lv_obj_set_style_text_font(status, CAM_STATUS_FONT, LV_PART_MAIN);
     cam_style_chip(status);
@@ -356,19 +380,20 @@ static void cam_carousel_update_pos_label(size_t index)
     lv_label_set_text(s_carousel_pos_label, text);
 }
 
-/* After a swipe settles, only the camera in view keeps fetching. */
-static void cam_carousel_scroll_end_cb(lv_event_t *event)
+/* A swipe starts: stop fetching until it settles. */
+static void cam_carousel_scroll_begin_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_carousel == NULL || s_carousel_count == 0) {
-        return;
-    }
-    const lv_coord_t page_w = APP_CONTENT_BOX_WIDTH;
-    size_t index = (size_t)((lv_obj_get_scroll_x(s_carousel) + page_w / 2) / page_w);
+    s_carousel_scrolling = true;
+    cam_sync_activity();
+}
+
+/* Makes camera `index` the one in view: only it keeps fetching. */
+static void cam_carousel_select(size_t index)
+{
     if (index >= s_carousel_count) {
         index = s_carousel_count - 1;
     }
-
     ui_camera_instance_t *shown = NULL;
     for (size_t i = 0; i < s_carousel_count; i++) {
         ui_camera_instance_t *inst = &s_instances[i];
@@ -376,6 +401,13 @@ static void cam_carousel_scroll_end_cb(lv_event_t *event)
         inst->on_screen = (i == index);
         if (inst->on_screen && !was_on_screen) {
             shown = inst;
+        }
+        if (CAM_CAROUSEL_INSTANT && inst->card != NULL) {
+            if (inst->on_screen) {
+                lv_obj_clear_flag(inst->card, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(inst->card, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
     cam_carousel_update_pos_label(index);
@@ -387,16 +419,90 @@ static void cam_carousel_scroll_end_cb(lv_event_t *event)
     }
 }
 
+static size_t cam_carousel_index(void)
+{
+    for (size_t i = 0; i < s_carousel_count; i++) {
+        if (s_instances[i].on_screen) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* After a swipe settles, only the camera in view keeps fetching. */
+static void cam_carousel_scroll_end_cb(lv_event_t *event)
+{
+    (void)event;
+    s_carousel_scrolling = false;
+    if (s_carousel == NULL || s_carousel_count == 0) {
+        return;
+    }
+    const lv_coord_t page_w = APP_CONTENT_BOX_WIDTH;
+    cam_carousel_select((size_t)((lv_obj_get_scroll_x(s_carousel) + page_w / 2) / page_w));
+}
+
+/* Instant mode: the carousel takes horizontal swipes as gestures. LVGL fires a gesture
+ * only when nothing scrolls, and a drag that the carousel cannot scroll is
+ * passed on to scrollable parents (the page) or picked up by scrollable
+ * children - so nothing below scrolls, nothing above is asked, and every
+ * child hands the gesture up. */
+static void cam_carousel_take_swipes_descendants(lv_obj_t *obj)
+{
+    const uint32_t n = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(obj, (int32_t)i);
+        lv_obj_add_flag(child, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_clear_flag(child, LV_OBJ_FLAG_SCROLLABLE);
+        cam_carousel_take_swipes_descendants(child);
+    }
+}
+
+static void cam_carousel_take_swipes(lv_obj_t *target)
+{
+    lv_obj_clear_flag(target, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_add_flag(target, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(target, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    cam_carousel_take_swipes_descendants(target);
+}
+
+/* Instant mode: a horizontal swipe switches the camera, wrapping around. */
+static void cam_carousel_gesture_cb(lv_event_t *event)
+{
+    if (s_carousel == NULL || s_carousel_count < 2) {
+        return;
+    }
+    const lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
+        return;
+    }
+    lv_event_stop_bubbling(event);
+    const size_t index = cam_carousel_index();
+    cam_carousel_select(dir == LV_DIR_LEFT ? (index + 1) % s_carousel_count
+                                           : (index + s_carousel_count - 1) % s_carousel_count);
+}
+
 static lv_obj_t *cam_carousel_create(lv_obj_t *parent, size_t count)
 {
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
     lv_obj_set_pos(cont, 0, 0);
     lv_obj_set_size(cont, APP_CONTENT_BOX_WIDTH, APP_CONTENT_BOX_HEIGHT);
-    lv_obj_set_scroll_dir(cont, LV_DIR_HOR);
-    lv_obj_set_scroll_snap_x(cont, LV_SCROLL_SNAP_CENTER);
-    lv_obj_add_flag(cont, LV_OBJ_FLAG_SCROLL_ONE);
     lv_obj_set_scrollbar_mode(cont, LV_SCROLLBAR_MODE_OFF);
+    if (CAM_CAROUSEL_INSTANT) {
+        /* Not scrollable, so the press turns into a gesture. */
+        lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(cont, cam_carousel_gesture_cb, LV_EVENT_GESTURE, NULL);
+    } else {
+        lv_obj_set_scroll_dir(cont, LV_DIR_HOR);
+        lv_obj_set_scroll_snap_x(cont, LV_SCROLL_SNAP_CENTER);
+        lv_obj_add_flag(cont, LV_OBJ_FLAG_SCROLL_ONE);
+    }
+    /* Opaque and square: LVGL starts every swipe frame here instead of
+     * repainting the page backdrop and blending translucent cards over it,
+     * which is what made swiping slow on the large panel. */
+    lv_obj_set_style_bg_color(cont, lv_color_hex(CAM_CAROUSEL_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_add_event_cb(cont, cam_carousel_scroll_begin_cb, LV_EVENT_SCROLL_BEGIN, NULL);
     lv_obj_add_event_cb(cont, cam_carousel_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
 
     s_carousel = cont;
@@ -464,8 +570,9 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
         rows = 1;
     }
 
-    /* Short screens have no room for a grid: swipe through full-size tiles. */
-    const bool carousel = APP_LAYOUT_COMPACT && count >= 2;
+    /* One camera per screen, swiped: a grid makes every picture small (wide
+     * panoramas end up as a strip), on the large panel as well. */
+    const bool carousel = count >= 2;
     lv_obj_t *tile_parent = parent;
     if (carousel) {
         cols = 1;
@@ -497,9 +604,10 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
         lv_coord_t x;
         lv_coord_t y;
         if (carousel) {
-            /* One full content-box width per camera; snap centres each tile. */
+            /* One full content-box width per camera; snap centres each tile.
+             * Instant mode stacks them and shows one at a time. */
             inst->on_screen = (built == 0);
-            x = (lv_coord_t)built * APP_CONTENT_BOX_WIDTH + CAM_GRID_MARGIN;
+            x = (CAM_CAROUSEL_INSTANT ? 0 : (lv_coord_t)built * APP_CONTENT_BOX_WIDTH) + CAM_GRID_MARGIN;
             y = CAM_GRID_MARGIN;
         } else {
             inst->on_screen = true;
@@ -510,12 +618,22 @@ esp_err_t ui_cameras_page_build(lv_obj_t *parent, const char *page_id)
         }
 
         cam_build_tile(inst, tile_parent, x, y, tile_w, tile_h);
+        if (carousel && CAM_CAROUSEL_INSTANT && inst->card != NULL) {
+            /* The swipe has to reach the carousel as a gesture. */
+            lv_obj_clear_flag(inst->card, LV_OBJ_FLAG_CLICKABLE);
+            if (built != 0) {
+                lv_obj_add_flag(inst->card, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
         built++;
     }
 
     if (carousel) {
         s_carousel_count = built;
         cam_carousel_create_pos_label(parent);
+        if (CAM_CAROUSEL_INSTANT) {
+            cam_carousel_take_swipes(tile_parent);
+        }
     }
 
     free(entries);
@@ -530,6 +648,7 @@ void ui_cameras_page_deinit(void)
     s_carousel = NULL;
     s_carousel_pos_label = NULL;
     s_carousel_count = 0;
+    s_carousel_scrolling = false;
     for (size_t i = 0; i < APP_MAX_CAMERAS; i++) {
         ui_camera_instance_t *inst = &s_instances[i];
         if (!inst->active) {
@@ -551,6 +670,22 @@ void ui_cameras_page_deinit(void)
         inst->fetching = false;
         inst->active = false;
     }
+}
+
+bool ui_cameras_page_debug_swipe(void)
+{
+    if (s_carousel == NULL || s_carousel_count < 2) {
+        return false;
+    }
+    if (CAM_CAROUSEL_INSTANT) {
+        cam_carousel_select((cam_carousel_index() + 1) % s_carousel_count);
+        return true;
+    }
+    const lv_coord_t page_w = APP_CONTENT_BOX_WIDTH;
+    size_t index = (size_t)((lv_obj_get_scroll_x(s_carousel) + page_w / 2) / page_w);
+    index = (index + 1) % s_carousel_count;
+    lv_obj_scroll_to_x(s_carousel, (lv_coord_t)index * page_w, LV_ANIM_ON);
+    return true;
 }
 
 void ui_cameras_page_on_shown(const char *page_id)

@@ -189,55 +189,6 @@
                 <div class="meta" id="weatherPageChipHint">The chip shows the entity weather.dom. Change the entity of the first weather tile if you want a different one.</div>
               </div>
             </div>
-            <div id="pageLookOptions" class="page-look-options hidden">
-              <h2 id="pageLookHeading">Page look</h2>
-              <div class="meta" id="pageLookHint">Background of the whole page: solid color, gradient or the panel wallpaper.</div>
-              <label><span id="fPagePresetLabel">Preset</span>
-                <select id="fPagePreset">
-                  <option value="auto">Theme default</option>
-                  <option value="midnight">Midnight</option>
-                  <option value="deep_sea">Deep sea</option>
-                  <option value="forest">Forest</option>
-                  <option value="sunset">Sunset</option>
-                  <option value="plum">Plum</option>
-                  <option value="wallpaper">Wallpaper</option>
-                  <option value="wallpaper_dim">Wallpaper dimmed</option>
-                </select>
-              </label>
-              <label class="tile-color-row"><span id="fPageBgColorLabel">Background color</span>
-                <span class="tile-color-inputs">
-                  <input id="fPageBgColor" type="text" placeholder="#RRGGBB (panel)" maxlength="7" />
-                  <input id="fPageBgColorPick" type="color" value="#10202e" />
-                </span>
-              </label>
-              <label class="tile-color-row"><span id="fPageBgGradColorLabel">Gradient end color</span>
-                <span class="tile-color-inputs">
-                  <input id="fPageBgGradColor" type="text" placeholder="#RRGGBB (none)" maxlength="7" />
-                  <input id="fPageBgGradColorPick" type="color" value="#1b3a5c" />
-                </span>
-              </label>
-              <label><span id="fPageBgGradDirLabel">Gradient direction</span>
-                <select id="fPageBgGradDir">
-                  <option value="none">None</option>
-                  <option value="ver">Vertical</option>
-                  <option value="hor">Horizontal</option>
-                </select>
-              </label>
-              <label class="row">
-                <input id="fPageWallpaper" type="checkbox" />
-                <span id="fPageWallpaperLabel">Use panel wallpaper</span>
-              </label>
-              <label><span id="fPageDimLabel">Wallpaper dimming (%)</span>
-                <input id="fPageDim" type="number" min="0" max="90" step="5" placeholder="0" />
-              </label>
-              <label><span id="fPageThemeLabel">Theme override for this page</span>
-                <select id="fPageTheme">
-                  <option value="">Follow the global / day-night theme</option>
-                </select>
-              </label>
-              <div id="fPageThemeHint" class="meta">The page is repainted with the selected theme as soon as it is shown.</div>
-              <button id="pageLookResetBtn" class="btn small" type="button">Reset page look</button>
-            </div>
           </div>
           <div id="pagesMiniList" class="section-mini hidden"></div>
         </section>
@@ -258,6 +209,7 @@
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addHeatingTileBtn">Heating Tile</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addMediaPlayerBtn">Media Player</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addRoborockTileBtn">Roborock</button>
+                    <button class="dropdown-item" type="button" role="menuitem" data-add-target="addMowerTileBtn" data-en="Lawn mower">Rasenmäher</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addLockBtn">Lock</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addFanBtn">Fan</button>
                     <button class="dropdown-item" type="button" role="menuitem" data-add-target="addSelectBtn">Select</button>
@@ -308,6 +260,7 @@
               <button id="addTodoListBtn" type="button">+ Todo List</button>
               <button id="addMediaPlayerBtn" type="button">+ Media Player</button>
               <button id="addRoborockTileBtn" type="button">+ Roborock</button>
+              <button id="addMowerTileBtn" type="button">+ Mower</button>
               <button id="addLockBtn" type="button">+ Lock</button>
               <button id="addFanBtn" type="button">+ Fan</button>
               <button id="addSelectBtn" type="button">+ Select</button>
@@ -353,6 +306,7 @@
                     <option value="todo_list">todo_list</option>
                     <option value="media_player">media_player</option>
                     <option value="roborock_tile">roborock_tile</option>
+                    <option value="mower_tile">mower_tile</option>
                     <option value="lock">lock</option>
                     <option value="fan">fan</option>
                     <option value="select">select</option>
@@ -492,6 +446,21 @@
                         <input id="fChartName3" type="text" maxlength="40" data-en-placeholder="Name (optional)" placeholder="Name (optional)" />
                       </div>
                     <div class="meta" data-en="Numeric sensors. Bars, columns and ring show the current values; the line loads the history from Home Assistant.">Sensoren mit Zahlenwerten. Balken, Säulen und Kreis zeigen die aktuellen Werte, die Kurve lädt den Verlauf aus Home Assistant.</div>
+                  </div>
+                  <div id="mowerOptions" class="slider-options hidden">
+                    <label><span data-en="Battery (sensor in %, optional)">Akku (Sensor in %, optional)</span>
+                      <input id="fMowerBattery" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                    </label>
+                    <label><span data-en="Mowing progress (sensor in %, optional)">Mähfortschritt (Sensor in %, optional)</span>
+                      <input id="fMowerProgress" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                    </label>
+                    <label><span data-en="Current task (sensor, optional)">Aktuelle Aufgabe (Sensor, optional)</span>
+                      <input id="fMowerTask" type="text" list="wasteEntityOptions" autocomplete="off" placeholder="sensor.…" />
+                    </label>
+                    <div class="row">
+                      <button id="fMowerSuggestBtn" class="btn small" type="button" data-en="Find the mower&#x27;s sensors and map">Sensoren und Karte des Mähers suchen</button>
+                    </div>
+                    <div id="fMowerHint" class="meta" data-en="The map is the camera entity above (camera.*). Sensors and map are looked up by the mower&#x27;s entity name.">Die Karte ist die Kamera-Entität oben (camera.*). Sensoren und Karte werden über den Namen der Mäher-Entität gesucht.</div>
                   </div>
                   <div id="heatingOptions" class="slider-options hidden">
                     <label><span id="fHeatingStyleVariantLabel">Heating style</span>
@@ -989,6 +958,63 @@
               <label><span id="settingsDateColorLabel">Date color</span>
                 <input id="settingsDateColor" type="color" />
               </label>
+            </div>
+            <div class="saver-layout">
+              <div class="waste-settings-title" data-en="Layout (drag the clock)">Anordnung (Uhr verschieben)</div>
+              <div id="saverPreview" class="saver-preview">
+                <div id="saverPreviewBlock" class="saver-preview-block">
+                  <div id="saverPreviewDateAbove" class="saver-preview-date"></div>
+                  <div id="saverPreviewClock" class="saver-preview-clock">12:34</div>
+                  <div id="saverPreviewDateBelow" class="saver-preview-date"></div>
+                </div>
+              </div>
+              <input id="settingsSaverClockX" type="hidden" />
+              <input id="settingsSaverClockY" type="hidden" />
+              <label><span><span data-en="Clock size:">Größe der Uhr:</span> <b id="settingsSaverClockScaleValue">100</b> %</span>
+                <input id="settingsSaverClockScale" type="range" min="40" max="300" step="10" />
+              </label>
+              <div class="grid-2">
+                <label><span data-en="Date position">Datum</span>
+                  <select id="settingsSaverDatePos">
+                    <option value="above" data-en="Above the clock">Über der Uhr</option>
+                    <option value="below" data-en="Below the clock">Unter der Uhr</option>
+                  </select>
+                </label>
+                <label><span data-en="Date format">Datumsformat</span>
+                  <select id="settingsSaverDateFormat">
+                    <option value="DD.MM.YYYY">24.10.2026</option>
+                    <option value="MM/DD/YYYY">10/24/2026</option>
+                    <option value="YYYY-MM-DD">2026-10-24</option>
+                    <option value="DD.MM">24.10.</option>
+                    <option value="WD, DD.MM.YYYY">Sa, 24.10.2026</option>
+                    <option value="WD, DD.MM">Sa, 24.10.</option>
+                  </select>
+                </label>
+              </div>
+              <label class="row">
+                <input id="settingsSaverDrift" type="checkbox" />
+                <span data-en="Burn-in protection (moves the clock a few pixels every 3 minutes)">Einbrennschutz (Uhr wandert alle 3 Minuten ein paar Pixel)</span>
+              </label>
+              <div class="row">
+                <button id="saverLayoutResetBtn" class="btn small" type="button" data-en="Default position and size">Standardposition und -größe</button>
+              </div>
+              <div class="meta" data-en="Drag the clock in the preview; the date moves with it. Applied with “Apply now”.">Die Uhr in der Vorschau verschieben, das Datum wandert mit. Übernommen wird mit &bdquo;Apply now&ldquo;.</div>
+            </div>
+            <div class="saver-layout">
+              <div class="waste-settings-title" data-en="Cards">Karten</div>
+              <label class="row">
+                <input id="settingsSaverCards" type="checkbox" />
+                <span data-en="Show cards on the screensaver (remaining time, sport, now playing)">Karten auf dem Bildschirmschoner zeigen (Restlaufzeit, Sport, Now Playing)</span>
+              </label>
+              <label><span data-en="Home Assistant label">Home-Assistant-Label</span>
+                <input id="settingsCardsLabel" type="text" maxlength="47" placeholder="Panel" />
+              </label>
+              <div class="row">
+                <button id="cardsDemoBtn" class="btn small" type="button" data-en="Preview with demo cards">Vorschau mit Demo-Karten</button>
+                <button id="cardsRefreshBtn" class="btn small" type="button" data-en="Reload entities">Entitäten neu laden</button>
+              </div>
+              <div id="cardsStatus" class="meta"></div>
+              <div class="meta" data-en="Give the entities the label in HA. Remaining time: sensors of one device (end time, remaining minutes, progress in %). Sport: Team Tracker sensors. Now playing: media players.">Den Entitäten in HA das Label geben. Restlaufzeit: Sensoren eines Geräts (Endzeit, Restminuten, Fortschritt in %). Sport: Team-Tracker-Sensoren. Now Playing: Media-Player.</div>
             </div>
             <hr />
             <label class="row">
@@ -1635,6 +1661,55 @@
               <input id="importFile" type="file" accept="application/json" />
             </div>
             <textarea id="jsonPaste" placeholder="Paste layout JSON here"></textarea>
+          </section>
+          <section id="pageLookOptions" class="panel-section page-look-options hidden">
+            <h2 id="pageLookHeading">Page look</h2>
+            <div class="meta" id="pageLookHint">Background of the whole page: solid color, gradient or the panel wallpaper.</div>
+            <label><span id="fPagePresetLabel">Preset</span>
+              <select id="fPagePreset">
+                <option value="auto">Theme default</option>
+                <option value="midnight">Midnight</option>
+                <option value="deep_sea">Deep sea</option>
+                <option value="forest">Forest</option>
+                <option value="sunset">Sunset</option>
+                <option value="plum">Plum</option>
+                <option value="wallpaper">Wallpaper</option>
+                <option value="wallpaper_dim">Wallpaper dimmed</option>
+              </select>
+            </label>
+            <label class="tile-color-row"><span id="fPageBgColorLabel">Background color</span>
+              <span class="tile-color-inputs">
+                <input id="fPageBgColor" type="text" placeholder="#RRGGBB (panel)" maxlength="7" />
+                <input id="fPageBgColorPick" type="color" value="#10202e" />
+              </span>
+            </label>
+            <label class="tile-color-row"><span id="fPageBgGradColorLabel">Gradient end color</span>
+              <span class="tile-color-inputs">
+                <input id="fPageBgGradColor" type="text" placeholder="#RRGGBB (none)" maxlength="7" />
+                <input id="fPageBgGradColorPick" type="color" value="#1b3a5c" />
+              </span>
+            </label>
+            <label><span id="fPageBgGradDirLabel">Gradient direction</span>
+              <select id="fPageBgGradDir">
+                <option value="none">None</option>
+                <option value="ver">Vertical</option>
+                <option value="hor">Horizontal</option>
+              </select>
+            </label>
+            <label class="row">
+              <input id="fPageWallpaper" type="checkbox" />
+              <span id="fPageWallpaperLabel">Use panel wallpaper</span>
+            </label>
+            <label><span id="fPageDimLabel">Wallpaper dimming (%)</span>
+              <input id="fPageDim" type="number" min="0" max="90" step="5" placeholder="0" />
+            </label>
+            <label><span id="fPageThemeLabel">Theme override for this page</span>
+              <select id="fPageTheme">
+                <option value="">Follow the global / day-night theme</option>
+              </select>
+            </label>
+            <div id="fPageThemeHint" class="meta">The page is repainted with the selected theme as soon as it is shown.</div>
+            <button id="pageLookResetBtn" class="btn small" type="button">Reset page look</button>
           </section>
         </aside>
       </div>

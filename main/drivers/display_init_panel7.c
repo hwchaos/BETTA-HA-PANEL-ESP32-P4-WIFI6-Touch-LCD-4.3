@@ -189,12 +189,76 @@ static void display_note_render_pass(uint32_t ms, uint32_t dirty_pct, bool full)
     s_render_note_pending = true;
 }
 
+static int64_t s_flush_start_us;
+/* Last invalidated areas (diagnostics: who keeps repainting what). */
+#define DISPLAY_INV_LOG 96
+static lv_area_t s_inv_log[DISPLAY_INV_LOG];
+static uint32_t s_inv_log_n;
+static lv_area_t s_flush_log[DISPLAY_INV_LOG];
+static uint32_t s_flush_log_n;
+
+size_t display_recent_flushes(lv_area_t *out, size_t max)
+{
+    size_t n = s_flush_log_n < DISPLAY_INV_LOG ? s_flush_log_n : DISPLAY_INV_LOG;
+    if (n > max) {
+        n = max;
+    }
+    for (size_t i = 0; i < n; i++) {
+        out[i] = s_flush_log[(s_flush_log_n - 1 - i) % DISPLAY_INV_LOG];
+    }
+    return n;
+}
+
+size_t display_recent_invalidations(lv_area_t *out, size_t max)
+{
+    size_t n = s_inv_log_n < DISPLAY_INV_LOG ? s_inv_log_n : DISPLAY_INV_LOG;
+    if (n > max) {
+        n = max;
+    }
+    for (size_t i = 0; i < n; i++) {
+        out[i] = s_inv_log[(s_inv_log_n - 1 - i) % DISPLAY_INV_LOG];
+    }
+    return n;
+}
+static int64_t s_flush_wait_start_us;
+
 static void display_render_event_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
 
+    /* Split of a pass: flush_cb (rotation + hand-off to the panel) and the
+     * wait for the previous flush; the rest is LVGL drawing. */
+    if (code == LV_EVENT_FLUSH_START) {
+        s_flush_start_us = esp_timer_get_time();
+        const lv_area_t *a = (const lv_area_t *)lv_event_get_param(e);
+        if (a != NULL) {
+            s_render_stats.flush_px += (uint64_t)lv_area_get_size(a);
+            s_flush_log[s_flush_log_n % DISPLAY_INV_LOG] = *a;
+            s_flush_log_n++;
+        }
+        s_render_stats.flushes++;
+        return;
+    }
+    if (code == LV_EVENT_FLUSH_FINISH) {
+        s_render_stats.flush_us += (uint64_t)(esp_timer_get_time() - s_flush_start_us);
+        return;
+    }
+    if (code == LV_EVENT_FLUSH_WAIT_START) {
+        s_flush_wait_start_us = esp_timer_get_time();
+        return;
+    }
+    if (code == LV_EVENT_FLUSH_WAIT_FINISH) {
+        s_render_stats.flush_wait_us += (uint64_t)(esp_timer_get_time() - s_flush_wait_start_us);
+        return;
+    }
+
     if (code == LV_EVENT_INVALIDATE_AREA) {
-        display_dirty_mark((const lv_area_t *)lv_event_get_param(e));
+        const lv_area_t *a = (const lv_area_t *)lv_event_get_param(e);
+        if (a != NULL) {
+            s_inv_log[s_inv_log_n % DISPLAY_INV_LOG] = *a;
+            s_inv_log_n++;
+        }
+        display_dirty_mark(a);
         return;
     }
 
@@ -1146,6 +1210,10 @@ esp_err_t display_init(void)
         lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
         lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_RENDER_START, NULL);
         lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_RENDER_READY, NULL);
+        lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_FLUSH_START, NULL);
+        lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_FLUSH_FINISH, NULL);
+        lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_FLUSH_WAIT_START, NULL);
+        lv_display_add_event_cb(s_lv_display, display_render_event_cb, LV_EVENT_FLUSH_WAIT_FINISH, NULL);
         lvgl_port_unlock();
     } else {
         ESP_LOGW(TAG_DISPLAY, "Could not lock LVGL for rotation setup");
