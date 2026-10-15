@@ -16,6 +16,7 @@
 #define RUNTIME_MOTION_MAX_ZONES 4
 
 #define RUNTIME_ASSIST_PIPELINE_ID_MAX_LEN 64
+#define RUNTIME_WAKE_MODEL_MAX_LEN 32
 
 /* Waste collection chips in the top bar. */
 #define RUNTIME_WASTE_SLOTS 4
@@ -168,6 +169,8 @@ typedef struct {
     bool assist_reply_audio;  /* speak the answer (TTS) through the speaker */
     int assist_mic_gain;      /* microphone gain in dB, 0..42 */
     int assist_max_listen_sec; /* hard stop of a recording, 3..30 s */
+    bool assist_wake_enabled;  /* listen for the wake word (on-device) */
+    char assist_wake_model[RUNTIME_WAKE_MODEL_MAX_LEN]; /* model id, e.g. "okay_nabu" */
 
     /* HLK-LD2410 presence radar on UART1. */
     bool radar_enabled;

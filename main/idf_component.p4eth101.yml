@@ -35,9 +35,17 @@ dependencies:
     version: "2.4.1"
   78/esp-opus:
     version: "1.0.5"
+  # On-device wake word (microWakeWord models).
+  espressif/esp-tflite-micro:
+    version: "1.4.1"
+  # Audio feature frontend the microWakeWord models are trained with.
+  esphome/esp-micro-speech-features:
+    version: "1.2.3"
   # Pulled in by the components above; pinned so a fresh build matches.
   espressif/esp_codec_dev:
     version: "1.5.11"
+  espressif/esp-nn:
+    version: "1.4.1"
   espressif/i2c_bus:
     version: "1.5.2"
   waveshare/esp_lcd_dsi:

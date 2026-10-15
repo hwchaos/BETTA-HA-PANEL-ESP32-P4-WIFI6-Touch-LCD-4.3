@@ -33,6 +33,7 @@ idf_component_register(
         "api/api_layout.c"
         "api/api_energy.c"
         "api/api_entities.c"
+        "api/api_wakeword.c"
         "api/api_state.c"
         "api/api_settings.c"
         "api/api_sd.c"
@@ -135,9 +136,11 @@ idf_component_register(
         "camera/camera_store.c"
         "util/json_util.c"
         "util/ringbuf.c"
+        "util/svg_map.c"
         "radio/panel_radio.c"
         "audio/panel_audio.c"
         "assist/panel_assist.c"
+        "assist/panel_wake.cc"
         "ui/ui_assist.c"
         "ui/ui_notify.c"
         "ui/ui_geometry.c"
@@ -178,6 +181,8 @@ idf_component_register(
         esp_websocket_client
         esp_http_client
         esp_http_server
+        espressif__esp-tflite-micro
+        esphome__esp-micro-speech-features
         mqtt
         esp_rom
         esp_timer
@@ -228,6 +233,9 @@ endif()
 
 # Full Material Design Icons webfont for ui_mdi_icon.c (any "mdi:..." icon,
 # rendered at runtime by LVGL's Tiny TTF engine).
+# Built-in wake word model (assist/panel_wake.cc).
+target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/assist/models/okay_nabu.tflite" BINARY)
+
 if(CONFIG_LV_USE_TINY_TTF)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/ui/fonts/materialdesignicons-webfont.ttf" BINARY)
     # Text font for full-screen messages (ui_notify.c), rendered at any size.

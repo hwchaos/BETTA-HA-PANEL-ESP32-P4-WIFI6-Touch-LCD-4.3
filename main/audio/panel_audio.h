@@ -60,6 +60,14 @@ esp_err_t panel_audio_test_beep(void);
 // Open the microphone capture device (lazy; call when a session starts).
 esp_err_t panel_audio_open_mic(void);
 
+// Open the microphone for the wake word listener without stopping a radio
+// stream: fails (ESP_ERR_INVALID_STATE) while the speaker is taken. The
+// listener must close it again once panel_audio_output_wanted() turns true.
+esp_err_t panel_audio_open_mic_shared(void);
+
+// True while someone waits for a shared microphone to be closed.
+bool panel_audio_output_wanted(void);
+
 // Close the microphone capture device (call when a session ends).
 esp_err_t panel_audio_close_mic(void);
 

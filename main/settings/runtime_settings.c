@@ -418,6 +418,8 @@ cJSON *runtime_settings_public_json(const runtime_settings_t *settings)
         cJSON_AddBoolToObject(assist, "reply_audio", settings->assist_reply_audio);
         cJSON_AddNumberToObject(assist, "mic_gain", settings->assist_mic_gain);
         cJSON_AddNumberToObject(assist, "max_listen_sec", settings->assist_max_listen_sec);
+        cJSON_AddBoolToObject(assist, "wake_word", settings->assist_wake_enabled);
+        cJSON_AddStringToObject(assist, "wake_model", settings->assist_wake_model);
         cJSON_AddItemToObject(root, "assist", assist);
     }
 
@@ -1043,6 +1045,8 @@ static esp_err_t parse_settings_json(
         json_copy_bool(assist, "reply_audio", &out->assist_reply_audio);
         json_copy_int(assist, "mic_gain", &out->assist_mic_gain, 0, 42);
         json_copy_int(assist, "max_listen_sec", &out->assist_max_listen_sec, 3, 30);
+        json_copy_bool(assist, "wake_word", &out->assist_wake_enabled);
+        json_copy_string(assist, "wake_model", out->assist_wake_model, sizeof(out->assist_wake_model));
     }
 
     if (cJSON_IsObject(camera)) {
@@ -1369,6 +1373,8 @@ void runtime_settings_set_defaults(runtime_settings_t *out)
     out->assist_reply_audio = true;
     out->assist_mic_gain = 30;
     out->assist_max_listen_sec = 10;
+    out->assist_wake_enabled = false;
+    snprintf(out->assist_wake_model, sizeof(out->assist_wake_model), "okay_nabu");
 
     out->radar_enabled = false;
 #if CONFIG_APP_PANEL_BOARD_WAVESHARE_P4ETH101

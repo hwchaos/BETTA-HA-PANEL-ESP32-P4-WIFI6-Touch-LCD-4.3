@@ -10,89 +10,191 @@
 #include "ui/theme/theme_default.h"
 #include "ui/ui_i18n.h"
 #include "ui/ui_mdi_icon.h"
-#include "ui/ui_screen_saver.h"
+#include "drivers/display_init.h"
 #include "ui/ui_geometry.h"
 
 /* A press shorter than this is a tap: listening then continues until Home
  * Assistant detects the end of the sentence. Longer = push-to-talk. */
 #define ASSIST_TAP_MS 600
-#define ASSIST_BUBBLE_MIN_MS 6000
-#define ASSIST_BUBBLE_MS_PER_CHAR 70
-#define ASSIST_BUBBLE_GAP 10
+#define ASSIST_SHOW_MIN_MS 6000
+#define ASSIST_SHOW_MS_PER_CHAR 70
+#define ASSIST_PULSE_MS 1400
+/* Fixed colours: the overlay is always dark, whatever the theme. */
+#define ASSIST_COLOR_LISTEN 0x3B82F6
+#define ASSIST_COLOR_WORK 0x334155
+#define ASSIST_COLOR_DONE 0x22C55E
+#define ASSIST_COLOR_ERROR 0xEF4444
+#define ASSIST_COLOR_TEXT 0xF1F5F9
+#define ASSIST_COLOR_MUTED 0x94A3B8
 
+/* Full-screen voice overlay: a dimmed backdrop with a microphone disc in the
+ * middle (pulsing while listening, a spinner while Home Assistant works),
+ * the recognised sentence and the answer below. A tap ends the recording,
+ * aborts the request or closes the answer. */
 static lv_obj_t *s_chip;
-static lv_obj_t *s_bubble;
-static lv_obj_t *s_bubble_status;
-static lv_obj_t *s_bubble_text;
+static lv_obj_t *s_overlay;
+static lv_obj_t *s_ring;
+static lv_obj_t *s_disc;
+static lv_obj_t *s_icon;
+static lv_obj_t *s_spinner;
+static lv_obj_t *s_status;
+static lv_obj_t *s_text;
+static lv_obj_t *s_hint;
 static lv_timer_t *s_timer;
 static uint32_t s_seen_seq;
 static int64_t s_press_ms;
 static int64_t s_hide_at_ms;
 static panel_assist_state_t s_shown_state;
+static int32_t s_orb;
 
 static int64_t assist_now_ms(void)
 {
     return esp_timer_get_time() / 1000;
 }
 
-static void assist_bubble_hide(void)
+static void assist_pulse_cb(void *obj, int32_t v)
 {
-    if (s_bubble != NULL) {
-        lv_obj_add_flag(s_bubble, LV_OBJ_FLAG_HIDDEN);
+    const int32_t size = s_orb + (s_orb * 6 / 10) * v / 1000;
+    lv_obj_set_size(obj, size, size);
+    lv_obj_set_style_bg_opa(obj, (lv_opa_t)(120 * (1000 - v) / 1000), LV_PART_MAIN);
+}
+
+static void assist_pulse(bool on)
+{
+    if (s_ring == NULL) {
+        return;
+    }
+    lv_anim_delete(s_ring, assist_pulse_cb);
+    if (!on) {
+        lv_obj_add_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_remove_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_ring);
+    lv_anim_set_exec_cb(&a, assist_pulse_cb);
+    lv_anim_set_values(&a, 0, 1000);
+    lv_anim_set_duration(&a, ASSIST_PULSE_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+}
+
+static void assist_overlay_hide(void)
+{
+    if (s_overlay != NULL) {
+        assist_pulse(false);
+        lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
     }
     s_hide_at_ms = 0;
 }
 
-static void assist_bubble_click_cb(lv_event_t *event)
+static void assist_overlay_click_cb(lv_event_t *event)
 {
     LV_UNUSED(event);
-    panel_assist_cancel();
-    assist_bubble_hide();
-}
-
-static void assist_bubble_create(void)
-{
-    if (s_bubble != NULL) {
+    panel_assist_status_t st;
+    panel_assist_get_status(&st);
+    if (panel_assist_is_busy() && st.state == PANEL_ASSIST_LISTENING) {
+        panel_assist_stop_listening(); /* done talking */
         return;
     }
-    /* Above the bottom bar, or centred over the content box with a left bar. */
-    const lv_coord_t bottom = APP_SCREEN_HEIGHT - (APP_CONTENT_BOX_Y + APP_CONTENT_BOX_HEIGHT);
-    const lv_coord_t shift_x = ui_geometry_nav_left() ? (APP_CONTENT_BOX_X / 2) : 0;
+    panel_assist_cancel();
+    assist_overlay_hide();
+}
 
-    s_bubble = lv_obj_create(lv_layer_top());
-    lv_obj_remove_style_all(s_bubble);
-    lv_obj_set_width(s_bubble, (APP_CONTENT_BOX_WIDTH * 4) / 5);
-    lv_obj_set_height(s_bubble, LV_SIZE_CONTENT);
-    lv_obj_align(s_bubble, LV_ALIGN_BOTTOM_MID, shift_x, -(bottom + ASSIST_BUBBLE_GAP));
-    lv_obj_set_style_bg_color(s_bubble, lv_color_hex(APP_UI_COLOR_CARD_BG_OFF), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_bubble, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_bubble, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_bubble, lv_color_hex(APP_UI_COLOR_STATE_ON), LV_PART_MAIN);
-    lv_obj_set_style_radius(s_bubble, 18, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(s_bubble, 18, LV_PART_MAIN);
-    lv_obj_set_style_pad_ver(s_bubble, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(s_bubble, 4, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(s_bubble, 24, LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(s_bubble, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_set_style_shadow_color(s_bubble, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_flex_flow(s_bubble, LV_FLEX_FLOW_COLUMN);
-    lv_obj_clear_flag(s_bubble, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_bubble, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(s_bubble, assist_bubble_click_cb, LV_EVENT_CLICKED, NULL);
+static lv_obj_t *assist_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_width(label, LV_PCT(84));
+    lv_obj_set_style_text_font(label, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    return label;
+}
 
-    s_bubble_status = lv_label_create(s_bubble);
-    lv_obj_set_width(s_bubble_status, LV_PCT(100));
-    lv_obj_set_style_text_font(s_bubble_status, APP_FONT_TEXT_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_bubble_status, lv_color_hex(APP_UI_COLOR_TEXT_MUTED), LV_PART_MAIN);
-    lv_label_set_long_mode(s_bubble_status, LV_LABEL_LONG_DOT);
+static void assist_overlay_create(void)
+{
+    if (s_overlay != NULL) {
+        return;
+    }
+    s_orb = LV_MIN(APP_SCREEN_WIDTH, APP_SCREEN_HEIGHT) / 4;
 
-    s_bubble_text = lv_label_create(s_bubble);
-    lv_obj_set_width(s_bubble_text, LV_PCT(100));
-    lv_obj_set_style_text_font(s_bubble_text, APP_FONT_TEXT_20, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_bubble_text, lv_color_hex(APP_UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
-    lv_label_set_long_mode(s_bubble_text, LV_LABEL_LONG_WRAP);
+    s_overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_overlay);
+    lv_obj_set_size(s_overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_overlay, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_overlay, LV_OPA_90, LV_PART_MAIN);
+    lv_obj_set_flex_flow(s_overlay, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(s_overlay, s_orb / 8, LV_PART_MAIN);
+    lv_obj_set_scrollable(s_overlay, false);
+    lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_overlay, assist_overlay_click_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_add_flag(s_bubble, LV_OBJ_FLAG_HIDDEN);
+    /* the disc with its pulse ring and spinner, in a box that fits the ring */
+    const int32_t box_size = s_orb * 16 / 10;
+    lv_obj_t *box = lv_obj_create(s_overlay);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, box_size, box_size);
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(box, false);
+
+    s_ring = lv_obj_create(box);
+    lv_obj_remove_style_all(s_ring);
+    lv_obj_set_size(s_ring, s_orb, s_orb);
+    lv_obj_set_style_radius(s_ring, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_center(s_ring);
+    lv_obj_remove_flag(s_ring, LV_OBJ_FLAG_CLICKABLE);
+
+    s_spinner = lv_spinner_create(box);
+    lv_obj_set_size(s_spinner, s_orb + s_orb / 5, s_orb + s_orb / 5);
+    lv_obj_center(s_spinner);
+    lv_obj_set_style_arc_width(s_spinner, LV_MAX(3, s_orb / 30), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_spinner, LV_MAX(3, s_orb / 30), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(s_spinner, LV_OPA_20, LV_PART_MAIN);
+    lv_obj_remove_flag(s_spinner, LV_OBJ_FLAG_CLICKABLE);
+
+    s_disc = lv_obj_create(box);
+    lv_obj_remove_style_all(s_disc);
+    lv_obj_set_size(s_disc, s_orb, s_orb);
+    lv_obj_set_style_radius(s_disc, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_disc, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_center(s_disc);
+    lv_obj_remove_flag(s_disc, LV_OBJ_FLAG_CLICKABLE);
+
+    s_icon = lv_label_create(s_disc);
+    lv_label_set_text(s_icon, "");
+    lv_obj_set_style_text_color(s_icon, lv_color_white(), LV_PART_MAIN);
+    lv_obj_center(s_icon);
+
+    s_status = assist_label(s_overlay, APP_FONT_TEXT_24, ASSIST_COLOR_MUTED);
+    s_text = assist_label(s_overlay, APP_FONT_TEXT_28, ASSIST_COLOR_TEXT);
+    lv_obj_set_style_max_height(s_text, APP_SCREEN_HEIGHT * 2 / 5, LV_PART_MAIN);
+    s_hint = assist_label(s_overlay, APP_FONT_TEXT_18, ASSIST_COLOR_MUTED);
+    lv_obj_set_style_text_opa(s_hint, LV_OPA_70, LV_PART_MAIN);
+
+    lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void assist_overlay_icon(const char *name, const char *fallback)
+{
+    if (!ui_mdi_icon_apply(s_icon, name, s_orb / 2)) {
+        lv_label_set_text(s_icon, fallback);
+        lv_obj_set_style_text_font(s_icon, &lv_font_montserrat_28, LV_PART_MAIN);
+    }
+    lv_obj_center(s_icon);
+}
+
+static void assist_set_label(lv_obj_t *label, const char *text)
+{
+    lv_label_set_text(label, text);
+    if (text[0] == '\0') {
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static const char *assist_error_text(const char *code)
@@ -142,62 +244,90 @@ static void assist_refresh(void)
         return;
     }
     s_seen_seq = st.seq;
+    /* Counts as activity like a touch: ends the screensaver (or wakes the
+     * dark panel) for a session the wake word started, and keeps the
+     * display on while the answer is shown. */
+    if (st.state != PANEL_ASSIST_IDLE && st.state != s_shown_state) {
+        display_note_activity_from("assist");
+    }
+    const panel_assist_state_t prev = s_shown_state;
     s_shown_state = st.state;
     assist_chip_tint(st.state);
 
     if (st.state == PANEL_ASSIST_IDLE) {
-        assist_bubble_hide();
+        assist_overlay_hide();
         return;
     }
-    assist_bubble_create();
-    lv_obj_clear_flag(s_bubble, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_bubble);
+    assist_overlay_create();
+    lv_obj_remove_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_overlay);
     s_hide_at_ms = 0;
 
-    uint32_t border = APP_UI_COLOR_STATE_ON;
+    uint32_t color = ASSIST_COLOR_LISTEN;
+    const char *icon = "microphone";
+    const char *fallback = LV_SYMBOL_AUDIO;
     const char *status = "";
     const char *text = "";
+    const char *hint = "";
+    bool spin = false;
     char quoted[192];
     switch (st.state) {
     case PANEL_ASSIST_LISTENING:
-        border = APP_UI_COLOR_ERROR;
         status = ui_i18n_get("assist.listening", "Listening...");
-        text = "";
+        hint = ui_i18n_get("assist.hint_listening", "Tap when you are done");
         break;
     case PANEL_ASSIST_PROCESSING:
+        color = ASSIST_COLOR_WORK;
+        spin = true;
         status = ui_i18n_get("assist.processing", "One moment...");
         if (st.heard[0] != '\0') {
             snprintf(quoted, sizeof(quoted), "\"%s\"", st.heard);
             text = quoted;
         }
+        hint = ui_i18n_get("assist.hint_cancel", "Tap to cancel");
         break;
     case PANEL_ASSIST_DONE:
+        color = ASSIST_COLOR_DONE;
+        icon = "check";
+        fallback = LV_SYMBOL_OK;
         if (st.heard[0] != '\0') {
             snprintf(quoted, sizeof(quoted), "\"%s\"", st.heard);
             status = quoted;
         }
         text = (st.reply[0] != '\0') ? st.reply : ui_i18n_get("assist.done", "Done");
-        s_hide_at_ms = assist_now_ms() + ASSIST_BUBBLE_MIN_MS + (int64_t)strlen(text) * ASSIST_BUBBLE_MS_PER_CHAR;
+        hint = ui_i18n_get("assist.hint_close", "Tap to close");
+        s_hide_at_ms = assist_now_ms() + ASSIST_SHOW_MIN_MS + (int64_t)strlen(text) * ASSIST_SHOW_MS_PER_CHAR;
         break;
     case PANEL_ASSIST_ERROR:
     default:
-        border = APP_UI_COLOR_ERROR;
+        color = ASSIST_COLOR_ERROR;
+        icon = "alert-circle-outline";
+        fallback = LV_SYMBOL_WARNING;
         if (st.heard[0] != '\0') {
             snprintf(quoted, sizeof(quoted), "\"%s\"", st.heard);
             status = quoted;
         }
         text = assist_error_text(st.error);
-        s_hide_at_ms = assist_now_ms() + ASSIST_BUBBLE_MIN_MS;
+        hint = ui_i18n_get("assist.hint_close", "Tap to close");
+        s_hide_at_ms = assist_now_ms() + ASSIST_SHOW_MIN_MS;
         break;
     }
-    lv_obj_set_style_border_color(s_bubble, lv_color_hex(border), LV_PART_MAIN);
-    lv_label_set_text(s_bubble_status, status);
-    lv_label_set_text(s_bubble_text, text);
-    if (text[0] == '\0') {
-        lv_obj_add_flag(s_bubble_text, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_clear_flag(s_bubble_text, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(s_disc, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_ring, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_spinner, lv_color_hex(ASSIST_COLOR_LISTEN), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_spinner, lv_color_hex(ASSIST_COLOR_MUTED), LV_PART_MAIN);
+    if (st.state != prev || lv_label_get_text(s_icon)[0] == '\0') {
+        assist_overlay_icon(icon, fallback);
     }
+    if (spin) {
+        lv_obj_remove_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_spinner, LV_OBJ_FLAG_HIDDEN);
+    }
+    assist_pulse(st.state == PANEL_ASSIST_LISTENING);
+    assist_set_label(s_status, status);
+    assist_set_label(s_text, text);
+    assist_set_label(s_hint, hint);
 }
 
 static void assist_timer_cb(lv_timer_t *timer)
@@ -205,7 +335,7 @@ static void assist_timer_cb(lv_timer_t *timer)
     LV_UNUSED(timer);
     assist_refresh();
     if (s_hide_at_ms != 0 && assist_now_ms() >= s_hide_at_ms && !panel_assist_is_busy()) {
-        assist_bubble_hide();
+        assist_overlay_hide();
     }
 }
 
@@ -213,7 +343,6 @@ static void assist_chip_event_cb(lv_event_t *event)
 {
     const lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_PRESSED) {
-        ui_screen_saver_wake();
         panel_assist_status_t st;
         panel_assist_get_status(&st);
         if (panel_assist_is_busy()) {
@@ -251,7 +380,7 @@ void ui_assist_attach_chip(lv_obj_t *chip)
     lv_obj_add_event_cb(chip, assist_chip_event_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(chip, assist_chip_event_cb, LV_EVENT_PRESS_LOST, NULL);
     s_shown_state = PANEL_ASSIST_IDLE;
-    /* The bubble lives on the top layer and survives page rebuilds. */
+    /* The overlay lives on the top layer and survives page rebuilds. */
     if (s_timer == NULL) {
         s_timer = lv_timer_create(assist_timer_cb, 100, NULL);
     }

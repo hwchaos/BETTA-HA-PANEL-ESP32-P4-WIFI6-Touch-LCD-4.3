@@ -90,6 +90,7 @@ static int64_t s_wifi_last_connect_ms = 0;
 static int64_t s_wifi_last_session_ms = 0;
 
 static esp_err_t wifi_mgr_force_reconnect_internal(bool allow_transport_escalation);
+static void wifi_mgr_apply_protocols(void);
 
 static void wifi_mgr_reset_reconnect_state(void)
 {
@@ -528,6 +529,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         }
         ESP_LOGI(TAG_WIFI, "Wi-Fi connected, IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        /* What the link runs on, for telling AP / standard issues apart. */
+        wifi_ap_record_t ap = {0};
+        uint8_t protocol = 0;
+        const esp_err_t ap_err = esp_wifi_sta_get_ap_info(&ap);
+        if (ap_err != ESP_OK) {
+            ESP_LOGW(TAG_WIFI, "link: AP info unavailable (%s)", esp_err_to_name(ap_err));
+        } else {
+            (void)esp_wifi_get_protocol(WIFI_IF_STA, &protocol);
+            ESP_LOGW(TAG_WIFI, "link: ch %u%s rssi %d, AP offers b%d g%d n%d ax%d, STA protocols 0x%02x",
+                (unsigned)ap.primary, ap.second == WIFI_SECOND_CHAN_NONE ? "" : " (40 MHz)", (int)ap.rssi,
+                ap.phy_11b, ap.phy_11g, ap.phy_11n, ap.phy_11ax, (unsigned)protocol);
+        }
     }
 }
 
@@ -1060,6 +1073,7 @@ esp_err_t wifi_mgr_init(const wifi_mgr_config_t *cfg)
     s_cached_sta_cfg_valid = true;
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG_WIFI, "esp_wifi_set_mode");
+    wifi_mgr_apply_protocols();
     wifi_mgr_set_setup_ap_state(false, NULL);
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg), TAG_WIFI, "esp_wifi_set_config");
     err = esp_wifi_start();
@@ -1093,6 +1107,25 @@ esp_err_t wifi_mgr_init(const wifi_mgr_config_t *cfg)
     }
 
     return ESP_OK;
+}
+
+/* 802.11ax stays on: load tests showed the same losses with b/g/n on the
+ * same channel, so the protocol is not the cause. Set explicitly because
+ * the C6 keeps the last choice across resets. 1 = b/g/n only. */
+#ifndef APP_WIFI_STA_NO_11AX
+#define APP_WIFI_STA_NO_11AX 0
+#endif
+
+static void wifi_mgr_apply_protocols(void)
+{
+    uint8_t protocols = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
+#if !APP_WIFI_STA_NO_11AX
+    protocols |= WIFI_PROTOCOL_11AX;
+#endif
+    const esp_err_t err = esp_wifi_set_protocol(WIFI_IF_STA, protocols);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG_WIFI, "esp_wifi_set_protocol(0x%02x) failed: %s", protocols, esp_err_to_name(err));
+    }
 }
 
 bool wifi_mgr_is_connected(void)
@@ -1143,6 +1176,17 @@ static esp_err_t wifi_mgr_force_hosted_hard_recover(void)
         return hosted_err;
     }
 
+    /* The reset C6 has lost its Wi-Fi driver state: without a fresh
+     * esp_wifi_init() every following call fails with ESP_ERR_WIFI_NOT_INIT
+     * and only a reboot of the panel brought the link back. */
+    (void)esp_wifi_deinit();
+    wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_err_t init_err = esp_wifi_init(&wifi_init_cfg);
+    if (init_err != ESP_OK && init_err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG_WIFI, "esp_wifi_init failed during hard recover: %s", esp_err_to_name(init_err));
+        return init_err;
+    }
+
     wifi_mode_t restore_mode = s_setup_ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA;
 
     esp_err_t mode_err = esp_wifi_set_mode(restore_mode);
@@ -1150,6 +1194,7 @@ static esp_err_t wifi_mgr_force_hosted_hard_recover(void)
         ESP_LOGE(TAG_WIFI, "esp_wifi_set_mode failed during hard recover: %s", esp_err_to_name(mode_err));
         return mode_err;
     }
+    wifi_mgr_apply_protocols();
 
     if (s_cached_sta_cfg_valid) {
         esp_err_t cfg_err = esp_wifi_set_config(WIFI_IF_STA, &s_cached_sta_cfg);
@@ -1415,6 +1460,10 @@ esp_err_t wifi_mgr_get_sta_ap_info(wifi_mgr_sta_ap_info_t *out_info)
     out_info->authmode = (uint8_t)ap_info.authmode;
     out_info->channel = ap_info.primary;
     memcpy(out_info->bssid, ap_info.bssid, sizeof(out_info->bssid));
+    out_info->ht40 = ap_info.second != WIFI_SECOND_CHAN_NONE;
+    out_info->ap_11n = ap_info.phy_11n;
+    out_info->ap_11ax = ap_info.phy_11ax;
+    (void)esp_wifi_get_protocol(WIFI_IF_STA, &out_info->protocols);
     return ESP_OK;
 #endif
 }

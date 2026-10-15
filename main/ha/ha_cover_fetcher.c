@@ -17,6 +17,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
+#include "util/svg_map.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -197,32 +198,39 @@ static bool cover_is_svg(const uint8_t *buf, size_t len)
     return (len - i >= 5 && memcmp(buf + i, "<?xml", 5) == 0) || (len - i >= 4 && memcmp(buf + i, "<svg", 4) == 0);
 }
 
-/* Hands the SVG text over as is; the consumer renders it at the size it
- * asked for (vector maps of robot mowers / vacuums). */
-static bool cover_pass_svg(const uint8_t *svg, size_t len, int target_w, int target_h, ha_cover_result_t *out)
+/* SVG is rasterised here, in the fetcher task, into an ARGB8888 bitmap of
+ * the requested size: drawing it through LVGL's SVG decoder blocked the UI
+ * for up to 12 s per map. Camera SVGs are maps (robot mowers / vacuums):
+ * zoomed onto the main shape, dark lines brightened for the dark tiles. */
+static bool cover_render_svg(const uint8_t *svg, size_t len, int target_w, int target_h, bool is_map,
+    ha_cover_result_t *out)
 {
-    /* LVGL's SVG decoder wants "<svg" / "<?xml" as the very first bytes. */
-    if (len >= 3 && svg[0] == 0xEF && svg[1] == 0xBB && svg[2] == 0xBF) {
-        svg += 3;
-        len -= 3;
-    }
-    while (len > 0 && (*svg == ' ' || *svg == '\t' || *svg == '\r' || *svg == '\n')) {
-        svg++;
-        len--;
-    }
-    uint8_t *copy = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (copy == NULL) {
+    char *text = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (text == NULL) {
         return false;
     }
-    memcpy(copy, svg, len);
-    copy[len] = 0;
+    memcpy(text, svg, len);
+    text[len] = '\0';
+    const int w = target_w > 0 ? target_w : 256;
+    const int h = target_h > 0 ? target_h : 256;
+    const svg_map_opts_t opts = {.zoom_main_shape = is_map, .min_value = is_map ? 0xB0 : 0};
+    const int64_t t0 = esp_timer_get_time();
+    uint8_t *px = svg_map_render(text, w, h, &opts);
+    heap_caps_free(text);
+    if (px == NULL) {
+        return false;
+    }
+    ESP_LOGI(TAG, "SVG rendered %dx%d in %d ms", w, h, (int)((esp_timer_get_time() - t0) / 1000));
     memset(out, 0, sizeof(*out));
     out->image.header.magic = LV_IMAGE_HEADER_MAGIC;
-    out->image.header.w = (uint32_t)(target_w > 0 ? target_w : 256);
-    out->image.header.h = (uint32_t)(target_h > 0 ? target_h : 256);
-    out->image.data_size = (uint32_t)len;
-    out->image.data = copy;
-    out->is_svg = true;
+    out->image.header.cf = LV_COLOR_FORMAT_ARGB8888;
+    out->image.header.w = (uint32_t)w;
+    out->image.header.h = (uint32_t)h;
+    out->image.header.stride = (uint32_t)w * 4;
+    out->image.data_size = (uint32_t)w * (uint32_t)h * 4;
+    out->image.data = px;
+    out->source_w = (uint32_t)w;
+    out->source_h = (uint32_t)h;
     out->valid = true;
     return true;
 }
@@ -2021,7 +2029,8 @@ static void cover_task(void *arg)
         }
         if (ok) {
             if (cover_is_svg(sink.buf, sink.len)) {
-                ok = cover_pass_svg(sink.buf, sink.len, req.target_w, req.target_h, &result);
+                ok = cover_render_svg(sink.buf, sink.len, req.target_w, req.target_h,
+                    strstr(req.url, "camera_proxy") != NULL, &result);
             } else if (cover_is_png(sink.buf, sink.len)) {
                 ok = cover_decode_png(sink.buf, sink.len, req.target_w, req.target_h, &result);
             } else {

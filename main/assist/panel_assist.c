@@ -15,6 +15,7 @@
 #include "ha/ha_client.h"
 #include "radio/panel_radio.h"
 #include "audio/panel_audio.h"
+#include "assist/panel_wake.h"
 
 static const char *TAG = "assist";
 
@@ -339,7 +340,7 @@ esp_err_t panel_assist_init(const runtime_settings_t *settings)
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "ready (%s)", s_cfg.enabled ? "enabled" : "disabled");
-    return ESP_OK;
+    return panel_wake_init(settings);
 }
 
 void panel_assist_apply_settings(const runtime_settings_t *settings)
@@ -348,6 +349,7 @@ void panel_assist_apply_settings(const runtime_settings_t *settings)
         return;
     }
     assist_copy_cfg(settings);
+    panel_wake_apply_settings(settings);
     if (!s_cfg.enabled) {
         panel_assist_cancel();
     }

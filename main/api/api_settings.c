@@ -482,6 +482,8 @@ esp_err_t api_settings_get_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(assist, "reply_audio", settings->assist_reply_audio);
         cJSON_AddNumberToObject(assist, "mic_gain", settings->assist_mic_gain);
         cJSON_AddNumberToObject(assist, "max_listen_sec", settings->assist_max_listen_sec);
+        cJSON_AddBoolToObject(assist, "wake_word", settings->assist_wake_enabled);
+        cJSON_AddStringToObject(assist, "wake_model", settings->assist_wake_model);
     }
 
     cJSON_AddBoolToObject(root, "ok", true);
@@ -1114,6 +1116,9 @@ esp_err_t api_settings_put_handler(httpd_req_t *req)
         (void)update_bool_setting(assist, "reply_audio", &settings->assist_reply_audio, &invalid_type);
         (void)update_int_setting(assist, "mic_gain", &settings->assist_mic_gain, 0, 42, &invalid_type);
         (void)update_int_setting(assist, "max_listen_sec", &settings->assist_max_listen_sec, 3, 30, &invalid_type);
+        (void)update_bool_setting(assist, "wake_word", &settings->assist_wake_enabled, &invalid_type);
+        (void)update_string_setting(assist, "wake_model", settings->assist_wake_model,
+            sizeof(settings->assist_wake_model), &invalid_type, &too_long);
     }
 
     if (cJSON_IsObject(camera)) {

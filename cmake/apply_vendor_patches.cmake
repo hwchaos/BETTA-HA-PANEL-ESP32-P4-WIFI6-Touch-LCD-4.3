@@ -37,7 +37,6 @@ endif()
 set(_VENDOR_PATCHES
     "patches/esp_hosted_2.11.7_sdio_streaming_rx_graceful.patch|managed_components/espressif__esp_hosted/host/drivers/transport/sdio/sdio_drv.c|KB-PATCH"
     "patches/esp_hosted_2.11.7_transport_tx_graceful.patch|managed_components/espressif__esp_hosted/host/drivers/transport/transport_drv.c|KB-PATCH"
-    "patches/lvgl_9.6.0_svg_decoder_format.patch|managed_components/lvgl__lvgl/src/image/svg/lv_svg_decoder.c|KB-PATCH"
 )
 
 find_program(_VENDOR_PATCH_GIT git)

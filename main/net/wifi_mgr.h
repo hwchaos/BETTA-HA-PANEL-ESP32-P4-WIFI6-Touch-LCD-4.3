@@ -48,6 +48,10 @@ typedef struct {
     uint8_t authmode;
     uint8_t channel;
     uint8_t bssid[6];
+    bool ht40;          /* 40 MHz channel */
+    bool ap_11n;        /* the AP offers 802.11n / ax */
+    bool ap_11ax;
+    uint8_t protocols;  /* WIFI_PROTOCOL_* bits enabled on the STA */
 } wifi_mgr_sta_ap_info_t;
 
 typedef struct {

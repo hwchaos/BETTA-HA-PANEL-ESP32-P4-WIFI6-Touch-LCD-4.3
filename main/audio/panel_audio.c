@@ -47,6 +47,10 @@ static esp_codec_dev_handle_t g_speaker = NULL;
 static esp_codec_dev_handle_t g_mic = NULL;
 static bool g_ready = false;
 static bool g_mic_open = false;
+/* Opened by the wake word listener: given up as soon as the speaker is
+ * wanted (g_output_wanted), instead of blocking the radio. */
+static volatile bool g_mic_shared = false;
+static volatile bool g_output_wanted = false;
 static bool g_busy  = false;
 static int  g_volume = AUDIO_VOLUME_DEFAULT;
 
@@ -59,6 +63,8 @@ static int  g_volume = AUDIO_VOLUME_DEFAULT;
 /* Hand-over window when the microphone takes the codec back from a running
  * radio stream: the stream sees the stop flag at its next read timeout. */
 #define AUDIO_OUTPUT_HANDOVER_MS 1500
+/* Time the wake word listener gets to close a shared microphone. */
+#define AUDIO_MIC_YIELD_MS 500
 
 static int16_t g_beep_buffer[AUDIO_SAMPLE_RATE * DURATION_MS / 1000];
 
@@ -263,6 +269,14 @@ esp_err_t panel_audio_acquire_output(uint32_t rate)
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* The wake word listener holds the mic only on loan: ask it to let go. */
+    if (g_mic_open && g_mic_shared) {
+        g_output_wanted = true;
+        for (int waited = 0; g_mic_open && waited < AUDIO_MIC_YIELD_MS; waited += 10) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
     panel_audio_lock();
     esp_err_t err;
     if (g_output_exclusive) {
@@ -278,6 +292,8 @@ esp_err_t panel_audio_acquire_output(uint32_t rate)
             ESP_LOGI(TAG, "output taken by the radio at %u Hz", (unsigned)rate);
         }
     }
+    /* kept up until the output is taken, so the listener cannot reopen */
+    g_output_wanted = false;
     panel_audio_unlock();
     return err;
 }
@@ -421,8 +437,34 @@ esp_err_t panel_audio_open_mic(void)
             ESP_LOGI(TAG, "Mic opened: stereo %d ch, %d Hz", PANEL_AUDIO_MIC_CHANNELS, AUDIO_SAMPLE_RATE);
         }
     }
+    g_mic_shared = false;
     panel_audio_unlock();
     return err;
+}
+
+esp_err_t panel_audio_open_mic_shared(void)
+{
+    panel_audio_lock();
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (!g_output_exclusive && !g_output_wanted && !g_mic_open) {
+        err = panel_audio_init_locked();
+        if (err == ESP_OK) {
+            esp_codec_dev_sample_info_t fs = panel_audio_mic_sample_info();
+            if (esp_codec_dev_open(g_mic, &fs) != ESP_CODEC_DEV_OK) {
+                err = ESP_FAIL;
+            } else {
+                g_mic_open = true;
+                g_mic_shared = true;
+            }
+        }
+    }
+    panel_audio_unlock();
+    return err;
+}
+
+bool panel_audio_output_wanted(void)
+{
+    return g_output_wanted;
 }
 
 esp_err_t panel_audio_close_mic(void)
@@ -432,6 +474,7 @@ esp_err_t panel_audio_close_mic(void)
     }
     esp_codec_dev_close(g_mic);
     g_mic_open = false;
+    g_mic_shared = false;
     return ESP_OK;
 }
 

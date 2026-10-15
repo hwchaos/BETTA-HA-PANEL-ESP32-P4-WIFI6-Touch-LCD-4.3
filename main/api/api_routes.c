@@ -131,6 +131,26 @@ static esp_err_t guarded_api_assist_pipelines_get(httpd_req_t *req)
     return http_guard_handle(req, api_assist_pipelines_get_handler);
 }
 
+static esp_err_t guarded_api_wakeword_get(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_wakeword_get_handler);
+}
+
+static esp_err_t guarded_api_wakeword_install_post(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_wakeword_install_post_handler);
+}
+
+static esp_err_t guarded_api_wakeword_model_delete(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_wakeword_model_delete_handler);
+}
+
+static esp_err_t guarded_api_wakeword_test_post(httpd_req_t *req)
+{
+    return http_guard_handle(req, api_wakeword_test_post_handler);
+}
+
 static esp_err_t guarded_api_radar_get(httpd_req_t *req)
 {
     return http_guard_handle(req, api_radar_get_handler);
@@ -461,6 +481,30 @@ esp_err_t api_routes_register(httpd_handle_t server)
         .handler = guarded_api_assist_pipelines_get,
         .user_ctx = NULL,
     };
+    httpd_uri_t get_wakeword = {
+        .uri = "/api/wakeword",
+        .method = HTTP_GET,
+        .handler = guarded_api_wakeword_get,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t post_wakeword_install = {
+        .uri = "/api/wakeword/install",
+        .method = HTTP_POST,
+        .handler = guarded_api_wakeword_install_post,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t delete_wakeword_model = {
+        .uri = "/api/wakeword/model",
+        .method = HTTP_DELETE,
+        .handler = guarded_api_wakeword_model_delete,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t post_wakeword_test = {
+        .uri = "/api/wakeword/test",
+        .method = HTTP_POST,
+        .handler = guarded_api_wakeword_test_post,
+        .user_ctx = NULL,
+    };
     httpd_uri_t get_light_entities = {
         .uri = "/api/ha/light_entities",
         .method = HTTP_GET,
@@ -782,6 +826,13 @@ esp_err_t api_routes_register(httpd_handle_t server)
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_mdi_icons), "api_routes", "GET /api/mdi/icons");
     ESP_RETURN_ON_ERROR(
         httpd_register_uri_handler(server, &get_assist_pipelines), "api_routes", "GET /api/assist/pipelines");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_wakeword), "api_routes", "GET /api/wakeword");
+    ESP_RETURN_ON_ERROR(
+        httpd_register_uri_handler(server, &post_wakeword_install), "api_routes", "POST /api/wakeword/install");
+    ESP_RETURN_ON_ERROR(
+        httpd_register_uri_handler(server, &delete_wakeword_model), "api_routes", "DELETE /api/wakeword/model");
+    ESP_RETURN_ON_ERROR(
+        httpd_register_uri_handler(server, &post_wakeword_test), "api_routes", "POST /api/wakeword/test");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_radar), "api_routes", "GET /api/radar");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_cards), "api_routes", "GET /api/cards");
     ESP_RETURN_ON_ERROR(

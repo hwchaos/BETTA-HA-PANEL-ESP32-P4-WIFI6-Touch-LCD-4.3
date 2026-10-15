@@ -150,6 +150,10 @@ static void add_wifi_section(cJSON *root)
         cJSON_AddNumberToObject(wifi, "rssi", ap_info.rssi);
         cJSON_AddNumberToObject(wifi, "channel", ap_info.channel);
         cJSON_AddNumberToObject(wifi, "authmode", ap_info.authmode);
+        cJSON_AddBoolToObject(wifi, "ht40", ap_info.ht40);
+        cJSON_AddBoolToObject(wifi, "ap_11n", ap_info.ap_11n);
+        cJSON_AddBoolToObject(wifi, "ap_11ax", ap_info.ap_11ax);
+        cJSON_AddNumberToObject(wifi, "sta_protocols", ap_info.protocols);
     }
 
     const char *setup_ssid = wifi_mgr_get_setup_ap_ssid();

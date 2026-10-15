@@ -21,6 +21,7 @@
 
 #include "app_config.h"
 #include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "ha/ha_cards.h"
 #include "ha/ha_client.h"
@@ -126,17 +127,43 @@ typedef struct {
     int64_t last_used;
 } card_img_t;
 
+/* The card tables live in PSRAM (about 40 KB): the internal RAM is what
+ * Wi-Fi and TLS run short of. Allocated on first use. */
 static lv_obj_t *s_row;
-static card_t s_cards[CARDS_MAX];
+static card_t *s_cards;     /* [CARDS_MAX] */
+static card_t *s_old_cards; /* [CARDS_MAX], previous pass */
 static int s_card_count;
-static card_view_t s_views[CARDS_MAX];
+static card_view_t *s_views; /* [CARDS_MAX] */
 static int s_view_count;
 static uint32_t s_seen_seq = UINT32_MAX;
 static bool s_was_visible;
 static int32_t s_last_top = -1;
 static int32_t s_last_bottom = -1;
-static card_img_t s_imgs[IMG_SLOTS];
+static card_img_t *s_imgs; /* [IMG_SLOTS] */
 static bool s_img_arrived;
+
+static bool cards_alloc(void)
+{
+    if (s_cards != NULL) {
+        return true;
+    }
+    card_t *cards = heap_caps_calloc(CARDS_MAX, sizeof(card_t), MALLOC_CAP_SPIRAM);
+    card_t *old = heap_caps_calloc(CARDS_MAX, sizeof(card_t), MALLOC_CAP_SPIRAM);
+    card_view_t *views = heap_caps_calloc(CARDS_MAX, sizeof(card_view_t), MALLOC_CAP_SPIRAM);
+    card_img_t *imgs = heap_caps_calloc(IMG_SLOTS, sizeof(card_img_t), MALLOC_CAP_SPIRAM);
+    if (cards == NULL || old == NULL || views == NULL || imgs == NULL) {
+        heap_caps_free(cards);
+        heap_caps_free(old);
+        heap_caps_free(views);
+        heap_caps_free(imgs);
+        return false;
+    }
+    s_old_cards = old;
+    s_views = views;
+    s_imgs = imgs;
+    s_cards = cards;
+    return true;
+}
 
 /* ------------------------------------------------------------------ data */
 
@@ -811,7 +838,7 @@ static void cards_views_clear(void)
     if (s_row != NULL) {
         lv_obj_clean(s_row);
     }
-    memset(s_views, 0, sizeof(s_views));
+    memset(s_views, 0, CARDS_MAX * sizeof(*s_views));
     s_view_count = 0;
 }
 
@@ -929,6 +956,9 @@ static void cards_place(int32_t clock_top, int32_t clock_bottom)
 
 void ui_saver_cards_attach(lv_obj_t *overlay)
 {
+    if (!cards_alloc()) {
+        return; /* no cards without their tables */
+    }
     s_row = lv_obj_create(overlay);
     lv_obj_remove_style_all(s_row);
     lv_obj_set_size(s_row, APP_SCREEN_WIDTH - 2 * CARDS_MARGIN, LV_SIZE_CONTENT);
@@ -939,7 +969,7 @@ void ui_saver_cards_attach(lv_obj_t *overlay)
     lv_obj_set_style_pad_row(s_row, CARD_GAP, LV_PART_MAIN);
     lv_obj_clear_flag(s_row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_row, LV_OBJ_FLAG_HIDDEN);
-    memset(s_views, 0, sizeof(s_views));
+    memset(s_views, 0, CARDS_MAX * sizeof(*s_views));
     s_view_count = 0;
     s_seen_seq = UINT32_MAX; /* rebuild on the next tick */
     s_last_top = -1;
@@ -949,7 +979,9 @@ void ui_saver_cards_attach(lv_obj_t *overlay)
 void ui_saver_cards_detach(void)
 {
     s_row = NULL;
-    memset(s_views, 0, sizeof(s_views));
+    if (s_views != NULL) {
+        memset(s_views, 0, CARDS_MAX * sizeof(*s_views));
+    }
     s_view_count = 0;
     s_seen_seq = UINT32_MAX;
 }
@@ -996,6 +1028,9 @@ static bool cards_same_set(const card_t *old_cards, int old_count)
 
 void ui_saver_cards_tick(bool visible, int32_t clock_top, int32_t clock_bottom)
 {
+    if (s_cards == NULL) {
+        return;
+    }
     if (s_row == NULL) {
         return;
     }
@@ -1015,9 +1050,9 @@ void ui_saver_cards_tick(bool visible, int32_t clock_top, int32_t clock_bottom)
     bool relayout = clock_top != s_last_top || clock_bottom != s_last_bottom || s_img_arrived;
     s_img_arrived = false;
     if (refresh) {
-        static card_t old_cards[CARDS_MAX];
+        card_t *old_cards = s_old_cards;
         const int old_count = s_card_count;
-        memcpy(old_cards, s_cards, sizeof(s_cards));
+        memcpy(old_cards, s_cards, CARDS_MAX * sizeof(*s_cards));
         s_seen_seq = seq;
         cards_rebuild_data(now);
         if (!cards_same_set(old_cards, old_count) || s_view_count != s_card_count) {

@@ -25,7 +25,6 @@
  */
 #include "ui/ui_widget_factory.h"
 
-#include <ctype.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -37,8 +36,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "image/lv_image_decoder_private.h"
-#include "misc/cache/instance/lv_image_cache.h"
 
 #include "ha/ha_client.h"
 #include "ha/ha_cover_fetcher.h"
@@ -55,12 +52,6 @@ static const char *TAG = "w_mower";
 #define MOWER_MAP_ACTIVE_MS 10000
 #define MOWER_MAP_IDLE_MS 120000
 #define MOWER_MAP_RETRY_MS 30000
-/* vector maps: zoom on the lawn up to this factor, keep this margin */
-#define MOWER_MAP_MAX_ZOOM 8
-#define MOWER_MAP_MARGIN 4
-#define MOWER_MAP_CELL 4
-/* darkest colour value (HSV) a vector map keeps on the dark tile */
-#define MOWER_MAP_MIN_VALUE 0xB0
 #define MOWER_COLOR_ACTIVE 0x4CD964
 #define MOWER_COLOR_ERROR 0xFF5A52
 #define MOWER_COLOR_BAR 0x4FC3F7
@@ -109,11 +100,9 @@ typedef struct {
     int shown_progress;     /* -2 never, -1 hidden, 0..100 */
     int shown_main;         /* -1 never, 0 start, 1 pause, 2 resume */
 
-    /* map: raster image, or a vector map rendered once into a canvas */
+    /* map: raster image (SVG maps arrive rendered) */
     lv_image_dsc_t map_dsc;
     void *map_buf;
-    lv_obj_t *map_canvas;
-    lv_draw_buf_t *map_canvas_buf;
     bool map_fetching;
     int64_t map_next_ms;
 } w_mower_ctx_t;
@@ -209,280 +198,8 @@ static float mower_attr_battery(const ha_state_t *st)
 
 /* ------------------------------------------------------------------ map */
 
-#if LV_USE_SVG
-/* Numeric attribute of the <svg> tag (plain user units only). */
-static bool mower_svg_attr(const char *tag, const char *tag_end, const char *name, float *out, int count)
-{
-    const size_t name_len = strlen(name);
-    for (const char *p = tag; p != NULL && p < tag_end; p++) {
-        p = strstr(p, name);
-        if (p == NULL || p >= tag_end) {
-            return false;
-        }
-        if ((p > tag && p[-1] != ' ' && p[-1] != '\t' && p[-1] != '\n' && p[-1] != '\r') ||
-            strncmp(p + name_len, "=\"", 2) != 0) {
-            continue;
-        }
-        const char *v = p + name_len + 2;
-        for (int i = 0; i < count; i++) {
-            char *end = NULL;
-            out[i] = strtof(v, &end);
-            if (end == v || end > tag_end) {
-                return false;
-            }
-            v = end;
-            while (*v == ' ' || *v == ',') {
-                v++;
-            }
-        }
-        /* a percentage says nothing about the drawing's size */
-        return *v != '%';
-    }
-    return false;
-}
-
-/* The drawing's own size: width/height, else the viewBox. */
-static bool mower_svg_size(const char *svg, int32_t *w, int32_t *h)
-{
-    const char *tag = strstr(svg, "<svg");
-    const char *tag_end = tag != NULL ? strchr(tag, '>') : NULL;
-    if (tag_end == NULL) {
-        return false;
-    }
-    float wh[2];
-    float vb[4];
-    if (mower_svg_attr(tag, tag_end, "width", &wh[0], 1) && mower_svg_attr(tag, tag_end, "height", &wh[1], 1) &&
-        wh[0] >= 1.0f && wh[1] >= 1.0f) {
-        *w = (int32_t)lroundf(wh[0]);
-        *h = (int32_t)lroundf(wh[1]);
-        return true;
-    }
-    if (mower_svg_attr(tag, tag_end, "viewBox", vb, 4) && vb[2] >= 1.0f && vb[3] >= 1.0f) {
-        *w = (int32_t)lroundf(vb[2]);
-        *h = (int32_t)lroundf(vb[3]);
-        return true;
-    }
-    return false;
-}
-
-/* The map lies on the tile's dark background (the drawing's own full-size
- * background rect has a percentage size, which LVGL's renderer skips), so
- * colours too dark to see there are brightened in place: same hue and
- * saturation, value raised to MOWER_MAP_MIN_VALUE. */
-static void mower_svg_lift_colors(char *svg)
-{
-    static const char hex[] = "0123456789abcdef";
-    for (char *p = strstr(svg, "\"#"); p != NULL; p = strstr(p + 2, "\"#")) {
-        char *h = p + 2;
-        uint8_t c[3];
-        bool ok = true;
-        for (int i = 0; i < 6 && ok; i++) {
-            ok = isxdigit((unsigned char)h[i]);
-        }
-        /* #rrggbb or #rrggbbaa only */
-        if (!ok || (h[6] != '"' && !(isxdigit((unsigned char)h[6]) && isxdigit((unsigned char)h[7]) && h[8] == '"'))) {
-            continue;
-        }
-        for (int i = 0; i < 3; i++) {
-            char pair[3] = {h[i * 2], h[i * 2 + 1], 0};
-            c[i] = (uint8_t)strtoul(pair, NULL, 16);
-        }
-        const int v = LV_MAX(c[0], LV_MAX(c[1], c[2]));
-        if (v >= MOWER_MAP_MIN_VALUE) {
-            continue;
-        }
-        for (int i = 0; i < 3; i++) {
-            const int n = v == 0 ? MOWER_MAP_MIN_VALUE : (c[i] * MOWER_MAP_MIN_VALUE) / v;
-            h[i * 2] = hex[(n >> 4) & 0xF];
-            h[i * 2 + 1] = hex[n & 0xF];
-        }
-    }
-}
-
-/* Draws the SVG at `scale` (1/256) with its origin at ox/oy of the canvas. */
-static void mower_svg_draw(w_mower_ctx_t *ctx, lv_image_decoder_dsc_t *dec, const lv_image_dsc_t *src,
-    int32_t scale, int32_t ox, int32_t oy)
-{
-    lv_draw_buf_clear(ctx->map_canvas_buf, NULL);
-    lv_layer_t layer;
-    lv_canvas_init_layer(ctx->map_canvas, &layer);
-    lv_draw_image_dsc_t dsc;
-    lv_draw_image_dsc_init(&dsc);
-    dsc.base.obj = ctx->map_canvas;
-    dsc.src = src;
-    dsc.header = dec->header;
-    dsc.scale_x = scale;
-    dsc.scale_y = scale;
-    const lv_area_t coords = {ox, oy, ox + ctx->map_w - 1, oy + ctx->map_h - 1};
-    const lv_area_t clip = {0, 0, ctx->map_w - 1, ctx->map_h - 1};
-    dec->decoder->custom_draw_cb(&layer, dec, &coords, &dsc, &clip);
-    lv_canvas_finish_layer(ctx->map_canvas, &layer);
-}
-
-/* Bounding box of the largest connected shape on the canvas, found on a
- * grid of MOWER_MAP_CELL px cells so that nearby strokes join up. */
-static bool mower_map_main_shape(const lv_draw_buf_t *buf, lv_area_t *out)
-{
-    const int32_t w = (int32_t)buf->header.w;
-    const int32_t h = (int32_t)buf->header.h;
-    const int32_t gw = (w + MOWER_MAP_CELL - 1) / MOWER_MAP_CELL;
-    const int32_t gh = (h + MOWER_MAP_CELL - 1) / MOWER_MAP_CELL;
-    const int32_t cells = gw * gh;
-    /* per cell: number of drawn pixels, and whether a search reached it */
-    uint16_t *count = heap_caps_calloc((size_t)cells, sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *seen = heap_caps_malloc((size_t)cells, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    int32_t *stack = heap_caps_malloc((size_t)cells * sizeof(int32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    bool found = false;
-    if (count == NULL || seen == NULL || stack == NULL) {
-        goto done;
-    }
-    for (int32_t y = 0; y < h; y++) {
-        const uint8_t *row = buf->data + (size_t)y * buf->header.stride;
-        for (int32_t x = 0; x < w; x++) {
-            if (row[x * 4 + 3] > 48) {
-                count[(y / MOWER_MAP_CELL) * gw + x / MOWER_MAP_CELL]++;
-            }
-        }
-    }
-    memset(seen, 0, (size_t)cells);
-    uint32_t best_px = 0;
-    for (int32_t seed = 0; seed < cells; seed++) {
-        if (count[seed] == 0 || seen[seed]) {
-            continue;
-        }
-        int32_t top = 0;
-        uint32_t px = 0;
-        lv_area_t a = {seed % gw, seed / gw, seed % gw, seed / gw};
-        stack[top++] = seed;
-        seen[seed] = 1;
-        while (top > 0) {
-            const int32_t c = stack[--top];
-            const int32_t cx = c % gw;
-            const int32_t cy = c / gw;
-            px += count[c];
-            a.x1 = LV_MIN(a.x1, cx);
-            a.x2 = LV_MAX(a.x2, cx);
-            a.y1 = LV_MIN(a.y1, cy);
-            a.y2 = LV_MAX(a.y2, cy);
-            for (int32_t dy = -1; dy <= 1; dy++) {
-                for (int32_t dx = -1; dx <= 1; dx++) {
-                    const int32_t nx = cx + dx;
-                    const int32_t ny = cy + dy;
-                    if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) {
-                        continue;
-                    }
-                    const int32_t n = ny * gw + nx;
-                    if (count[n] > 0 && !seen[n]) {
-                        seen[n] = 1;
-                        stack[top++] = n;
-                    }
-                }
-            }
-        }
-        if (px > best_px) {
-            best_px = px;
-            out->x1 = a.x1 * MOWER_MAP_CELL;
-            out->y1 = a.y1 * MOWER_MAP_CELL;
-            out->x2 = LV_MIN((a.x2 + 1) * MOWER_MAP_CELL, w) - 1;
-            out->y2 = LV_MIN((a.y2 + 1) * MOWER_MAP_CELL, h) - 1;
-            found = true;
-        }
-    }
-done:
-    heap_caps_free(count);
-    heap_caps_free(seen);
-    heap_caps_free(stack);
-    return found;
-}
-#endif
-
-/* A vector map (SVG) is rendered once per download into a canvas of the
- * box size; drawing the page then only blits that canvas. */
-static bool mower_map_render_svg(w_mower_ctx_t *ctx, const ha_cover_result_t *svg)
-{
-#if LV_USE_SVG
-    if (ctx->map_canvas_buf == NULL) {
-        ctx->map_canvas_buf = lv_draw_buf_create((uint32_t)ctx->map_w, (uint32_t)ctx->map_h,
-            LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO);
-        if (ctx->map_canvas_buf == NULL) {
-            return false;
-        }
-    }
-    if (ctx->map_canvas == NULL) {
-        ctx->map_canvas = lv_canvas_create(ctx->map_box);
-        lv_canvas_set_draw_buf(ctx->map_canvas, ctx->map_canvas_buf);
-        lv_obj_set_pos(ctx->map_canvas, 0, 0);
-    }
-    /* lv_draw_image() clips a custom-drawn image against its widget's
-     * screen coordinates, which does not work for an off-screen canvas
-     * layer; so the decoder's draw callback is called directly, scaled to
-     * fit the box (the SVG's own size comes from its width/height/viewBox). */
-    /* the text is ours (NUL-terminated copy of the download) */
-    mower_svg_lift_colors((char *)svg->image.data);
-    lv_image_decoder_dsc_t dec;
-    if (lv_image_decoder_open(&dec, &svg->image, NULL) != LV_RESULT_OK) {
-        return false;
-    }
-    if (dec.decoder == NULL || dec.decoder->custom_draw_cb == NULL || dec.header.w == 0 || dec.header.h == 0) {
-        lv_image_decoder_close(&dec);
-        return false;
-    }
-    /* the decoder reports the size set by the fetcher (the box), not the
-     * drawing's own one */
-    int32_t src_w = 0;
-    int32_t src_h = 0;
-    if (!mower_svg_size((const char *)svg->image.data, &src_w, &src_h)) {
-        src_w = (int32_t)dec.header.w;
-        src_h = (int32_t)dec.header.h;
-    }
-    /* fit: scale = min(box/src) in 1/256 */
-    int32_t scale = (int32_t)(((int64_t)ctx->map_w * 256) / src_w);
-    const int32_t scale_h = (int32_t)(((int64_t)ctx->map_h * 256) / src_h);
-    if (scale_h < scale) {
-        scale = scale_h;
-    }
-    int32_t ox = (ctx->map_w - (src_w * scale) / 256) / 2;
-    int32_t oy = (ctx->map_h - (src_h * scale) / 256) / 2;
-    mower_svg_draw(ctx, &dec, &svg->image, scale, ox, oy);
-
-    /* The lawn usually covers a small part of the drawing (legend, captions
-     * and margins around it): zoom in on the largest connected shape. */
-    lv_area_t box;
-    if (mower_map_main_shape(ctx->map_canvas_buf, &box)) {
-        const int32_t bw = lv_area_get_width(&box);
-        const int32_t bh = lv_area_get_height(&box);
-        const int32_t avail_w = ctx->map_w - 2 * MOWER_MAP_MARGIN;
-        const int32_t avail_h = ctx->map_h - 2 * MOWER_MAP_MARGIN;
-        int32_t zoom = (avail_w * 256) / bw;
-        if ((avail_h * 256) / bh < zoom) {
-            zoom = (avail_h * 256) / bh;
-        }
-        zoom = LV_MIN(zoom, MOWER_MAP_MAX_ZOOM * 256);
-        if (zoom > 256 + 256 / 16) {
-            /* drawing coordinates of the shape's centre, times 256 */
-            const int64_t cx = ((int64_t)(box.x1 + box.x2 + 1) * 128 - (int64_t)ox * 256) * 256 / scale;
-            const int64_t cy = ((int64_t)(box.y1 + box.y2 + 1) * 128 - (int64_t)oy * 256) * 256 / scale;
-            scale = (int32_t)(((int64_t)scale * zoom) / 256);
-            ox = ctx->map_w / 2 - (int32_t)((cx * scale) / (256 * 256));
-            oy = ctx->map_h / 2 - (int32_t)((cy * scale) / (256 * 256));
-            mower_svg_draw(ctx, &dec, &svg->image, scale, ox, oy);
-        }
-    }
-    lv_image_decoder_close(&dec);
-
-    /* the next download may reuse this buffer address */
-    lv_image_cache_drop(&svg->image);
-    lv_obj_set_hidden(ctx->map_canvas, false);
-    lv_obj_set_hidden(ctx->map_img, true);
-    lv_obj_set_hidden(ctx->map_icon, true);
-    return true;
-#else
-    LV_UNUSED(ctx);
-    LV_UNUSED(svg);
-    return false;
-#endif
-}
-
+/* Raster maps arrive as they are; SVG maps arrive already rendered at the
+ * box size by the fetcher (util/svg_map.c), on a transparent background. */
 static void mower_map_cb(void *user, const ha_cover_result_t *result)
 {
     w_mower_ctx_t *ctx = user;
@@ -492,13 +209,6 @@ static void mower_map_cb(void *user, const ha_cover_result_t *result)
         return;
     }
     ha_cover_result_t copy = *result;
-    if (copy.valid && copy.is_svg && ctx->map_box != NULL) {
-        if (!mower_map_render_svg(ctx, &copy)) {
-            ctx->map_next_ms = mower_now_ms() + MOWER_MAP_RETRY_MS;
-        }
-        ha_cover_result_release(&copy); /* the text is drawn now */
-        return;
-    }
     if (!copy.valid || copy.image.data == NULL || ctx->map_img == NULL) {
         ha_cover_result_release(&copy);
         ctx->map_next_ms = mower_now_ms() + MOWER_MAP_RETRY_MS;
@@ -514,9 +224,6 @@ static void mower_map_cb(void *user, const ha_cover_result_t *result)
     lv_obj_set_hidden(ctx->map_img, false);
     if (ctx->map_icon != NULL) {
         lv_obj_set_hidden(ctx->map_icon, true);
-    }
-    if (ctx->map_canvas != NULL) {
-        lv_obj_set_hidden(ctx->map_canvas, true);
     }
     if (old != NULL) {
         heap_caps_free(old);
@@ -708,10 +415,6 @@ static void mower_delete_cb(lv_event_t *e)
     }
     if (ctx->map_buf != NULL) {
         heap_caps_free(ctx->map_buf);
-    }
-    /* The canvas object goes with the card; its buffer is ours. */
-    if (ctx->map_canvas_buf != NULL) {
-        lv_draw_buf_destroy(ctx->map_canvas_buf);
     }
     free(ctx);
 }
@@ -935,7 +638,7 @@ void w_mower_set_visible(ui_widget_instance_t *instance, bool visible)
         return;
     }
     /* Shown again: a map older than the idle period is fetched at once. */
-    if (ctx->map_buf == NULL && ctx->map_canvas == NULL) {
+    if (ctx->map_buf == NULL) {
         ctx->map_next_ms = 0;
     }
 }

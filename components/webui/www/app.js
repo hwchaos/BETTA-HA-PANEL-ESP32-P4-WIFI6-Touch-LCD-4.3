@@ -10622,6 +10622,110 @@ function applyAssistSettings(assist) {
   assistSelectedPipeline = assist.pipeline_id || "";
   setAssistPipelineOptions([], "", assistSelectedPipeline);
   loadAssistPipelines();
+  if (byId("settingsAssistWake")) {
+    byId("settingsAssistWake").checked = assist.wake_word === true;
+    wakeSelectedModel = assist.wake_model || "okay_nabu";
+    loadWakeModels();
+  }
+}
+
+/* ---- Wake word (on-device microWakeWord) ---- */
+let wakeSelectedModel = "okay_nabu";
+
+function wakeStatusText(data) {
+  if (!data.enabled) return L("Hotword ist aus.", "Wake word is off.");
+  if (data.error) return `${L("Hört nicht zu", "Not listening")}: ${data.error}`;
+  const parts = [];
+  parts.push(data.listening ? L("Hört zu", "Listening") : L("Pausiert (Lautsprecher, Sitzung oder HA getrennt)", "Paused (speaker, session or HA offline)"));
+  if (data.wake_word) parts.push(`„${data.wake_word}“`);
+  if (data.detections > 0) {
+    const ago = data.last_detection_ago_s;
+    parts.push(L(`${data.detections}× erkannt, zuletzt vor ${ago} s`, `${data.detections}× detected, last ${ago} s ago`));
+  }
+  if (data.listening && Number.isFinite(data.level_db)) parts.push(L(`Mikrofon ${data.level_db} dBFS`, `microphone ${data.level_db} dBFS`));
+  if (data.invoke_us > 0) parts.push(L(`Rechenzeit ${(data.invoke_us / 1000).toFixed(1)} ms je 30 ms`, `compute ${(data.invoke_us / 1000).toFixed(1)} ms per 30 ms`));
+  return parts.join(" · ");
+}
+
+async function loadWakeModels() {
+  const select = document.getElementById("settingsAssistWakeModel");
+  if (!select) return;
+  const selected = select.value || wakeSelectedModel;
+  let data = null;
+  try {
+    data = await apiGet("/api/wakeword");
+  } catch (_err) {
+    data = null;
+  }
+  const models = data && Array.isArray(data.models) ? data.models : [{ id: "okay_nabu", wake_word: "Okay Nabu", builtin: true }];
+  select.innerHTML = "";
+  for (const m of models) {
+    const option = document.createElement("option");
+    option.value = m.id;
+    option.textContent = `${m.wake_word || m.id}${m.builtin ? L(" (eingebaut)", " (built in)") : ""}`;
+    select.appendChild(option);
+  }
+  if (selected && !models.some((m) => m.id === selected)) {
+    const option = document.createElement("option");
+    option.value = selected;
+    option.textContent = `${selected} (${L("nicht installiert", "not installed")})`;
+    select.appendChild(option);
+  }
+  select.value = selected || "okay_nabu";
+  const status = document.getElementById("settingsAssistWakeStatus");
+  if (status) status.textContent = data ? wakeStatusText(data) : "";
+}
+
+async function installWakeModel() {
+  const urlInput = document.getElementById("settingsAssistWakeUrl");
+  const preset = document.getElementById("settingsAssistWakePreset");
+  const url = (urlInput?.value || "").trim() || preset?.value || "";
+  const status = document.getElementById("settingsAssistWakeStatus");
+  if (!url) {
+    if (status) status.textContent = L("Bitte ein Modell wählen oder eine URL eingeben.", "Choose a model or enter a URL.");
+    return;
+  }
+  if (status) status.textContent = L("Wird geladen …", "Downloading …");
+  try {
+    const response = await fetch("/api/wakeword/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || `${response.status}`);
+    wakeSelectedModel = data.id;
+    const select = document.getElementById("settingsAssistWakeModel");
+    if (select) select.value = "";
+    if (urlInput) urlInput.value = "";
+    if (preset) preset.value = "";
+    await loadWakeModels();
+    if (select) select.value = data.id;
+    if (status) status.textContent = L(`„${data.id}“ installiert – zum Verwenden auswählen und speichern.`, `"${data.id}" installed – select it and save to use it.`);
+  } catch (err) {
+    if (status) status.textContent = `${L("Installation fehlgeschlagen", "Install failed")}: ${err.message}`;
+  }
+}
+
+async function deleteWakeModel() {
+  const select = document.getElementById("settingsAssistWakeModel");
+  const status = document.getElementById("settingsAssistWakeStatus");
+  const id = select?.value || "";
+  if (!id || id === "okay_nabu") {
+    if (status) status.textContent = L("Das eingebaute Hotword kann nicht entfernt werden.", "The built-in wake word cannot be removed.");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/wakeword/model?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || `${response.status}`);
+    wakeSelectedModel = "okay_nabu";
+    if (select) select.value = "";
+    await loadWakeModels();
+    if (status) status.textContent = L(`„${id}“ entfernt – Auswahl speichern.`, `"${id}" removed – save the selection.`);
+  } catch (err) {
+    if (status) status.textContent = `${L("Entfernen fehlgeschlagen", "Remove failed")}: ${err.message}`;
+  }
 }
 
 function setAssistPipelineOptions(pipelines, preferred, selected) {
@@ -10677,6 +10781,8 @@ function collectAssistPayload() {
     reply_audio: byId("settingsAssistReply").checked,
     mic_gain: clampInt(byId("settingsAssistGain").value, 0, 42, 30),
     max_listen_sec: clampInt(byId("settingsAssistMaxListen").value, 3, 30, 10),
+    wake_word: byId("settingsAssistWake") ? byId("settingsAssistWake").checked : false,
+    wake_model: byId("settingsAssistWakeModel")?.value || wakeSelectedModel || "okay_nabu",
   };
 }
 
@@ -10689,6 +10795,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const reload = document.getElementById("settingsAssistReload");
   if (reload) reload.addEventListener("click", () => loadAssistPipelines());
+  document.getElementById("settingsAssistWakeInstall")?.addEventListener("click", () => installWakeModel());
+  document.getElementById("settingsAssistWakeDelete")?.addEventListener("click", () => deleteWakeModel());
+  document.getElementById("settingsAssistWakePreset")?.addEventListener("change", (event) => {
+    const url = document.getElementById("settingsAssistWakeUrl");
+    if (url && event.target.value) url.value = "";
+  });
 });
 
 function collectSystemPayload() {

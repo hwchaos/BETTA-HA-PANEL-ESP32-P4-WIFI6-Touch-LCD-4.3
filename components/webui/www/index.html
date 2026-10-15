@@ -820,6 +820,32 @@
             <label><span data-en="Maximum recording time (seconds)">Maximale Aufnahmedauer (Sekunden)</span>
               <input id="settingsAssistMaxListen" type="number" min="3" max="30" step="1" />
             </label>
+            <label class="row">
+              <input id="settingsAssistWake" type="checkbox" />
+              <span data-en="Wake word: listen continuously on the panel">Hotword: auf dem Panel dauerhaft mithören</span>
+            </label>
+            <label><span data-en="Wake word">Hotword</span>
+              <select id="settingsAssistWakeModel"></select>
+            </label>
+            <div class="meta" id="settingsAssistWakeStatus"></div>
+            <label><span data-en="Install another wake word">Weiteres Hotword installieren</span>
+              <select id="settingsAssistWakePreset">
+                <option data-en="Choose a model or enter a URL below" value="">Modell wählen oder unten eine URL eingeben</option>
+                <option value="https://raw.githubusercontent.com/esphome/micro-wake-word-models/main/models/v2/hey_jarvis.json">Hey Jarvis</option>
+                <option value="https://raw.githubusercontent.com/esphome/micro-wake-word-models/main/models/v2/alexa.json">Alexa</option>
+                <option value="https://raw.githubusercontent.com/esphome/micro-wake-word-models/main/models/v2/hey_mycroft.json">Hey Mycroft</option>
+                <option data-en="Okay Computer (experimental)" value="https://raw.githubusercontent.com/esphome/micro-wake-word-models/main/models/v2/experiments/okay_computer.json">Okay Computer (experimentell)</option>
+                <option data-en="Hey Home Assistant (experimental)" value="https://raw.githubusercontent.com/esphome/micro-wake-word-models/main/models/v2/experiments/hey_home_assistant.json">Hey Home Assistant (experimentell)</option>
+              </select>
+            </label>
+            <label><span data-en="Manifest URL (microWakeWord v2, .json)">Manifest-URL (microWakeWord v2, .json)</span>
+              <input id="settingsAssistWakeUrl" type="text" maxlength="380" placeholder="https://…/model.json" />
+            </label>
+            <div class="row">
+              <button data-en="Install" id="settingsAssistWakeInstall" type="button">Installieren</button>
+              <button data-en="Remove selected wake word" id="settingsAssistWakeDelete" type="button">Gewähltes Hotword entfernen</button>
+            </div>
+            <div data-en="Detection runs on the panel; audio only goes to Home Assistant after the wake word. Listening pauses while the speaker plays (radio, spoken answer). The models are trained on English pronunciation." class="meta">Die Erkennung läuft auf dem Panel, Audio geht erst nach dem Hotword an Home Assistant. Während der Lautsprecher spielt (Radio, gesprochene Antwort), pausiert das Mithören. Die Modelle sind auf englische Aussprache trainiert.</div>
             <div data-en="Hold and speak, or tap briefly and speak until a pause is detected. The pipeline (Whisper / Speech-to-Phrase, Piper) is set up in Home Assistant under Settings → Voice assistants." id="settingsAssistInfo" class="meta">Gedrückt halten und sprechen, oder kurz tippen und sprechen, bis eine Pause erkannt wird. Die Pipeline (Whisper / Speech-to-Phrase, Piper) wird in Home Assistant unter Einstellungen &rarr; Sprachassistenten eingerichtet.</div>
           </div>
         </section>
